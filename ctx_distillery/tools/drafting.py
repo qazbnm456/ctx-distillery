@@ -1,0 +1,286 @@
+"""`draft_memory_file` / `draft_skill_file` — the only two tools that AUTHOR text, and they
+author it into the TRACE, never onto disk.
+
+Base/wrap split, per rlm-kit's convention: the kit owns the generic "call a model, retry transient
+endpoint errors, run a deterministic validator, break the circuit on repeated declines" core
+(`make_model_tool`); this module supplies the project half — the two tool names, the two validators,
+the result wording, and the tracing.
+
+Three project invariants live here:
+
+* **Write boundary.** Both tools return TEXT ONLY. Neither touches the memory directory, a
+  `skill_dir`, or any other path — `rlm_kit.skills`'s own discovery being directory-based makes
+  "helpfully write it where it belongs" a tempting mistake, so it is called out rather than assumed
+  (`CLAUDE.md` invariant 1; `docs/DESIGN.md`'s explicit write-boundary note).
+* **`output_model` carries judgement only** (`CLAUDE.md` invariant 2), so the drafted bytes must be
+  recoverable from the trace. Each call therefore records the FULL drafted text on its `tool_call`
+  event, keyed by `artifact_id` — a deliberate departure from the leaner "record size, not body"
+  convention, because `session.assemble` re-sources the verbatim bytes from exactly this event.
+* **The validator returns `FormatCheck`, never a bare dict.** `make_model_tool` reads
+  `getattr(validated, "ok", False)` / `getattr(validated, "errors", [])`; a dict has neither
+  attribute, so a dict-returning validator would report every draft as `ok=False` and trip the
+  circuit breaker after three calls, silently. The dataclass makes that impossible.
+
+Validation is STRUCTURAL only — is the draft well-formed and non-colliding — never semantic. Whether
+a memory is worth keeping is the human reviewer's call, per `docs/DESIGN.md`.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+
+from rlm_kit.tools.model import ChatFn, make_model_tool
+from rlm_kit.trace import record_tool_call
+
+from .. import frontmatter
+from ..adapters.base import ArtifactRef
+from ..adapters.claude_code import MEMORY_TYPES
+
+#: Consecutive invalid drafts before `make_model_tool`'s breaker short-circuits the model. A
+#: productive repair loop recovers within a couple of declines (see the kit's own docstring).
+MAX_CONSECUTIVE_INVALID = 3
+
+
+@dataclass
+class FormatCheck:
+    """A validator verdict in the `.ok` / `.errors` shape `make_model_tool` requires.
+
+    Never return a bare dict from a `validate=` callable: `make_model_tool` reads `.ok`/`.errors` as
+    ATTRIBUTES, so a dict silently reads as `ok=False` on every call.
+    """
+
+    ok: bool
+    errors: list[str] = field(default_factory=list)
+    #: The parsed frontmatter, when it parsed at all — handy for a caller that wants the drafted name.
+    meta: dict = field(default_factory=dict)
+
+
+def _existing_names(memory_index: Sequence[ArtifactRef], kind: str) -> set[str]:
+    return {ref.name.strip().lower() for ref in memory_index if ref.kind == kind}
+
+
+def make_memory_validator(
+    memory_index: Sequence[ArtifactRef], memory_type: Callable[[], str | None] | None = None
+) -> Callable[[str], FormatCheck]:
+    """Build the deterministic memory-file format check over an index SNAPSHOT.
+
+    `memory_type`, when given, returns the `memory_type` the planner passed for the CURRENT call, so
+    the validator can cross-check it against the frontmatter the model actually produced — the reason
+    `draft_memory_file` takes `memory_type` as an explicit param instead of letting the model bury it
+    in free text.
+    """
+    taken = _existing_names(memory_index, "memory")
+
+    def validate(raw: str) -> FormatCheck:
+        errors: list[str] = []
+        text = raw or ""
+        if not text.strip():
+            return FormatCheck(ok=False, errors=["empty draft: the model returned no text"])
+        meta, body = frontmatter.parse(text)
+        if not meta:
+            return FormatCheck(
+                ok=False,
+                errors=[
+                    (
+                        "no parseable YAML frontmatter: a memory file must open with a `---` block "
+                        "carrying `name`, `description`, and `metadata.type`."
+                    )
+                ],
+            )
+        name = meta.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append("frontmatter `name` is missing or not a non-empty string")
+        elif name.strip().lower() in taken:
+            errors.append(
+                f"frontmatter `name` {name!r} collides with an existing memory file; pick a "
+                f"distinct name, or propose this as an update to that file instead"
+            )
+        description = meta.get("description")
+        if not isinstance(description, str) or not description.strip():
+            errors.append("frontmatter `description` is missing or not a non-empty string")
+        metadata = meta.get("metadata")
+        if not isinstance(metadata, dict):
+            errors.append("frontmatter `metadata` is missing or not a mapping (needs `type:`)")
+        else:
+            declared = metadata.get("type")
+            if declared not in MEMORY_TYPES:
+                errors.append(
+                    f"`metadata.type` must be one of {list(MEMORY_TYPES)}, got {declared!r}"
+                )
+            elif memory_type is not None:
+                requested = memory_type()
+                if requested and declared != requested:
+                    errors.append(
+                        f"`metadata.type` {declared!r} does not match the requested memory_type "
+                        f"{requested!r}"
+                    )
+        if not body.strip():
+            errors.append("the draft has frontmatter but an empty body")
+        return FormatCheck(ok=not errors, errors=errors, meta=meta)
+
+    return validate
+
+
+def make_skill_validator(memory_index: Sequence[ArtifactRef]) -> Callable[[str], FormatCheck]:
+    """Build the deterministic skill-file format check (the Agent-Skills shape) over a SNAPSHOT.
+
+    The collision set is the snapshot's `kind="skill"` refs, which the Claude Code adapter does not
+    yet enumerate (a stated pass-1 gap) — so today this checks against an empty set: not wrong, just
+    weaker than it will be once skill enumeration exists.
+    """
+    taken = _existing_names(memory_index, "skill")
+
+    def validate(raw: str) -> FormatCheck:
+        errors: list[str] = []
+        text = raw or ""
+        if not text.strip():
+            return FormatCheck(ok=False, errors=["empty draft: the model returned no text"])
+        meta, body = frontmatter.parse(text)
+        if not meta:
+            return FormatCheck(
+                ok=False,
+                errors=[
+                    (
+                        "no parseable YAML frontmatter: a SKILL.md must open with a `---` block "
+                        "carrying `name` and `description`."
+                    )
+                ],
+            )
+        name = meta.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append("frontmatter `name` is missing or not a non-empty string")
+        elif name.strip().lower() in taken:
+            errors.append(f"frontmatter `name` {name!r} collides with an existing skill")
+        description = meta.get("description")
+        if not isinstance(description, str) or not description.strip():
+            errors.append("frontmatter `description` is missing or not a non-empty string")
+        if not body.strip():
+            errors.append("the draft has frontmatter but an empty body")
+        return FormatCheck(ok=not errors, errors=errors, meta=meta)
+
+    return validate
+
+
+def _spec_for_memory(topic: str, memory_type: str, evidence: str) -> str:
+    return (
+        f"Draft ONE Claude Code memory file.\n"
+        f"topic: {topic}\n"
+        f"memory_type (must appear verbatim as metadata.type): {memory_type}\n"
+        f"evidence from the session transcript(s):\n{evidence}\n"
+        f"Output the complete file: a YAML frontmatter block delimited by `---` lines carrying "
+        f"`name`, `description`, and a nested `metadata:` mapping with `type: {memory_type}`, then "
+        f"the memory body in markdown. Output nothing else."
+    )
+
+
+def _spec_for_skill(procedure: str, evidence: str) -> str:
+    return (
+        f"Draft ONE SKILL.md documenting a reusable procedure.\n"
+        f"procedure: {procedure}\n"
+        f"evidence from the session transcript(s):\n{evidence}\n"
+        f"Output the complete file: a YAML frontmatter block delimited by `---` lines carrying "
+        f"`name` and `description`, then the procedure body in markdown. Output nothing else."
+    )
+
+
+def _errors_with_infra(result) -> list[str]:
+    errors = list(result.errors)
+    if result.circuit_broken:
+        return errors or ["circuit breaker: too many consecutive invalid drafts"]
+    if result.endpoint_error:
+        return errors or [result.endpoint_error]
+    return errors
+
+
+def make_draft_memory_file_tool(
+    chat_fn: ChatFn, memory_index: Sequence[ArtifactRef]
+) -> Callable[[str, str, str], dict]:
+    """Wrap an injected `chat_fn` into the sync `draft_memory_file` tool.
+
+    Sync because dspy's interpreter invokes tools with a plain call (no await). Returns a dict so
+    dspy JSON-bridges it into a real REPL value the planner can subscript.
+    """
+    snapshot = list(memory_index)
+    # The current call's requested type, read back by the validator to cross-check the frontmatter.
+    # Safe as plain closure state: dspy's interpreter invokes a tool with one plain SYNCHRONOUS call
+    # (only the sub-LM is ever fanned across threads), so a call's validate() runs before the next
+    # call can overwrite this.
+    pending: dict[str, str | None] = {"memory_type": None}
+    call_model = make_model_tool(
+        chat_fn,
+        make_memory_validator(snapshot, lambda: pending["memory_type"]),
+        max_consecutive_invalid=MAX_CONSECUTIVE_INVALID,
+    )
+
+    def draft_memory_file(topic: str, memory_type: str, evidence: str) -> dict:
+        """Draft the text of ONE candidate memory file. Writes nothing — text only.
+
+        ``memory_type`` must be one of "user", "feedback", "project", "reference"; it is checked
+        against the drafted frontmatter's ``metadata.type``. ``evidence`` should quote or summarise
+        the transcript material that justifies the memory. Returns
+        ``{"artifact_id", "ok", "errors", "draft"}``; put the ``artifact_id`` on the matching
+        ``promote_to_memory`` candidate in your final plan — the drafted text itself is re-sourced
+        from this tool call, so do NOT copy it into the plan."""
+        artifact_id = uuid.uuid4().hex[:12]
+        pending["memory_type"] = memory_type
+        result = call_model(_spec_for_memory(topic, memory_type, evidence))
+        draft = result.raw or ""
+        errors = _errors_with_infra(result)
+        # ONE tool_call per call, carrying the FULL drafted text — `session.assemble` re-sources the
+        # verbatim bytes from THIS event, keyed by artifact_id (see the module docstring).
+        record_tool_call(
+            "draft_memory_file",
+            args={"topic": topic, "memory_type": memory_type, "evidence": evidence},
+            ok=result.ok,
+            artifact_id=artifact_id,
+            kind="memory",
+            draft=draft,
+            errors=errors,
+            reasoning=result.reasoning,
+            endpoint_error=result.endpoint_error,
+            circuit_broken=result.circuit_broken,
+        )
+        return {"artifact_id": artifact_id, "ok": result.ok, "errors": errors, "draft": draft}
+
+    return draft_memory_file
+
+
+def make_draft_skill_file_tool(
+    chat_fn: ChatFn, memory_index: Sequence[ArtifactRef]
+) -> Callable[[str, str], dict]:
+    """Wrap an injected `chat_fn` into the sync `draft_skill_file` tool (same shape as above)."""
+    snapshot = list(memory_index)
+    call_model = make_model_tool(
+        chat_fn,
+        make_skill_validator(snapshot),
+        max_consecutive_invalid=MAX_CONSECUTIVE_INVALID,
+    )
+
+    def draft_skill_file(procedure: str, evidence: str) -> dict:
+        """Draft the text of ONE candidate SKILL.md. Writes nothing — text only.
+
+        Use this for a reusable HOW-TO discovered in the session (a workflow, technique, or recipe),
+        as opposed to a fact about the user or project — that is ``draft_memory_file``'s job.
+        Returns ``{"artifact_id", "ok", "errors", "draft"}``; put the ``artifact_id`` on the matching
+        ``promote_to_skill`` candidate in your final plan rather than copying the text."""
+        artifact_id = uuid.uuid4().hex[:12]
+        result = call_model(_spec_for_skill(procedure, evidence))
+        draft = result.raw or ""
+        errors = _errors_with_infra(result)
+        record_tool_call(
+            "draft_skill_file",
+            args={"procedure": procedure, "evidence": evidence},
+            ok=result.ok,
+            artifact_id=artifact_id,
+            kind="skill",
+            draft=draft,
+            errors=errors,
+            reasoning=result.reasoning,
+            endpoint_error=result.endpoint_error,
+            circuit_broken=result.circuit_broken,
+        )
+        return {"artifact_id": artifact_id, "ok": result.ok, "errors": errors, "draft": draft}
+
+    return draft_skill_file

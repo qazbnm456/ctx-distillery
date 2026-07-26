@@ -23,7 +23,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-ArtifactKind = Literal["memory", "skill"]
+# "index" is the harness's own memory INDEX file (Claude Code's `MEMORY.md`) — a third kind, not a
+# memory file. It exists because docs/DESIGN.md's success criterion (b) ("flags candidate MEMORY.md
+# index lines") requires the planner to be able to READ the index; a kind excluded from
+# `list_targets` is unreachable through `read_memory_file`'s snapshot allowlist, so the criterion
+# would be unmeetable. Adding a supporting VALUE here does not change the ABC's three abstract
+# methods, and the "no write path" constraint in the module docstring is untouched.
+ArtifactKind = Literal["memory", "skill", "index"]
 
 
 @dataclass(frozen=True)

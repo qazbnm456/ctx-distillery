@@ -1,18 +1,30 @@
-"""The DistillSession RLM task — an honest skeleton, not a working implementation.
+"""The DistillSession RLM task — declaration plus the runtime tool wiring.
 
-This is the FIRST scaffolding pass for ctx-distillery. `DistillSession` declares the shape
-of the task (signature, output_model, instructions) as designed in docs/DESIGN.md, but wires
-NO tools yet — see the TODO below. Do not treat this as functional; it is here so the
-project's structure, dependency on rlm-kit, and output contract are pinned down before any
-tool is implemented.
+`DistillSession` declares the shape of the task (signature, output_model, instructions) as
+designed in docs/DESIGN.md, and its `__init__` wires the five READ-ONLY tools from an immutable
+memory-index snapshot plus an already-redacted transcript list. `session.run_distillation` is the
+driver that produces both and assembles the result; nothing here reads a harness directly.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+import dataclasses
+from collections.abc import Callable, Sequence
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 from rlm_kit import RLMTask
+from rlm_kit.config import RLMConfig
+from rlm_kit.runtime import get_config
+from rlm_kit.tools.model import ChatFn
+
+from .adapters.base import ArtifactRef
+from .tools.drafting import make_draft_memory_file_tool, make_draft_skill_file_tool
+from .tools.memory_reader import make_list_memory_files_tool, make_read_memory_file_tool
+from .tools.transcript_reader import make_read_transcript_chunk_tool
+
+#: The sandbox this task ALWAYS runs in — see `_forced_config` and CLAUDE.md invariant (1).
+PINNED_INTERPRETER = "pyodide"
 
 # --- Output contract -----------------------------------------------------------------------
 #
@@ -92,19 +104,53 @@ class DistillSession(RLMTask):
     output_model = DistillPlan
     instructions = _INSTRUCTIONS
 
-    # TODO(ctx-distillery): wire the read-only tools designed in docs/DESIGN.md. None of
-    # these exist yet — this is the first scaffolding pass, not a working task. Planned tools,
-    # all read-only (see CLAUDE.md invariant 1 and docs/DESIGN.md's tool enumeration):
-    #
-    #   - list_memory_files()            -> structured index of existing memory/skill files
-    #   - read_memory_file(path)         -> full text of one existing memory/skill file
-    #   - read_transcript_chunk(...)      -> paginated read over a (potentially huge) transcript
-    #   - draft_memory_file(...)          -> LM-backed drafting tool (make_model_tool), TEXT ONLY,
-    #                                        returns a candidate memory file body + an artifact_id
-    #   - draft_skill_file(...)           -> LM-backed drafting tool (make_model_tool), TEXT ONLY,
-    #                                        returns a candidate SKILL.md body + an artifact_id
-    #
-    # Each will be sourced from a HarnessAdapter (see ctx_distillery/adapters/base.py) so the
-    # planner core stays harness-agnostic. No tool here may ever write or delete a file — that
-    # would break the structural guarantee this whole project exists to uphold.
-    tools: list = []
+    # Empty at class level and REASSIGNED per instance in __init__ (a tool closes over runtime-injected
+    # state — the index snapshot, the transcripts, the chat_fn — which cannot exist on the class).
+    tools: ClassVar[list[Callable[..., Any]]] = []
+
+    def __init__(
+        self,
+        *,
+        memory_index: Sequence[ArtifactRef],
+        chat_fn: ChatFn,
+        transcripts: Sequence[str],
+        config: RLMConfig | None = None,
+        **kw: Any,
+    ) -> None:
+        """Wire the five read-only tools from an index SNAPSHOT + already-redacted transcripts.
+
+        `memory_index` is the `list[ArtifactRef]` from ONE `adapter.ingest()` call — an immutable
+        snapshot, never a live adapter, so the `read_memory_file` allowlist cannot shift mid-run.
+        `transcripts` MUST already be redacted (`session.run_distillation` does this immediately
+        after `ingest()`); it is the same list passed to `.arun(transcripts=...)`, deliberately
+        threaded twice — once to build `read_transcript_chunk`'s closure, once to bind the signature
+        input — so there is exactly one copy of the text in play.
+        """
+        self.tools = [
+            make_list_memory_files_tool(memory_index),
+            make_read_memory_file_tool(memory_index),
+            # SAME list `.arun(transcripts=...)` binds — see the docstring above.
+            make_read_transcript_chunk_tool(transcripts),
+            make_draft_memory_file_tool(chat_fn, memory_index),
+            make_draft_skill_file_tool(chat_fn, memory_index),
+        ]
+        super().__init__(config=_forced_config(config), **kw)
+
+
+def _forced_config(config: RLMConfig | None) -> RLMConfig:
+    """Return `config` (or the configured default) with `interpreter` forced to `pyodide`.
+
+    CLAUDE.md invariant (1) requires the sandbox pin be STATED IN THE TASK, not left to
+    `.env.example` or to whatever the caller happened to configure: the "no mutation" guarantee
+    depends on never routing through a writable-mount `container` (or, worse, `local`) config. So the
+    pin is enforced HERE, in code — `dataclasses.replace` on the frozen `RLMConfig` — and a caller
+    passing `interpreter="local"` gets `pyodide` anyway rather than a silently weakened sandbox.
+
+    (An explicit interpreter OBJECT via `RLMTask(interpreter=...)` still bypasses this, exactly as it
+    bypasses rlm-kit's own sandbox guard: that is the documented TEST seam — `ScriptedInterpreter` —
+    where the caller supplies and owns the double. It is not a config path.)
+    """
+    base = config if config is not None else get_config()
+    if base.interpreter == PINNED_INTERPRETER:
+        return base
+    return dataclasses.replace(base, interpreter=PINNED_INTERPRETER)
