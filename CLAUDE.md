@@ -15,12 +15,18 @@ uv pip install -e ../rlm-kit
 
 ## Verify
 
-- This is a first scaffolding pass: there is no live-model integration yet, so there is
-  nothing to run against real credentials or a sandbox. `tests/test_import.py` is the only
-  test — it just confirms the package and `DistillSession` import cleanly.
-- Once tools land, follow rlm-kit's own pattern: lint with `ruff check .` (line-length 110,
-  matching rlm-kit's config) and run the suite with `pytest`, offline first via
-  `rlm_kit.testing.ScriptedInterpreter` before any live `dspy.RLM` run.
+Run BOTH before pushing — the suite is fully offline (no live model, no Deno, no network):
+
+- `ruff check .` — lint (line-length 110, matching rlm-kit's config).
+- `pytest -q` — the whole suite. The dspy-bearing tests (`test_task.py`, `test_session.py`)
+  drive a REAL `dspy.RLM.aforward` through `rlm_kit.testing.ScriptedInterpreter` +
+  `scripted_lm`, so the planner → tools → SUBMIT chain executes (each tool's own tracing runs)
+  at zero cost; they `importorskip("dspy")`.
+- `tests/test_no_write_capability.py` is the tripwire for invariant (1): a static scan over
+  every module under `ctx_distillery/` asserting none contains a write/delete call. If it goes
+  red, someone added a writer — that is the finding, not a test to relax.
+- A LIVE run additionally needs real credentials and a Deno/pyodide sandbox
+  (`brew install deno`). Don't do it in CI; it costs money.
 
 ## Invariants — do not break
 
@@ -35,7 +41,11 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
    explicitly-pinned `pyodide` interpreter — that pin is stated in the task, not left to the
    default, because the "no mutation" guarantee depends on never routing through a
    writable-mount config. Together these make "propose, never apply" a structural property of
-   the sandbox, not a convention the planner could be prompted around.
+   the sandbox, not a convention the planner could be prompted around. The pin is ENFORCED IN
+   CODE, not documented: `task._forced_config` runs `dataclasses.replace(config,
+   interpreter="pyodide")` before `super().__init__`, so a caller passing `interpreter="local"`
+   still gets `pyodide`. (`RLMTask(interpreter=<object>)` still bypasses it — that is rlm-kit's
+   documented test seam, where the caller supplies and owns the double, not a config path.)
 2. **`output_model` carries only `{action, artifact_id, key_fields}` — never drafted content
    directly.** A promotion candidate's actual markdown+frontmatter body is authored by
    `draft_memory_file` or `draft_skill_file` (both `make_model_tool`-based) and recorded as a
@@ -50,6 +60,27 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
    stop.** See `ctx_distillery/adapters/base.py`. No adapter may ever expose a write/emit path
    reachable from an RLM tool — the actual "apply" step, if it's ever built, stays a separate,
    human-gated action outside the RLM trajectory entirely.
+5. **Tools close over an immutable SNAPSHOT, never a live adapter.** `run_distillation` calls
+   `adapter.ingest()` EXACTLY ONCE; that `list[ArtifactRef]` is what all five tool factories
+   receive. Nothing in `HarnessAdapter` promises `list_targets()` is cheap or stable across
+   calls, so a live reference would let `read_memory_file`'s allowlist shift mid-run — and it
+   would create a second copy of the transcripts the driver already owns. The allowlist check is
+   an EXACT `Path(path).resolve()` match against the snapshot; never make it a prefix or
+   substring test (a symlink planted inside `memory_dir` defeats a prefix check).
+
+## Known simplifications (stated, not hidden)
+
+- **`read_memory_file` reads through `ArtifactRef.path` directly**, not through a fourth adapter
+  method. The ABC answers "what exists" and "give me everything", not "give me one body on
+  demand"; every in-scope harness is a local filesystem, so a plain read of the enumerated,
+  already-resolved path is honest. Whether a future non-filesystem harness needs a different read
+  seam is deferred to when that harness is actually designed.
+- **`ClaudeCodeAdapter` does not locate Claude Code's transcript storage.** The caller supplies
+  already-loaded transcript text; finding the real on-disk location is future work.
+- **`list_targets()` never returns `kind="skill"` entries yet** (that storage location hasn't been
+  inspected), so `draft_skill_file`'s collision check currently runs against an empty set — weaker
+  than it will be, not wrong.
+- **No CLI entry point**, and no adapter for any harness other than Claude Code.
 
 ## Harness scope
 
