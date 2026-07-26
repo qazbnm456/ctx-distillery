@@ -10,10 +10,12 @@ this tree.
 - **`RLMTask`** — subclassed as `DistillSession` (`ctx_distillery/task.py`). The declaration carries the
   `signature`, `output_field`, `output_model` (`DistillPlan`), and `instructions`; retry/validation,
   sandbox selection, budget caps, and observability are inherited, not reimplemented here.
-- **`configure` / `RLMConfig`** — the consumer's own env-driven config surface (`CD_*` vars, see
-  `.env.example`) feeds rlm-kit's config the same way any consumer wires credentials and sandbox choice.
-  This task pins its interpreter explicitly to `pyodide` (see `docs/DESIGN.md`, "structural no-mutation
-  guarantee") — it never switches to `local` or a writable-mount `container` config.
+- **`configure` / `RLMConfig`** — will feed rlm-kit's config from this project's own env-driven surface
+  (`CD_*` vars, see `.env.example`) once `DistillSession` is wired to a live run — not yet imported in
+  `ctx_distillery/task.py`'s current stub. The design *commits* to pinning the interpreter explicitly to
+  `pyodide` (see `docs/DESIGN.md`, "structural no-mutation guarantee") and never switching to `local` or
+  a writable-mount `container` config — that pin still needs to land as a real constructor kwarg once
+  the task is wired up; it is not yet reflected in code.
 - **The trace schema + `rlm_kit.trace` helpers** — every run's tool calls (`draft_memory_file`,
   `draft_skill_file`, and the read-only lookups) are recorded through the standard trace/v1 events. Per
   `docs/DESIGN.md`, this project's use of the trace is for auditability, not for producing an RL dataset —
