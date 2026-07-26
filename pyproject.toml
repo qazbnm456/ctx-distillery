@@ -1,0 +1,47 @@
+[project]
+name = "ctx-distillery"
+version = "0.1.0"
+description = "RLM-driven distillation planner for AI coding-agent session transcripts + persistent memory stores — proposes, never applies."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Boik Su" }]
+keywords = [
+    "rlm",
+    "rlm-kit",
+    "memory",
+    "distillation",
+    "claude-code",
+    "agent",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "rlm-kit @ git+https://github.com/qazbnm456/rlm-kit",
+    "pydantic>=2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ctx_distillery"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
