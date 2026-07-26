@@ -38,6 +38,26 @@ def test_every_returned_path_is_absolute_and_resolved(snapshot):
         assert path.is_file()
 
 
+def test_list_targets_never_folds_a_symlinks_outside_target_into_the_snapshot(memory_dir, tmp_path):
+    """An adversarial review reproduced a real escape here: a symlink INSIDE `memory_dir`,
+    present BEFORE `ingest()` ever runs, resolves to a file outside it — and a naive enumeration
+    would fold that outside path into the trusted snapshot, which `read_memory_file`'s allowlist
+    then treats as legitimate (exact-match-against-a-poisoned-snapshot is not a defense). The
+    fix is a containment check in `list_targets` itself: only a resolved path whose PARENT is
+    still `memory_dir` may join the snapshot. This test plants the symlink BEFORE building the
+    adapter/snapshot — unlike the tool-level symlink test in test_tools_memory_reader.py, which
+    plants one AFTER a snapshot to test a different thing (an unlisted path being refused).
+    """
+    outside = tmp_path / "outside-secret.md"
+    outside.write_text("SECRET OUTSIDE CONTENT\n", encoding="utf-8")
+    os.symlink(outside, memory_dir / "sneaky.md")
+
+    snapshot = ClaudeCodeAdapter(memory_dir, transcripts=[]).ingest().memory_index
+
+    assert all(Path(ref.path) != outside.resolve() for ref in snapshot)
+    assert "sneaky" not in {ref.name for ref in snapshot}
+
+
 def test_paths_are_resolved_through_a_symlinked_memory_dir(tmp_path, memory_dir):
     link = tmp_path / "linked-memory"
     os.symlink(memory_dir, link)

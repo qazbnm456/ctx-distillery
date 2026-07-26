@@ -66,7 +66,13 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
    calls, so a live reference would let `read_memory_file`'s allowlist shift mid-run — and it
    would create a second copy of the transcripts the driver already owns. The allowlist check is
    an EXACT `Path(path).resolve()` match against the snapshot; never make it a prefix or
-   substring test (a symlink planted inside `memory_dir` defeats a prefix check).
+   substring test (a substring test lets `/etc/passwd` through under a crafted name, and an
+   unresolved prefix test lets a `..`-segment trick pass) — this defends the REQUEST side.
+   **Separately**, `ClaudeCodeAdapter.list_targets()` itself must never let a symlink living
+   inside `memory_dir` fold its outside target into the snapshot in the first place (an
+   adversarial review reproduced exactly that escape) — it only enumerates a resolved path whose
+   PARENT is still `memory_dir` itself. Exact-match-on-request and containment-at-enumeration are
+   two separate checks; neither substitutes for the other.
 
 ## Known simplifications (stated, not hidden)
 

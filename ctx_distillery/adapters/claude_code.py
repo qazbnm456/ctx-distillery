@@ -40,9 +40,13 @@ class ClaudeCodeAdapter(HarnessAdapter):
     """Read one Claude Code project's `memory/` directory + caller-supplied transcripts."""
 
     def __init__(self, memory_dir: str | Path, transcripts: Iterable[str] = ()) -> None:
-        # `.resolve()` once, here: every path this adapter hands out is absolute and symlink-resolved,
-        # which is what lets `read_memory_file` do an EXACT path match against the snapshot instead of
-        # a prefix/substring comparison a symlink or `..` segment could slip past.
+        # `.resolve()` once, here: every path this adapter hands out is absolute. Combined with
+        # `list_targets`'s containment check below, this is what lets `read_memory_file` do an EXACT
+        # path match against the snapshot instead of a prefix/substring comparison a `..` segment in
+        # a REQUESTED path could slip past. Resolving alone does NOT stop a symlink that already
+        # lives inside `memory_dir` at enumeration time — that is a separate, second check (an
+        # adversarial review found the first draft only guarded requests, not enumeration, and let a
+        # pre-existing symlink's resolved target join the snapshot as if it were a real memory file).
         self.memory_dir = Path(memory_dir).resolve()
         self._transcripts: list[str] = [str(t) for t in transcripts]
 
@@ -62,6 +66,13 @@ class ClaudeCodeAdapter(HarnessAdapter):
 
         Returns an empty list when `memory_dir` doesn't exist — a project with no memory store yet
         is a normal input (everything is a promotion candidate), not an error.
+
+        CONTAINMENT CHECK (fixed after an adversarial review reproduced a real escape): a symlink
+        living inside `memory_dir` can resolve to a path OUTSIDE it. `glob` follows symlinks, so a
+        naive enumeration would happily add that outside target to the snapshot — and everything
+        downstream (`read_memory_file`'s allowlist) trusts the snapshot completely, by design. So a
+        resolved path is only enumerated when its PARENT is still exactly `memory_dir` itself; a
+        symlink pointing elsewhere is silently skipped rather than joining the trusted snapshot.
         """
         if not self.memory_dir.is_dir():
             return []
@@ -69,6 +80,8 @@ class ClaudeCodeAdapter(HarnessAdapter):
         index_path = (self.memory_dir / INDEX_FILENAME).resolve()
         for path in sorted(self.memory_dir.glob("*.md")):
             resolved = path.resolve()
+            if resolved.parent != self.memory_dir:
+                continue  # a symlink resolving outside memory_dir — never trust it into the snapshot
             if resolved == index_path:
                 continue  # handled below, as kind="index"
             meta, _body = frontmatter.parse(_read_text(resolved))
@@ -80,9 +93,11 @@ class ClaudeCodeAdapter(HarnessAdapter):
                     path=str(resolved),
                 )
             )
-        if index_path.is_file():
-            # `MEMORY.md` has no frontmatter of its own — its name/description are fixed, and its
-            # VALUE to the planner is the index lines in its body, read via `read_memory_file`.
+        if index_path.is_file() and index_path.parent == self.memory_dir:
+            # Same containment check as above — `MEMORY.md` itself could theoretically be a
+            # symlink escaping the directory too. It has no frontmatter of its own — its
+            # name/description are fixed, and its VALUE to the planner is the index lines in its
+            # body, read via `read_memory_file`.
             refs.append(
                 ArtifactRef(
                     name=INDEX_FILENAME,

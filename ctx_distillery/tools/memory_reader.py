@@ -20,9 +20,16 @@ simplification (`CLAUDE.md`), not a hidden assumption.
 
 **Allowlist invariant (a project rule, not tool-docstring prose):** `read_memory_file` resolves the
 requested path and refuses unless it EXACT-MATCHES one `ArtifactRef.path` in the snapshot. Never a
-prefix or substring test — a prefix test on a resolved directory still lets a symlink planted inside
-`memory_dir` escape, and a substring test lets `/etc/passwd` through under a crafted name. Only
-paths the snapshot already enumerated are readable, full stop.
+prefix or substring test — a substring test lets `/etc/passwd` through under a crafted name, and a
+prefix test on an unresolved requested string lets a `..`-segment trick pass. This defends the
+REQUEST side: whatever the model asks to read must already be in the snapshot, verbatim.
+
+That is a SEPARATE concern from the snapshot's own construction: an adversarial review found that a
+symlink already living inside `memory_dir` at enumeration time would have its OUTSIDE target folded
+into the snapshot as if it were a real memory file (exact-match against a poisoned snapshot is not a
+defense at all). The fix lives in the adapter (`claude_code.py`'s `list_targets` — a containment
+check skips any resolved path whose parent isn't `memory_dir` itself), not here; this tool only ever
+trusts whatever snapshot it is given.
 """
 
 from __future__ import annotations
