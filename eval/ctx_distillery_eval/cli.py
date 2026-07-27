@@ -27,7 +27,22 @@ from .taskset import collect_tasks
 
 
 def _read_transcripts(paths: list[str]) -> list[str]:
-    return [Path(p).read_text(encoding="utf-8") for p in paths]
+    """Read every transcript path, refusing an EMPTY (or whitespace-only) one.
+
+    FIXED per adversarial review: `transcript_path` being a required CLI argument only enforces
+    the "mandatory" design decision STRUCTURALLY (omitting the flag errors via argparse) — an
+    empty file slipped straight through, ran to completion, and would silently ask a real judge
+    (the stub judge ignores its inputs, masking this) to score a plan against nothing, exactly the
+    failure mode "mandatory transcript" exists to prevent. Refuse it here instead, loudly.
+    """
+    texts = [Path(p).read_text(encoding="utf-8") for p in paths]
+    empty = [p for p, text in zip(paths, texts) if not text.strip()]
+    if empty:
+        raise SystemExit(
+            f"transcript path(s) {empty!r} are empty — a real judge would be scoring a plan "
+            f"against nothing, which defeats the point of requiring a transcript at all"
+        )
+    return texts
 
 
 def render_scorecard(report: EvalReport) -> str:

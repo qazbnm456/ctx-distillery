@@ -52,6 +52,16 @@ def test_score_run_handles_a_missing_result_event_as_no_plan():
     assert isinstance(row.score, EvalScore)
 
 
+def test_score_run_handles_a_malformed_result_output_without_raising():
+    """FIXED per adversarial review: a `result` event whose `output` is a dict but the WRONG shape
+    (missing the required `action` field) used to propagate a raw `pydantic.ValidationError`
+    uncaught — reproduced end-to-end, where scoring a glob of one good + one malformed trace killed
+    the whole batch. Must degrade to a run-level problem, exactly like a missing result event."""
+    malformed = _result({"candidates": [{"artifact_id": "x"}]})
+    row = score_run("r0", "trace.jsonl", [malformed], ["transcript text"])
+    assert isinstance(row.score, EvalScore)
+
+
 def _tool_call_stub(tool, artifact_id, draft="---\nname: x\ndescription: d\n---\nbody\n"):
     from rlm_kit.trace import EVENT_TOOL_CALL
 

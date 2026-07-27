@@ -47,7 +47,14 @@ jobs:
       - name: Sync
         run: uv sync --python ${{ matrix.python-version }}
       - name: Eval member tests
-        run: uv run --python ${{ matrix.python-version }} --package ctx-distillery-eval python -m pytest
+        # FIXED per adversarial review: `--package` only selects which workspace member's
+        # ENVIRONMENT to use — it does not change pytest's cwd or which pyproject.toml's
+        # `testpaths` gets resolved, so the original invocation silently re-ran the ROOT
+        # package's suite three times (once per Python version) and never executed a single
+        # test under eval/tests/, including the one-way-boundary test that is supposed to gate
+        # the whole eval-member invariant. `--directory eval` makes pytest resolve eval's own
+        # pyproject.toml and testpaths, verified against a real uv binary before landing this.
+        run: uv run --python ${{ matrix.python-version }} --directory eval --package ctx-distillery-eval python -m pytest
 
   lint:
     name: ruff

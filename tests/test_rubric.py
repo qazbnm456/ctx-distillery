@@ -114,6 +114,16 @@ def test_plan_from_events_is_none_with_no_result_event():
     assert _plan_from_events([]) is None
 
 
+def test_plan_from_events_is_none_with_a_malformed_result_output():
+    """FIXED per adversarial review: a well-formed dict with the WRONG shape (missing a required
+    field, unlike "not a dict at all" or "no result event") used to propagate a raw
+    `pydantic.ValidationError` uncaught — reproduced end-to-end via the eval CLI, where ONE
+    malformed trace in a glob took the entire scoring batch down. Must degrade to None, matching
+    `assemble(events, None)`'s own "none of them raise" philosophy."""
+    malformed = {"candidates": [{"artifact_id": "x"}]}  # missing the REQUIRED `action` field
+    assert _plan_from_events([_result(malformed)]) is None
+
+
 def test_plan_from_events_round_trips_through_a_real_recorder(tmp_path):
     """The one genuine round trip: a REAL `TraceRecorder.record_result` call, then re-read via
     `load_events` — confirms pydantic nested-model serialization actually survives the trip, which a

@@ -10,6 +10,7 @@ package pins that `ctx_distillery` never imports this package back).
 
 from __future__ import annotations
 
+from pydantic import ValidationError
 from rlm_kit.trace import EVENT_RESULT
 
 from ctx_distillery.session import AssembledPlan, assemble
@@ -25,12 +26,21 @@ def _plan_from_events(events: list[dict]) -> DistillPlan | None:
     Same reconstruction `ctx_distillery.rubric._plan_from_events` performs, kept as its own small
     local copy here (rather than importing that underscore-prefixed helper across the package
     boundary) so this package only ever touches `ctx_distillery`'s PUBLIC surface.
+
+    FIXED per adversarial review: a well-formed-but-wrong-shaped `output` dict (e.g. missing a
+    required field) used to raise an uncaught `pydantic.ValidationError`, reproduced end-to-end
+    scoring a glob where ONE malformed trace took the entire batch down. Returns `None` on that
+    shape too — `assemble(events, None)` already reports a missing plan as a run-level problem
+    rather than raising, and this must degrade the same way, matching `.rubric`'s own fix.
     """
     for event in reversed(events):
         if event.get("type") == EVENT_RESULT:
             output = (event.get("payload") or {}).get("output")
             if isinstance(output, dict):
-                return DistillPlan.model_validate(output)
+                try:
+                    return DistillPlan.model_validate(output)
+                except ValidationError:
+                    return None
     return None
 
 

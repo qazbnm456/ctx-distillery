@@ -104,15 +104,27 @@ def _plan_from_events(events: list[dict]):
     parameter, unlike `session.assemble(events, plan)` — so this rebuilds the plan `assemble` needs
     from the trace itself, via `rlm_kit.trace.record_result`'s recorded `EVENT_RESULT` payload
     (`payload["output"]`). Returns None if no result event carries a dict output (no run, or a run
-    that failed before SUBMIT) — `assemble(events, None)` already handles that as a run-level problem.
+    that failed before SUBMIT), OR if that dict does not actually validate as a `DistillPlan` —
+    `assemble(events, None)` already handles a missing plan as a run-level problem, and `assemble`'s
+    OWN stated philosophy is "none of them raise" (`session.py`'s module docstring), so a malformed
+    shape here must degrade the SAME way, not propagate a raw `pydantic.ValidationError` and crash
+    the whole batch. FIXED per adversarial review: an earlier draft only guarded "no result event" /
+    "output isn't a dict" and let a well-formed-but-wrong-shaped dict (e.g. missing a required field)
+    raise uncaught — reproduced end-to-end via the eval CLI, where ONE malformed trace in a glob took
+    the entire scoring run down with it.
     """
+    from pydantic import ValidationError
+
     from .task import DistillPlan  # local import: keep rubric.py's top light, mirror trace_facts style
 
     for event in reversed(events):
         if event.get("type") == EVENT_RESULT:
             output = (event.get("payload") or {}).get("output")
             if isinstance(output, dict):
-                return DistillPlan.model_validate(output)
+                try:
+                    return DistillPlan.model_validate(output)
+                except ValidationError:
+                    return None
     return None
 
 
