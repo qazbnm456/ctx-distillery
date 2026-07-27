@@ -103,16 +103,34 @@ def _step_key(event: dict) -> int:
 def _load_trace(run_id: str) -> list[dict]:
     """Read `{run_id}`'s trace file. 404 if it doesn't exist; 502 (never 500) on a genuinely
     external failure — an unreadable file or a corrupted JSONL line — mirroring `assemble`'s own
-    "none of them raise" discipline all the way out to the HTTP layer. `plan_from_events` /
-    `assemble` / `trace_facts` themselves already never raise on a malformed-but-READABLE trace, so
-    there is no double-guarding needed past this point."""
+    "none of them raise" discipline all the way out to the HTTP layer.
+
+    FIXED per adversarial review: `rlm_kit.trace.load_events` does NO shape validation — a line
+    that is syntactically valid JSON but NOT an object (`42`, `"x"`, `[1,2,3]`, `null`) parses fine
+    (no `ValueError`) and lands in the returned list as-is. Every downstream consumer
+    (`plan_from_events`/`trace_facts`/`_step_key`/`mapper.to_event`) assumes dict shape and calls
+    `.get(...)` unconditionally, so such a line previously reached them and raised a raw
+    `AttributeError` — a genuine 500, reproduced concretely by an adversarial review, and exactly
+    what this function's own docstring already claimed (incompletely) not to allow. Filtering to
+    dict-shaped events HERE, once, at the trace's only entry point into this app, is what actually
+    delivers on that claim — `plan_from_events`/`assemble`/`trace_facts` themselves still don't
+    need to know about this; they only ever see well-shaped events from this app.
+
+    NOTE, stated rather than silently left for someone else to rediscover: the SAME underlying gap
+    (`load_events` returning a non-dict entry unfiltered) also pre-exists in
+    `ctx_distillery.rubric`/`ctx_distillery.session` for a locally-invoked caller (e.g.
+    `eval/ctx_distillery_eval/cli.py`'s real-trace-file path) — this fix closes it for the studio's
+    newly network-reachable surface specifically; hardening the shared library functions themselves
+    is tracked as separate, future work, not silently rolled into this pass.
+    """
     path = _trace_path(run_id)
     if not path.exists():
         raise HTTPException(404, f"no trace for run {run_id!r}")
     try:
-        return load_events(str(path))
+        events = load_events(str(path))
     except (OSError, ValueError) as exc:  # a half-written / corrupted trace file, not a code bug
         raise HTTPException(502, f"trace file for run {run_id!r} is unreadable: {exc}") from exc
+    return [e for e in events if isinstance(e, dict)]
 
 
 @app.get("/v1/config")

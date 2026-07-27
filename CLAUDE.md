@@ -32,14 +32,18 @@ Run BOTH before pushing — the suite is fully offline (no live model, no Deno, 
   (`brew install deno`). Don't do it in CI; it costs money.
 - The `eval/` and `studio/` workspace members each carry their OWN test suite and must be run
   separately — they are not collected by a bare root `pytest -q` (each has its own
-  `pyproject.toml` `testpaths`). `uv run --directory eval --package ctx-distillery-eval --extra dev
-  python -m pytest` / `uv run --directory studio --package ctx-distillery-studio --extra dev python
-  -m pytest` (matching `.github/workflows/ci.yml`'s `eval-test`/`studio-test` jobs — `--extra dev` is
-  NOT optional: `pytest` lives in each member's `[project.optional-dependencies] dev`, not its
-  `dependencies`, and omitting it silently resolves an environment with no `pytest` installed at
-  all). In a plain-pip environment (no `uv`), install each member editable instead:
-  `pip install -e . -e ./eval -e ./studio` from the repo root, then run `pytest` from inside each
-  member's own directory.
+  `pyproject.toml` `testpaths`; `--directory eval`/`--directory studio` is what makes `uv run`
+  resolve the RIGHT `testpaths` — `--package` alone does not, an earlier Phase-1 fix). `uv run
+  --directory eval --package ctx-distillery-eval --extra dev python -m pytest` / `uv run
+  --directory studio --package ctx-distillery-studio --extra dev python -m pytest` (matching
+  `.github/workflows/ci.yml`'s `eval-test`/`studio-test` jobs). **`--extra dev` is added for
+  explicitness, not because it's load-bearing — corrected per adversarial review, which found an
+  earlier draft's claim that omitting it breaks the job was FALSE**: this is a `uv` workspace,
+  which shares ONE venv across all members, and the ROOT `pyproject.toml`'s `[dependency-groups]
+  dev = ["pytest>=8.0"]` already installs pytest into that shared venv on every `uv sync`,
+  regardless of which member a given `uv run --package` is scoped to. In a plain-pip environment
+  (no `uv`), install each member editable instead: `pip install -e . -e ./eval -e ./studio` from
+  the repo root, then run `pytest` from inside each member's own directory.
 
 ## Invariants — do not break
 

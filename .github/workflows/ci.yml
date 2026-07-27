@@ -54,11 +54,14 @@ jobs:
         # test under eval/tests/, including the one-way-boundary test that is supposed to gate
         # the whole eval-member invariant. `--directory eval` makes pytest resolve eval's own
         # pyproject.toml and testpaths, verified against a real uv binary before landing this.
-        # SECOND fix, found the same way while verifying the Studio pass's mirrored studio-test
-        # job against a real `uv` binary: `--directory`+`--package` alone re-resolve the shared
-        # workspace venv scoped to ONLY ctx-distillery-eval's own `dependencies` — `pytest` lives
-        # in its `[project.optional-dependencies] dev`, not `dependencies`, so this job has been
-        # failing with "No module named pytest" since it landed. `--extra dev` installs it.
+        # `--extra dev` added for explicitness — CORRECTED per adversarial review, this is NOT a
+        # bug fix. This is a uv WORKSPACE: one shared venv across all members, and the ROOT
+        # pyproject.toml's [dependency-groups] dev = ["pytest>=8.0"] already installs pytest into
+        # that shared venv on every `uv sync`, regardless of which member `--package` scopes a
+        # given `uv run` to. So omitting `--extra dev` here does NOT reproduce "No module named
+        # pytest" — verified against a real `uv` binary, from a fresh `.venv`, before adding this.
+        # `--extra dev` is added anyway because it makes this job self-contained (correct even if
+        # the root's dev group ever changed), not because anything here was broken.
         run: uv run --python ${{ matrix.python-version }} --directory eval --package ctx-distillery-eval --extra dev python -m pytest
 
   studio-test:
@@ -77,14 +80,13 @@ jobs:
       - name: Sync
         run: uv sync --python ${{ matrix.python-version }}
       - name: Studio member tests
-        # Mirrors eval-test's own fix: `--package` alone only selects which workspace member's
-        # ENVIRONMENT to use, not pytest's cwd/`testpaths` resolution — `--directory studio` makes
-        # pytest resolve studio's own pyproject.toml and testpaths. `--extra dev` installs
-        # `pytest`/`httpx` (they live in ctx-distillery-studio's `[project.optional-dependencies]
-        # dev`, not its `dependencies`) — omitting it reproduces the SAME "No module named pytest"
-        # bug this pass found (and fixed) in the sibling eval-test job above. Both verified
-        # end-to-end against a real `uv` binary before landing this, per the implementation plan's
-        # own warning about the Phase-1 `--package`-alone bug.
+        # Mirrors eval-test's own `--directory` fix: `--package` alone only selects which
+        # workspace member's ENVIRONMENT to use, not pytest's cwd/`testpaths` resolution —
+        # `--directory studio` makes pytest resolve studio's own pyproject.toml and testpaths.
+        # `--extra dev` is added for the SAME explicitness reason as eval-test's (see its comment
+        # above) — this is a shared-venv uv workspace, so the root's own dev group already
+        # provides pytest regardless; not a bug fix. Verified end-to-end against a real `uv`
+        # binary before landing this.
         run: uv run --python ${{ matrix.python-version }} --directory studio --package ctx-distillery-studio --extra dev python -m pytest
 
   lint:

@@ -47,16 +47,21 @@ never applies anything itself.
   `eval/tests/test_score.py` regression guard asserting `ctx_distillery_eval.score` no longer
   defines its own `_plan_from_events` (drift between two copies of the same reconstruction has
   already bitten this project once — see the malformed-`ValidationError` fix below).
-- **Found (via the Studio pass's own real-`uv`-binary verification of its new `studio-test` CI job)
-  and fixed a live bug in the already-merged `eval-test` job**: `uv run --directory eval --package
-  ctx-distillery-eval python -m pytest` (Phase 1's fix for the `--package`-alone testpaths bug) was
-  still missing `--extra dev` — `pytest` lives in `ctx-distillery-eval`'s
-  `[project.optional-dependencies] dev`, not its `dependencies`, and `--directory`+`--package`
-  re-resolve the shared workspace venv scoped to ONLY that member's own dependencies. Without
-  `--extra dev` the job has been failing with "No module named pytest" since it landed. Both
-  `eval-test` and the new `studio-test` job now pass `--extra dev`, verified end-to-end (pytest
-  actually running and its tests actually passing, not just resolving to the right `testpaths`)
-  against a real `uv` binary before landing this.
+- **Added `--extra dev` to the `eval-test` job and the new `studio-test` job, for explicitness —
+  CORRECTED per adversarial review, this was NOT fixing a live bug.** An earlier draft of this
+  entry claimed `eval-test` (added in the Phase-1 fix, `--directory eval --package
+  ctx-distillery-eval python -m pytest`) had been silently failing with "No module named pytest"
+  since it landed, because `pytest` supposedly lives only in `ctx-distillery-eval`'s
+  `[project.optional-dependencies] dev`. An adversarial review reproduced the EXACT pre-existing
+  invocation against a real `uv` binary, from a fully fresh `.venv`, and it passed cleanly, every
+  time — the claim was false. Root cause of the misunderstanding: this is a `uv` WORKSPACE, which
+  shares ONE venv across all members; the ROOT `pyproject.toml`'s `[dependency-groups] dev =
+  ["pytest>=8.0"]` installs pytest into that shared venv by default (no `[tool.uv]
+  default-groups` override exists to disable it), regardless of which member's `--package`
+  context a given `uv run` is scoped to — `--directory`/`--package` change which member's OWN
+  `dependencies` resolve, not whether the shared venv already has pytest from the root's dev
+  group. So `--extra dev` was never load-bearing for either job; it is added anyway because it is
+  more explicit/self-contained and does not hurt, not because anything was broken.
 - **Fixed three real bugs an adversarial review found in the rubric/eval pass**, before merge: (1)
   the `eval-test` CI job never actually ran `eval/tests/` — `--package` only selects which
   workspace member's ENVIRONMENT to use, not pytest's cwd/`testpaths` resolution, so it silently

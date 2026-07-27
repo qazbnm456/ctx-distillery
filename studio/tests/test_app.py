@@ -99,6 +99,21 @@ def test_get_run_502_on_a_genuinely_corrupted_trace_file(tmp_path, monkeypatch):
     assert client.get("/v1/runs/bad").status_code == 502
 
 
+def test_get_run_never_500s_on_a_syntactically_valid_but_non_dict_jsonl_line(tmp_path, monkeypatch):
+    """FIXED per adversarial review: `rlm_kit.trace.load_events` does NO shape validation — a line
+    that IS valid JSON but not an object (`42`, `"x"`, `[1,2,3]`, `null`) parses fine (no
+    `ValueError`, so the 502 guard above never fires) and used to reach `plan_from_events` as-is,
+    which called `.get("type")` on it unconditionally and raised a raw `AttributeError` — a genuine
+    500, reproduced concretely by an adversarial review. `_load_trace` now filters non-dict entries
+    before anything downstream ever sees them."""
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    (tmp_path / "weird.jsonl").write_text('{"type": "run_start", "payload": {}}\n42\nnull\n[1, 2, 3]\n"x"\n', encoding="utf-8")
+    resp = client.get("/v1/runs/weird")
+    assert resp.status_code == 200, resp.text
+    events_resp = client.get("/v1/runs/weird/events")
+    assert events_resp.status_code == 200, events_resp.text
+
+
 def test_run_id_path_is_slug_sanitized_against_traversal(tmp_path, monkeypatch):
     # a run_id becomes a file path. A traversal attempt must fold to a harmless slug that resolves
     # INSIDE traces_dir (-> 404), never escape it.
