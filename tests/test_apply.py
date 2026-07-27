@@ -302,6 +302,30 @@ def test_a_slug_carrying_a_path_separator_is_refused(memory_dir, tmp_path, scope
     assert list(root.iterdir()) == []
 
 
+@pytest.mark.parametrize("slug", ["", "   ", "\t"])
+def test_a_blank_slug_is_refused_rather_than_naming_the_root_itself(tmp_path, slug):
+    """Same defence-in-depth reasoning as the separator check above, and the same "driven directly"
+    caveat: `_promote_skill` refuses an empty slug before it ever gets here. But `root / ""` IS the
+    root, and a whitespace-only slug would create a directory nobody can address, so the function
+    whose job is to be the check refuses both."""
+    root = tmp_path / "skills"
+    root.mkdir()
+    target, reason = _skill_target(root, slug, overwrite=False)
+    assert target is None
+    assert "is blank" in reason
+    assert list(root.iterdir()) == []
+
+
+def test_an_unusable_slug_is_refused_instead_of_raising_out_of_apply_plan(tmp_path):
+    """An embedded NUL makes `Path.resolve()` raise ValueError, not OSError. A refusal is the right
+    answer; an exception would abandon every candidate queued after this one mid-run."""
+    root = tmp_path / "skills"
+    root.mkdir()
+    target, reason = _skill_target(root, "bad\x00slug", overwrite=False)
+    assert target is None
+    assert "could not resolve" in reason
+
+
 @pytest.mark.parametrize("scope", ["global", "project"])
 def test_a_legitimate_slug_resolves_to_the_nested_skill_md(memory_dir, tmp_path, scope):
     root = tmp_path / f"{scope}-skills"

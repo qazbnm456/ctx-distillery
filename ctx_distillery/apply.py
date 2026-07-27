@@ -444,9 +444,12 @@ def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | Non
     A DIFFERENT check from the flat-file one, per `docs/DESIGN.md`, and in this order deliberately
     (an escape attempt is diagnosed before a mere collision):
 
-    1. `slug` carries no path separator and is not a `.`/`..` traversal segment. `slugify` already
-       makes that impossible by character class; checked anyway, because this function's whole job is
-       to be the check — a future caller deriving the slug differently must still hit a wall here.
+    1. `slug` is non-blank, carries no path separator, and is not a `.`/`..` traversal segment.
+       `slugify` already makes all of that impossible by character class (and `_promote_skill`
+       refuses an empty slug before ever getting here); checked anyway, because this function's whole
+       job is to be the check — a future caller deriving the slug differently must still hit a wall
+       here. A blank slug would otherwise name the ROOT itself (`root / ""`), and a whitespace-only
+       one a directory nobody can address.
     2. `<root>/<slug>` resolves to a DIRECT child of `root`. This is what catches an existing
        symlinked skill directory pointing outside the store, the nested analogue of the flat check.
     3. the file itself resolves to `<that directory>/SKILL.md` — so a symlinked `SKILL.md` inside an
@@ -455,6 +458,11 @@ def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | Non
        outright (`overwrite` means "replace this draft's file", never "replace a file with a
        directory"); an existing skill directory is a collision the caller may explicitly overwrite.
     """
+    if not slug.strip():
+        return None, (
+            f"skill slug {slug!r} is blank — a blank slug names the skills root itself, not a skill "
+            f"directory inside it"
+        )
     if slug in (".", "..") or any(sep and sep in slug for sep in (os.sep, os.altsep, "/", "\\")):
         return None, (
             f"skill slug {slug!r} contains a path separator or traversal segment — a skill "
@@ -464,7 +472,10 @@ def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | Non
     try:
         resolved_dir = skill_dir.resolve()
         resolved_root = root.resolve()
-    except OSError as exc:  # pragma: no cover — an unresolvable path cannot be written
+    # ValueError as well as OSError: an embedded NUL makes `Path.resolve()` raise ValueError, and a
+    # refusal is the right answer to an unusable slug — never an exception escaping `apply_plan`
+    # halfway through a run of candidates.
+    except (OSError, ValueError) as exc:
         return None, f"could not resolve {skill_dir}: {exc}"
     if resolved_dir.parent != resolved_root or resolved_dir.name != slug:
         return None, (
@@ -474,7 +485,7 @@ def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | Non
     target = skill_dir / SKILL_FILENAME
     try:
         resolved = target.resolve()
-    except OSError as exc:  # pragma: no cover — as above
+    except (OSError, ValueError) as exc:  # pragma: no cover — as above
         return None, f"could not resolve {target}: {exc}"
     if resolved.parent != resolved_dir or resolved.name != SKILL_FILENAME:
         return None, (
