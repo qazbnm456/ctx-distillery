@@ -12,6 +12,79 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **Real Claude Code storage auto-discovery** — `ClaudeCodeAdapter.for_project(project_dir)`, a new
+  alternate constructor (the explicit `ClaudeCodeAdapter(memory_dir, transcripts)` is UNCHANGED and
+  still the right entry point for a test or advanced caller). It computes `sanitize(project_dir)`
+  (every `/` of the absolute path → `-`), derives
+  `<claude_home>/projects/<sanitized>/memory`, discovers every sibling `<session-id>.jsonl` as one
+  transcript, and points skill enumeration at both skill roots. `home=` overrides `~/.claude`
+  everywhere, which is how the tests stay hermetic — no test reads this machine's real `~/.claude`.
+  What the evidence actually supports is stated per-part rather than uniformly: the sanitization rule,
+  the transcript layout, and the global skill layout are CONFIRMED by direct inspection; the `memory/`
+  SUB-PATH is this project's pre-existing assumption carried forward, NOT independently re-verified;
+  and the project-repo-relative `<project>/.claude/skills/` location is an UNCONFIRMED hypothesis
+  (motivated by `.claude/rules/` genuinely being read project-relative) that nobody has verified by
+  seeding a test skill and checking whether Claude Code offers it. This pass targets it as the best
+  available option for project-scoped promotions and claims nothing more.
+- **A JSONL → text renderer** (`render_transcript_events` / `render_transcript_file`) turning raw
+  events into the `list[str]` the pipeline already expects — deliberately LOSSY, and specified rather
+  than improvised, covering the shapes really observed on disk: only `user`/`assistant` events are
+  rendered (no other event type carries `message`/`timestamp`/`isSidechain` at all, so the renderer
+  filters FIRST); `message.content` is handled as EITHER a plain string (which really occurs) or a
+  list of blocks; `text`/`thinking` contribute their text verbatim, `tool_use` a `[used tool: X]`
+  label, and `tool_result` a size label whose UNIT depends on ITS OWN content being a string
+  (`N chars`) or a list (`N blocks`) — both occur, so neither shape is assumed; an unrecognized block
+  type becomes `[unrecognized content block: X]` rather than raising or vanishing. A torn or
+  non-JSON line is skipped, not fatal. `isSidechain` events are skipped as a DEFENSIVE NO-OP, stated
+  accurately: it was `false` on all 1216 real events checked, because subagent messages live in
+  separate `subagents/agent-<id>.jsonl` files and are never inlined — the filter guards a future
+  version that inlines them and is not currently removing "subagent noise". Distilling subagent
+  transcripts is a deferred extension (same file shape, different glob).
+- **`list_targets()` now returns `kind="skill"` refs — for BOTH scopes**, closing the previously
+  stated gap ("never returns `kind="skill"` yet") at both ends rather than only the global one:
+  `~/.claude/skills/*/SKILL.md` as `scope="global"` and `<project_dir>/.claude/skills/*/SKILL.md` as
+  `scope="project"`. A skill is a DIRECTORY, so a ref's name falls back to the DIRECTORY name, never
+  the `SKILL` file stem (which would name every skill identically). The read-side containment
+  discipline extends to the nested layout: a symlinked skill directory resolving outside the root
+  never joins the trusted snapshot. Enumeration is OPT-IN on the explicit constructor, so
+  `apply.py`'s re-scan can never silently reach into a real `~/.claude/skills`.
+- **`ArtifactRef` gains `scope`** (`"global"` / `"project"`), with a KIND-DERIVED default rather than
+  a blanket one: a skill defaults to `"global"`, while a memory or index ref is inherently
+  `"project"` (this project's memory store has no global counterpart, so a blanket `"global"` default
+  would flatly mislabel it). An unrecognized scope raises — `apply.py` routes a write by this field.
+- **`draft_skill_file`'s frontmatter schema corrected** — `name` + `description` stay the ONLY
+  required fields; `when_to_use` / `dispatch_intent` are accepted as OPTIONAL extras, passed through
+  verbatim when present and never grounds for rejecting a draft. Every real installed skill inspected
+  carries both, but all of them were one author's single homogeneous suite, and Anthropic's own
+  documented Agent-Skills convention requires neither — mandating them would generalize from N=1. All
+  THREE places that encode the shape moved together, because they drift apart otherwise: the
+  validator, `_spec_for_skill`'s model-facing PROMPT TEXT, and `ClaudeCodeAdapter.schema_for("skill")`.
+- **Scope-aware collision checking.** `drafting._existing_names(index, kind, scope)` filters by scope
+  itself (the helper, not just its caller), and `draft_skill_file` now takes a `scope` argument the
+  validator reads back for the current call — the two skill stores are independent namespaces, so the
+  same name at the OTHER scope is not a collision and refusing it would block a legitimate draft. No
+  stated scope falls back to the union: weaker for the drafter, never wrong for the store.
+- **`task.py`'s `_INSTRUCTIONS` teach the `key_fields["scope"]` convention** for `promote_to_skill`
+  (and how to DECIDE it: a finding tied to this project's own tooling/conventions is `"project"`, a
+  genuinely portable technique is `"global"`), mirroring how `prune`'s `target_path` is already
+  taught. Pinned by a test so the prompt half and the apply half cannot drift.
+- **`apply.py`'s skill-write path — an architecture fix, not a new path string** (the biggest gap the
+  audit found). The shipped `_promote` wrote a FLAT `<slug>.md` under ONE root and refused anything
+  whose `resolved.parent != root`; a skill's real target is `<skills_root>/<slug>/SKILL.md`, one
+  directory deeper and under a root that is never `memory_dir` — so the existing check would have
+  REFUSED every legitimate skill write. `apply_plan` now takes roots PER KIND (`memory_dir` as before,
+  plus `global_skills_dir=` / `project_skills_dir=`, derived with the same
+  `global_skills_root()` / `project_skills_root()` helpers `for_project` uses, so reader and writer
+  cannot disagree about a location), routes a `promote_to_skill` by its own `key_fields["scope"]`, and
+  checks the nested target with its OWN function (`_skill_target`): the slug must carry no path
+  separator or traversal segment, `<root>/<slug>` must resolve to a DIRECT child of the root, the
+  `SKILL.md` there must resolve inside that directory, and `<root>/<slug>` must not already exist as
+  something else (a non-directory is refused even WITH `overwrite`, which only ever replaces a drafted
+  `SKILL.md`). A missing or bogus scope is refused rather than defaulted, and a scope whose root the
+  caller did not pass is refused too — the caller decides where a skill may be installed.
+  `test_a_skill_promotion_takes_the_same_write_path` is REPLACED (it pinned the flat behaviour the
+  research showed to be wrong) by tests asserting the real nested shape, plus escape and collision
+  refusals for both scopes.
 - `ctx_distillery/apply.py` — **the apply step**: `apply_plan(memory_dir, assembled_plan,
   approved_ids)`, the human-gated, host-side action that finally turns an approved plan into real
   file changes. Structurally outside the RLM (nothing on the planner's path imports it; no adapter

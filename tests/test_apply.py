@@ -18,10 +18,15 @@ from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
 from ctx_distillery.apply import (
     ARCHIVE_DIRNAME,
     _archive_destination,
+    _skill_target,
     apply_plan,
     slugify,
 )
 from ctx_distillery.session import AssembledCandidate, AssembledPlan
+
+#: The drafted bytes of one candidate skill — a real `SKILL.md` shape (`name` + `description` only;
+#: `when_to_use` / `dispatch_intent` are optional and deliberately absent here).
+SKILL_DRAFT = "---\nname: Deploy Runbook\ndescription: How to deploy.\n---\nSteps.\n"
 
 
 def memory_draft(name: str, *, body: str = "Some durable fact.\n") -> str:
@@ -43,6 +48,12 @@ def promotion(name: str, *, action: str = "promote_to_memory", **kw) -> Assemble
     kw.setdefault("draft", memory_draft(name))
     kw.setdefault("draft_ok", True)
     return AssembledCandidate(action=action, artifact_id="artifact-1", **kw)
+
+
+def skill_promotion(*, scope: str = "global", draft: str = SKILL_DRAFT, **kw) -> AssembledCandidate:
+    """A `promote_to_skill` candidate, carrying the `key_fields["scope"]` the convention requires."""
+    key_fields = {"scope": scope, **kw.pop("key_fields", {})}
+    return promotion("ignored", action="promote_to_skill", draft=draft, key_fields=key_fields, **kw)
 
 
 def prune(target_path) -> AssembledCandidate:
@@ -108,15 +119,244 @@ def test_a_clean_promotion_writes_the_assembled_draft_verbatim(memory_dir):
     assert "API Notes" in names_in(memory_dir)
 
 
-def test_a_skill_promotion_takes_the_same_write_path(memory_dir):
+def test_a_skill_promotion_takes_a_DIFFERENT_write_path_than_a_memory_one(memory_dir, tmp_path):
+    """Replaces the old `test_a_skill_promotion_takes_the_same_write_path`, which pinned behaviour
+    that primary-source research showed to be wrong (`docs/DESIGN.md`, gap #6).
+
+    A skill is NOT a flat `<slug>.md` in the memory store. It is `<skills_root>/<slug>/SKILL.md` —
+    one directory deeper, under a root that is never `memory_dir`. The old flat containment check
+    (`resolved.parent == memory_dir`) would have refused every legitimate skill write, so this needed
+    an architecture fix rather than a new path string, and the test has to assert the real shape.
+    """
     skill = "---\nname: Deploy Runbook\ndescription: How to deploy.\n---\nSteps.\n"
+    skills_root = tmp_path / "fake-home" / ".claude" / "skills"
+
     outcomes = apply_plan(
         memory_dir,
-        plan(promotion("ignored", action="promote_to_skill", draft=skill)),
+        plan(skill_promotion(draft=skill)),
         [0],
+        global_skills_dir=skills_root,
+    )
+
+    assert outcomes[0].status == "applied", outcomes[0].reason
+    written = skills_root / "deploy-runbook" / "SKILL.md"
+    assert written.read_text(encoding="utf-8") == skill
+    assert Path(outcomes[0].path) == written.resolve()
+    # …and NOTHING landed in the memory store: the two kinds have separate roots now.
+    assert sorted(p.name for p in memory_dir.iterdir()) == [
+        "MEMORY.md",
+        "conventions.md",
+        "user-prefs.md",
+    ]
+
+
+def test_a_project_scoped_skill_goes_to_the_project_root_not_the_global_one(memory_dir, tmp_path):
+    skill = "---\nname: This Repos Release\ndescription: How this repo ships.\n---\nSteps.\n"
+    global_root = tmp_path / "global-skills"
+    project_root = tmp_path / "proj" / ".claude" / "skills"
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope="project", draft=skill)),
+        [0],
+        global_skills_dir=global_root,
+        project_skills_dir=project_root,
+    )
+
+    assert outcomes[0].status == "applied", outcomes[0].reason
+    assert (project_root / "this-repos-release" / "SKILL.md").read_text(encoding="utf-8") == skill
+    assert not global_root.exists(), "a project-scoped skill must never touch the global store"
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_a_skill_promotion_with_no_root_for_its_scope_is_refused(memory_dir, tmp_path, scope):
+    """Refused, never defaulted: guessing between a user-global install and a project-local one is
+    not a guess this module is entitled to make."""
+    other = "project" if scope == "global" else "global"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope=scope)),
+        [0],
+        **{f"{other}_skills_dir": tmp_path / f"{other}-skills"},
+    )
+    assert outcomes[0].status == "refused"
+    assert f"no {scope} skills root" in outcomes[0].reason
+    assert not (tmp_path / f"{other}-skills").exists()
+
+
+@pytest.mark.parametrize("scope", [None, "", "Global", "user", 7, ["global"]])
+def test_a_skill_promotion_without_a_valid_scope_is_refused(memory_dir, tmp_path, scope):
+    key_fields = {} if scope is None else {"scope": scope}
+    outcomes = apply_plan(
+        memory_dir,
+        plan(promotion("x", action="promote_to_skill", draft=SKILL_DRAFT, key_fields=key_fields)),
+        [0],
+        global_skills_dir=tmp_path / "skills",
+        project_skills_dir=tmp_path / "proj-skills",
+    )
+    assert outcomes[0].status == "refused"
+    assert "key_fields['scope']" in outcomes[0].reason
+    assert not (tmp_path / "skills").exists() and not (tmp_path / "proj-skills").exists()
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_an_existing_skill_directory_refuses_unless_overwritten(memory_dir, tmp_path, scope):
+    root = tmp_path / f"{scope}-skills"
+    (root / "deploy-runbook").mkdir(parents=True)
+    (root / "deploy-runbook" / "SKILL.md").write_text("PRE-EXISTING SKILL\n", encoding="utf-8")
+    roots = {f"{scope}_skills_dir": root}
+
+    refused = apply_plan(memory_dir, plan(skill_promotion(scope=scope)), [0], **roots)
+    assert refused[0].status == "refused"
+    assert "name collision" in refused[0].reason
+    assert (root / "deploy-runbook" / "SKILL.md").read_text(encoding="utf-8") == "PRE-EXISTING SKILL\n"
+
+    applied = apply_plan(
+        memory_dir, plan(skill_promotion(scope=scope)), [0], overwrite_ids=[0], **roots
+    )
+    assert applied[0].status == "applied", applied[0].reason
+    assert (root / "deploy-runbook" / "SKILL.md").read_text(encoding="utf-8") == SKILL_DRAFT
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_a_file_sitting_where_the_skill_directory_belongs_is_refused_even_with_overwrite(
+    memory_dir, tmp_path, scope
+):
+    """`overwrite` means "replace this draft's SKILL.md", never "replace a file with a directory"."""
+    root = tmp_path / f"{scope}-skills"
+    root.mkdir()
+    (root / "deploy-runbook").write_text("A FILE, NOT A SKILL DIRECTORY\n", encoding="utf-8")
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope=scope)),
+        [0],
+        overwrite_ids=[0],
+        **{f"{scope}_skills_dir": root},
+    )
+
+    assert outcomes[0].status == "refused"
+    assert "not a skill directory" in outcomes[0].reason
+    assert (root / "deploy-runbook").read_text(encoding="utf-8") == "A FILE, NOT A SKILL DIRECTORY\n"
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_a_symlinked_skill_directory_cannot_redirect_the_write_outside_the_root(
+    memory_dir, tmp_path, scope
+):
+    """The nested analogue of the flat write-side containment check: `<root>/<slug>` must resolve to a
+    DIRECT child of the root, so a symlink planted there cannot host the write elsewhere."""
+    root = tmp_path / f"{scope}-skills"
+    root.mkdir()
+    outside = tmp_path / "outside-dir"
+    outside.mkdir()
+    os.symlink(outside, root / "deploy-runbook")
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope=scope)),
+        [0],
+        overwrite_ids=[0],
+        **{f"{scope}_skills_dir": root},
+    )
+
+    assert outcomes[0].status == "refused"
+    assert "refusing to write outside" in outcomes[0].reason or "not a skill directory" in outcomes[0].reason
+    assert list(outside.iterdir()) == [], "nothing may be written through the symlink"
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_a_symlinked_SKILL_md_inside_a_legitimate_directory_cannot_redirect_the_write(
+    memory_dir, tmp_path, scope
+):
+    root = tmp_path / f"{scope}-skills"
+    (root / "deploy-runbook").mkdir(parents=True)
+    outside = tmp_path / "outside-secret.md"
+    outside.write_text("SECRET OUTSIDE CONTENT\n", encoding="utf-8")
+    os.symlink(outside, root / "deploy-runbook" / "SKILL.md")
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope=scope)),
+        [0],
+        overwrite_ids=[0],
+        **{f"{scope}_skills_dir": root},
+    )
+
+    assert outcomes[0].status == "refused"
+    assert "refusing to write outside" in outcomes[0].reason
+    assert outside.read_text(encoding="utf-8") == "SECRET OUTSIDE CONTENT\n"
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+@pytest.mark.parametrize("slug", ["../escape", "nested/deep", "..", ".", "a\\b"])
+def test_a_slug_carrying_a_path_separator_is_refused(memory_dir, tmp_path, scope, slug):
+    """`slugify` already makes a separator impossible by character class — `_skill_target` checks
+    anyway, because being the check IS its job: a future caller deriving the slug differently must
+    still hit a wall. Driven directly, since the tool path cannot produce such a slug."""
+    root = tmp_path / f"{scope}-skills"
+    root.mkdir()
+    target, reason = _skill_target(root, slug, overwrite=False)
+    assert target is None
+    assert "path separator or traversal segment" in reason
+    assert list(root.iterdir()) == []
+
+
+@pytest.mark.parametrize("slug", ["", "   ", "\t"])
+def test_a_blank_slug_is_refused_rather_than_naming_the_root_itself(tmp_path, slug):
+    """Same defence-in-depth reasoning as the separator check above, and the same "driven directly"
+    caveat: `_promote_skill` refuses an empty slug before it ever gets here. But `root / ""` IS the
+    root, and a whitespace-only slug would create a directory nobody can address, so the function
+    whose job is to be the check refuses both."""
+    root = tmp_path / "skills"
+    root.mkdir()
+    target, reason = _skill_target(root, slug, overwrite=False)
+    assert target is None
+    assert "is blank" in reason
+    assert list(root.iterdir()) == []
+
+
+def test_an_unusable_slug_is_refused_instead_of_raising_out_of_apply_plan(tmp_path):
+    """An embedded NUL makes `Path.resolve()` raise ValueError, not OSError. A refusal is the right
+    answer; an exception would abandon every candidate queued after this one mid-run."""
+    root = tmp_path / "skills"
+    root.mkdir()
+    target, reason = _skill_target(root, "bad\x00slug", overwrite=False)
+    assert target is None
+    assert "could not resolve" in reason
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_a_legitimate_slug_resolves_to_the_nested_skill_md(memory_dir, tmp_path, scope):
+    root = tmp_path / f"{scope}-skills"
+    root.mkdir()
+    target, reason = _skill_target(root, "deploy-runbook", overwrite=False)
+    assert reason == ""
+    assert target == (root / "deploy-runbook" / "SKILL.md").resolve()
+
+
+def test_a_skill_name_that_slugifies_to_nothing_is_a_hard_refusal(memory_dir, tmp_path):
+    draft = '---\nname: "!!!"\ndescription: d\n---\nBody.\n'
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(draft=draft)),
+        [0],
+        global_skills_dir=tmp_path / "skills",
+    )
+    assert outcomes[0].status == "refused"
+    assert "slugifies to nothing" in outcomes[0].reason
+    assert not (tmp_path / "skills").exists()
+
+
+def test_a_memory_promotion_still_ignores_the_skills_roots_entirely(memory_dir, tmp_path):
+    """Roots are PER KIND: giving apply_plan a skills root must not change where a memory goes."""
+    skills_root = tmp_path / "skills"
+    outcomes = apply_plan(
+        memory_dir, plan(promotion("API Notes")), [0], global_skills_dir=skills_root
     )
     assert outcomes[0].status == "applied"
-    assert (memory_dir / "deploy-runbook.md").read_text(encoding="utf-8") == skill
+    assert (memory_dir / "api-notes.md").is_file()
+    assert not skills_root.exists()
 
 
 def test_a_promotion_into_a_memory_store_that_does_not_exist_yet_still_applies(tmp_path):

@@ -59,7 +59,11 @@ class DistillCandidate(BaseModel):
             "candidate flagged as an overlap/conflict. Never the drafted artifact body itself. "
             "For a `prune` candidate, `target_path` is REQUIRED by convention: the exact `path` of "
             "the existing artifact being pruned, verbatim from list_memory_files() (see "
-            "ctx_distillery/apply.py — a prune with no matching target_path is refused)."
+            "ctx_distillery/apply.py — a prune with no matching target_path is refused). For a "
+            "`promote_to_skill` candidate, `scope` is REQUIRED by the same convention: \"project\" "
+            "for a finding tied to this project, \"global\" for a portable technique — it selects "
+            "which skills directory the apply step would write into, and a promote_to_skill with no "
+            "valid scope is refused."
         ),
     )
 
@@ -95,6 +99,21 @@ existing artifact you are proposing to prune, copied verbatim from `list_memory_
 the only way a human's apply step can tell WHICH file a prune refers to; a prune whose
 `target_path` is missing, altered, or not one of the listed paths is refused rather than guessed
 at, and the harness's own memory index (`kind: "index"`) is never a valid prune target.
+
+For a `promote_to_skill` candidate you MUST set `key_fields["scope"]` to either "project" or
+"global", and pass that SAME value as `draft_skill_file`'s `scope` argument. Decide it by what the
+finding actually is:
+
+* "project" — the knowledge is tied to THIS project's own tooling, layout, or conventions (its test
+  command, its release checklist, the way ITS codebase is organized). It would be noise, or simply
+  wrong, in another repository.
+* "global" — the technique is genuinely portable and would help in any project (a debugging method,
+  a way of using a tool, a review habit that has nothing to do with this codebase's specifics).
+
+Skills at the two scopes live in two separate directories and are two separate namespaces: the same
+name existing in the OTHER scope is not a collision. A promote_to_skill candidate whose `scope` is
+missing or is not one of those two values is refused at apply time rather than guessed at, exactly
+like a `prune` with no `target_path`.
 
 See docs/DESIGN.md for the full design and acceptance criteria this task is built against.
 """

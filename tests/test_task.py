@@ -111,6 +111,22 @@ def test_the_prompt_asks_for_the_prune_target_path_convention():
     assert "target_path" in (DistillCandidate.model_fields["key_fields"].description or "")
 
 
+def test_the_prompt_teaches_the_promote_to_skill_scope_convention():
+    """The same two-halves-must-not-drift property, now for `key_fields["scope"]`.
+
+    `apply.py` ROUTES A WRITE by this field (user-global `~/.claude/skills/` vs. project-relative
+    `<project>/.claude/skills/`) and refuses a candidate without a valid one — which only works if
+    the PROMPT side asks for it, `key_fields` being a free-form dict. The instructions must also say
+    HOW to decide, or the planner is guessing: a project-tied finding is "project", a portable
+    technique is "global" (docs/DESIGN.md, "Architectural additions this research requires").
+    """
+    assert 'key_fields["scope"]' in _INSTRUCTIONS
+    assert "promote_to_skill" in _INSTRUCTIONS
+    assert '"global"' in _INSTRUCTIONS and '"project"' in _INSTRUCTIONS
+    description = DistillCandidate.model_fields["key_fields"].description or ""
+    assert "scope" in description and "promote_to_skill" in description
+
+
 def test_each_instance_gets_its_own_tools(snapshot):
     _configure([{"reasoning": "r", "code": "SUBMIT(plan={})"}])
     a, b = _build(snapshot), _build(snapshot)

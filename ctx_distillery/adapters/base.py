@@ -31,6 +31,16 @@ from typing import Any, Literal
 # methods, and the "no write path" constraint in the module docstring is untouched.
 ArtifactKind = Literal["memory", "skill", "index"]
 
+# A skill exists at TWO scopes in Claude Code: the user-global store (`~/.claude/skills/`) and a
+# project-repo-relative one (`<project>/.claude/skills/`). They are separate namespaces — the same
+# skill name may legitimately exist in both — so a collision check has to know WHICH one it is
+# checking, and `apply.py` has to know which root to write into. Memory has no global counterpart
+# at all, so a memory/index ref is inherently project-scoped (see `ArtifactRef.__post_init__`).
+ArtifactScope = Literal["global", "project"]
+
+#: The two scope values, as a runtime tuple (the `Literal` above is types-only).
+ARTIFACT_SCOPES: tuple[str, ...] = ("global", "project")
+
 
 @dataclass(frozen=True)
 class ArtifactRef:
@@ -45,6 +55,25 @@ class ArtifactRef:
     description: str
     kind: ArtifactKind
     path: str
+    #: "global" or "project". Leave it None to take the KIND-DERIVED default (below) — never a
+    #: blanket one: a memory/index ref defaulting to "global" would be flatly mislabeled.
+    scope: ArtifactScope | None = None
+
+    def __post_init__(self) -> None:
+        """Resolve `scope=None` to the default this ref's KIND implies, and reject a bogus value.
+
+        The default is deliberately kind-aware rather than one blanket constant
+        (`docs/DESIGN.md`, "Architectural additions this research requires"): a SKILL's default is
+        `"global"` (the store Claude Code definitely reads), while a memory or index ref is
+        inherently `"project"` — this project's memory store has no global counterpart, so there is
+        no other honest value for it. An unrecognized scope raises rather than being silently kept:
+        `apply.py` ROUTES A WRITE by this field, and a typo'd scope must not resolve to a
+        surprising root.
+        """
+        if self.scope is None:
+            object.__setattr__(self, "scope", "global" if self.kind == "skill" else "project")
+        elif self.scope not in ARTIFACT_SCOPES:
+            raise ValueError(f"scope must be one of {list(ARTIFACT_SCOPES)}, got {self.scope!r}")
 
 
 @dataclass(frozen=True)

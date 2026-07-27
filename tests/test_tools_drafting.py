@@ -109,10 +109,87 @@ def test_skill_validator_needs_name_and_description_only(snapshot):
     assert validate("---\nname: only-a-name\n---\nbody\n").ok is False
 
 
+def test_when_to_use_and_dispatch_intent_are_OPTIONAL_never_required(snapshot):
+    """Corrected per audit: requiring them would generalize from ONE author's skill pack.
+
+    All 9 real installed skills the research inspected carry both — but they are a single homogeneous
+    suite, and Anthropic's own documented Agent-Skills convention requires only `name` +
+    `description`. So a draft omitting them is valid, and a draft supplying them is valid too
+    (they pass through verbatim — `apply.py` writes the drafted bytes, it never re-authors them).
+    """
+    validate = make_skill_validator(snapshot)
+    assert validate(_GOOD_SKILL).ok is True, "omitting the two optionals must never fail a draft"
+
+    with_extras = _GOOD_SKILL.replace(
+        "description: How to re-run only the flaky CI job.\n",
+        "description: How to re-run only the flaky CI job.\n"
+        "when_to_use: When CI fails on one job only.\n"
+        "dispatch_intent: rerun-one-ci-job\n",
+    )
+    check = validate(with_extras)
+    assert check.ok is True and check.errors == []
+    # Parsed and carried through, not stripped or rejected.
+    assert check.meta["when_to_use"] == "When CI fails on one job only."
+    assert check.meta["dispatch_intent"] == "rerun-one-ci-job"
+
+
 def test_skill_collision_is_checked_against_kind_skill_refs():
     existing = [ArtifactRef(name="rerun-flaky-ci", description="d", kind="skill", path="/x/s.md")]
     check = make_skill_validator(existing)(_GOOD_SKILL)
     assert check.ok is False and any("collides with an existing skill" in e for e in check.errors)
+
+
+# -- scope-aware collisions (the two skill stores are separate namespaces) ------------------------
+
+
+def _skill_refs():
+    return [
+        ArtifactRef(name="rerun-flaky-ci", description="d", kind="skill", path="/g/s.md", scope="global"),
+        ArtifactRef(name="this-repo-only", description="d", kind="skill", path="/p/s.md", scope="project"),
+    ]
+
+
+def test_a_global_skill_name_is_not_a_collision_for_a_project_scoped_draft():
+    """`~/.claude/skills/` and `<project>/.claude/skills/` are independent stores, so the SAME name
+    at the other scope is not a collision at all — checking the union would refuse a legitimate draft."""
+    validate = make_skill_validator(_skill_refs(), lambda: "project")
+    assert validate(_GOOD_SKILL).ok is True
+
+
+def test_a_same_scope_name_still_collides():
+    validate = make_skill_validator(_skill_refs(), lambda: "global")
+    check = validate(_GOOD_SKILL)
+    assert check.ok is False
+    assert any("collides with an existing skill in the global scope" in e for e in check.errors)
+
+
+def test_the_project_scoped_namespace_is_checked_on_its_own_terms():
+    draft = _GOOD_SKILL.replace("name: rerun-flaky-ci", "name: This-Repo-Only")
+    assert make_skill_validator(_skill_refs(), lambda: "global")(draft).ok is True
+    project = make_skill_validator(_skill_refs(), lambda: "project")(draft)
+    assert project.ok is False and any("project scope" in e for e in project.errors)
+
+
+def test_no_stated_scope_falls_back_to_the_conservative_superset():
+    """A caller with no scope to check against gets EVERY scope's names treated as taken — weaker for
+    the drafter, never wrong for the store."""
+    for name in ("rerun-flaky-ci", "this-repo-only"):
+        draft = _GOOD_SKILL.replace("name: rerun-flaky-ci", f"name: {name}")
+        assert make_skill_validator(_skill_refs())(draft).ok is False
+
+
+def test_an_unrecognized_scope_is_reported_and_falls_back_to_the_superset():
+    check = make_skill_validator(_skill_refs(), lambda: "gobal")(_GOOD_SKILL)
+    assert check.ok is False
+    assert any("scope must be one of ['global', 'project']" in e for e in check.errors)
+    assert any("collides" in e for e in check.errors)
+
+
+def test_a_memory_name_is_scope_filtered_without_changing_anything(snapshot):
+    """A memory/index ref is inherently project-scoped, so scope filtering is a no-op for memory."""
+    assert {ref.scope for ref in snapshot} == {"project"}
+    colliding = _GOOD_MEMORY.replace("name: merge-freeze", "name: project-conventions")
+    assert make_memory_validator(snapshot, lambda: "project")(colliding).ok is False
 
 
 def test_a_memory_name_does_not_collide_with_a_skill_of_the_same_name(snapshot):
@@ -148,10 +225,27 @@ def test_draft_skill_file_records_the_full_text_keyed_by_artifact_id(snapshot, t
     tool = make_draft_skill_file_tool(_chat(_GOOD_SKILL), snapshot)
     trace = str(tmp_path / "t.jsonl")
     with TraceRecorder(trace, run_id="r0"):
-        out = tool("re-running one flaky CI job", "the session did this twice")
+        out = tool("re-running one flaky CI job", "global", "the session did this twice")
     payload = _payloads(trace, "draft_skill_file")[0]
     assert out["ok"] is True and payload["kind"] == "skill"
     assert payload["draft"] == _GOOD_SKILL and payload["artifact_id"] == out["artifact_id"]
+    # The declared scope is part of the audit record: `key_fields["scope"]` on the candidate must
+    # match what was actually drafted against, and the trace is where a reviewer can see it.
+    assert payload["args"]["scope"] == "global"
+
+
+def test_the_skill_tool_passes_its_scope_to_the_validators_collision_check(tmp_path):
+    """The tool-level half of the scope-aware check: the SAME name is refused at one scope and
+    accepted at the other, decided by the `scope` argument the planner passed."""
+    index = [
+        ArtifactRef(
+            name="rerun-flaky-ci", description="d", kind="skill", path="/g/s.md", scope="global"
+        )
+    ]
+    tool = make_draft_skill_file_tool(_chat(_GOOD_SKILL), index)
+    with TraceRecorder(str(tmp_path / "t.jsonl"), run_id="r0"):
+        assert tool("p", "global", "e")["ok"] is False
+        assert tool("p", "project", "e")["ok"] is True
 
 
 def test_each_call_mints_a_distinct_artifact_id(snapshot):
@@ -201,7 +295,7 @@ def test_an_endpoint_error_is_surfaced_not_raised(snapshot, tmp_path):
     tool = make_draft_skill_file_tool(boom, snapshot)
     trace = str(tmp_path / "t.jsonl")
     with TraceRecorder(trace, run_id="r0"):
-        out = tool("p", "e")
+        out = tool("p", "global", "e")
     assert out["ok"] is False and any("endpoint down" in e for e in out["errors"])
     assert _payloads(trace, "draft_skill_file")[0]["endpoint_error"] == "endpoint down"
 
@@ -210,5 +304,5 @@ def test_the_tools_never_write_a_file(snapshot, memory_dir):
     """Write boundary: drafting returns TEXT ONLY — the memory dir is untouched."""
     before = sorted(p.name for p in memory_dir.iterdir())
     make_draft_memory_file_tool(_chat(_GOOD_MEMORY), snapshot)("t", "project", "e")
-    make_draft_skill_file_tool(_chat(_GOOD_SKILL), snapshot)("p", "e")
+    make_draft_skill_file_tool(_chat(_GOOD_SKILL), snapshot)("p", "global", "e")
     assert sorted(p.name for p in memory_dir.iterdir()) == before

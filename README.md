@@ -6,11 +6,42 @@ propose a distillation plan: what's safe to prune, what should be cross-referenc
 across sessions, and what durable knowledge is worth promoting into a standing memory file or a
 reusable Skill. It is a judgement engine, nothing more.
 
-**Status: the planner is wired and offline-tested; the apply step exists.** The five read-only
-planning tools, the Claude Code adapter, the assemble-on-read convention, and the human-gated
-`apply_plan` are implemented. Still missing: a CLI, transcript auto-discovery, skill-file
-enumeration, and any harness other than Claude Code. See `docs/DESIGN.md` for the full design and
-`CLAUDE.md` for the invariants.
+**Status: the planner is wired and offline-tested; the apply step exists; storage is auto-discovered.**
+The five read-only planning tools, the Claude Code adapter, the assemble-on-read convention, the
+human-gated `apply_plan`, and auto-discovery of Claude Code's real on-disk storage (transcripts +
+both skill scopes) are implemented. Still missing: a CLI, subagent-transcript distillation, and any
+harness other than Claude Code. See `docs/DESIGN.md` for the full design and `CLAUDE.md` for the
+invariants.
+
+## Point it at a project
+
+```python
+from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
+
+adapter = ClaudeCodeAdapter.for_project("/path/to/your/project")
+```
+
+That's the whole setup. `for_project` finds Claude Code's real storage for that project — every past
+conversation's transcript, the project's memory store, and the skills it can already see — instead of
+making you assemble paths and text by hand. Concretely: a project's storage lives at
+`~/.claude/projects/<the project's absolute path with every "/" replaced by "-">/`, each past
+conversation is one `<session-id>.jsonl` file in there, and skills live one directory per skill
+(`<name>/SKILL.md`) under `~/.claude/skills/` globally or `<project>/.claude/skills/` per project.
+
+Two things worth knowing, because they are honest limits rather than polish:
+
+- **Transcripts are rendered lossily on purpose.** A real long conversation's raw log is
+  multi-megabyte; feeding it back verbatim would defeat the point of distilling it. What survives is
+  what was said and decided — message text and thinking verbatim, tool calls as short
+  `[used tool: X]` labels, tool results as size labels. Subagent conversations are stored separately
+  and aren't read yet.
+- **The project-scoped skills location is not confirmed to work.** `~/.claude/skills/` is verified —
+  it's where your installed skills actually live. `<project>/.claude/skills/` is where this tool
+  writes a project-scoped skill, and it is a *reasoned guess*: nobody has verified that Claude Code
+  discovers a skill there. (The precedent is real — this repo's own `.claude/rules/` files are read
+  project-relative — but precedent isn't proof.) If you care, check it first: seed a test skill in a
+  project, start a fresh session there, and see whether it's offered. Until then, treat a
+  project-scoped promotion as "written where we believe it belongs," not "installed and picked up."
 
 ## It never touches your files
 
@@ -35,10 +66,18 @@ wrong:
 ## Applying a plan (the human-gated step)
 
 ```python
+from ctx_distillery.adapters.claude_code import global_skills_root, project_skills_root
 from ctx_distillery.apply import apply_plan
 
 # You read the plan first. Then you name the candidates you approve, by list index.
-for outcome in apply_plan("path/to/project/memory", assembled_plan, approved_ids={0, 3, 7}):
+for outcome in apply_plan(
+    "path/to/project/memory",
+    assembled_plan,
+    approved_ids={0, 3, 7},
+    # Only needed if you approved a skill promotion — and only the scope(s) you want to allow.
+    global_skills_dir=global_skills_root(),
+    project_skills_dir=project_skills_root("/path/to/your/project"),
+):
     print(outcome.index, outcome.action, outcome.status, outcome.reason)
 ```
 
@@ -56,9 +95,13 @@ path should be the default one. What `apply_plan` guarantees:
 - **A promotion is created with an exclusive create** (`O_CREAT|O_EXCL`), so a name collision is
   caught atomically instead of by a racy check-then-write. It refuses that one candidate with a
   clear message; overwriting is an explicit opt-in for that one candidate, never a global flag.
-- **Nothing is written outside your memory directory.** The derived path must resolve to a direct
-  child of it — the same containment check the read side uses, for the same reason (a symlink in the
-  store resolves elsewhere).
+- **Nothing is written outside the directory that kind of artifact belongs in.** A memory file must
+  resolve to a direct child of your memory directory — the same containment check the read side uses,
+  for the same reason (a symlink in the store resolves elsewhere). A *skill* has a different real
+  shape, so it gets its own check: it goes to `<skills root>/<slug>/SKILL.md`, and that must resolve
+  to exactly that, with nothing already sitting there. Which skills root comes from the candidate's
+  own declared scope — global or project — and if you didn't pass a root for that scope, the
+  promotion is refused rather than installed somewhere it wasn't invited.
 - **A candidate the run itself flagged is refused even if you approved it** — a draft that failed
   its format check, an empty draft, or any assembled candidate carrying problems.
 - **Every candidate comes back with an outcome**, including the ones you didn't approve. The step
@@ -71,7 +114,12 @@ Not every durable finding belongs in the same bucket. The planner distinguishes:
 - **Memory** — a fact about the user or the project: a decision that was made, a constraint that
   was discovered, a piece of state worth remembering ("this project froze merges on date X").
 - **Skill** — a reusable *procedure*: a workflow, technique, or recipe worth documenting once and
-  reusing on demand ("when doing Y, always check Z first, because of incident W").
+  reusing on demand ("when doing Y, always check Z first, because of incident W"). A skill also
+  declares a **scope**: `project` when it's tied to this project's own tooling and would be noise
+  elsewhere, `global` when the technique is genuinely portable. The two live in separate directories
+  and are separate namespaces — the same name existing in the other one is not a conflict. A skill
+  file needs `name` and `description` in its frontmatter and nothing else; `when_to_use` and
+  `dispatch_intent` are accepted if the draft offers them, never demanded.
 
 These are authored by two separate drafting tools and validated against two separate structural
 schemas (frontmatter shape, non-colliding name) — never one undifferentiated "promote" action.
