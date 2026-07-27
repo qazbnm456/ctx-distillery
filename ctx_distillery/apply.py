@@ -34,6 +34,26 @@ one is load-bearing rather than cosmetic:
    read side); the write side requires exactly the same thing of the computed target path before any
    write is attempted.
 
+A SIXTH gap, found by the later primary-source research into Claude Code's real storage
+(`docs/DESIGN.md`, "Architectural additions this research requires"), needed an architecture fix
+rather than another path string: a skill does NOT live as a flat `<slug>.md` under `memory_dir` at
+all. It is `<skills_root>/<slug>/SKILL.md` — one directory level deeper, under a COMPLETELY
+different root (`~/.claude/skills` for a global skill, `<project_dir>/.claude/skills` for a
+project-scoped one). The flat containment check above (`resolved.parent == root`) would have REFUSED
+every legitimate skill write. So:
+
+* `apply_plan` takes root paths PER KIND: `memory_dir` positionally as before, plus
+  `global_skills_dir=` / `project_skills_dir=`. Derive those with
+  `adapters.claude_code.global_skills_root()` / `project_skills_root(project_dir)`, the same
+  functions `ClaudeCodeAdapter.for_project` uses — one derivation, two consumers.
+* a `promote_to_skill` candidate declares WHICH root via `key_fields["scope"]` ("global" /
+  "project"), the same documented-convention pattern `prune`'s `target_path` uses. A missing or
+  bogus scope is refused, never defaulted — the two roots are different places on disk.
+* the skill target's containment check is its OWN function (`_skill_target`), a DIFFERENT check
+  rather than a relaxed version of the flat one: the slug must carry no path separator, must resolve
+  to exactly `<skills_root>/<slug>/SKILL.md`, and `<skills_root>/<slug>` must not already exist as
+  something else.
+
 `prune` ARCHIVES, never hard-deletes: "propose, apply cautiously, still recoverable" beats "propose,
 apply irreversibly" even at the human-approved step. A separate, explicit `purge` (deleting the
 archive for real) is future work.
@@ -45,6 +65,7 @@ leaves no record of what happened.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
@@ -52,8 +73,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import frontmatter
-from .adapters.base import ArtifactRef
-from .adapters.claude_code import INDEX_FILENAME, ClaudeCodeAdapter
+from .adapters.base import ARTIFACT_SCOPES, ArtifactRef
+from .adapters.claude_code import INDEX_FILENAME, SKILL_FILENAME, ClaudeCodeAdapter
 from .session import PROMOTION_ACTIONS, AssembledCandidate, AssembledPlan
 
 __all__ = [
@@ -62,6 +83,9 @@ __all__ = [
     "apply_plan",
     "slugify",
 ]
+
+#: The action whose target is a NESTED `<slug>/SKILL.md` under a skills root, not a flat file.
+SKILL_ACTION = "promote_to_skill"
 
 #: The archive directory's name, created as a SIBLING of `memory_dir` — never inside it (gap #4).
 ARCHIVE_DIRNAME = "_ctx_distillery_archive"
@@ -113,8 +137,10 @@ def apply_plan(
     approved_ids: Collection[int],
     *,
     overwrite_ids: Collection[int] = (),
+    global_skills_dir: str | Path | None = None,
+    project_skills_dir: str | Path | None = None,
 ) -> list[ApplyOutcome]:
-    """Apply the APPROVED candidates of `assembled_plan` into `memory_dir`. Returns one outcome each.
+    """Apply the APPROVED candidates of `assembled_plan`. Returns one outcome per candidate.
 
     * `approved_ids` — LIST INDICES into `assembled_plan.candidates`. Indices, not `artifact_id`,
       because `prune`/`keep` candidates carry `artifact_id=None`: the index is the one identifier
@@ -124,10 +150,21 @@ def apply_plan(
     * `overwrite_ids` — the per-candidate escape hatch for a name collision. It is a set of indices,
       never a global flag: an operator who decides ONE specific promotion may replace an existing
       file says so about that one candidate. Every index here must also be approved.
+    * ROOTS ARE PER KIND. `memory_dir` takes `promote_to_memory` writes and `prune` archives, exactly
+      as before. A `promote_to_skill` goes to `global_skills_dir` or `project_skills_dir` depending
+      on its own `key_fields["scope"]` — a skill is `<skills_root>/<slug>/SKILL.md`, never a flat
+      file in the memory store. Derive those roots with
+      `adapters.claude_code.global_skills_root()` / `project_skills_root(project_dir)`. Leaving one
+      unset REFUSES the skill promotions that would need it (with a message saying so) rather than
+      inventing a location — the caller decides where a skill may be installed, not this module.
     * Writes nothing for a candidate the caller did not approve, and re-checks the refusal
       conditions itself rather than trusting the caller to have filtered correctly.
     """
     root = Path(memory_dir).resolve()
+    skills_roots: dict[str, Path | None] = {
+        "global": Path(global_skills_dir).resolve() if global_skills_dir else None,
+        "project": Path(project_skills_dir).resolve() if project_skills_dir else None,
+    }
     candidates = list(assembled_plan.candidates)
     approved = _indices(approved_ids, len(candidates), "approved_ids")
     overwrite = _indices(overwrite_ids, len(candidates), "overwrite_ids")
@@ -154,7 +191,12 @@ def apply_plan(
         if blocker is not None:
             outcomes.append(_outcome(index, candidate, STATUS_REFUSED, blocker))
             continue
-        if candidate.action in PROMOTION_ACTIONS:
+        if candidate.action == SKILL_ACTION:
+            # A DIFFERENT write path, not a variant of the flat one — nested target, other root.
+            outcomes.append(
+                _promote_skill(index, candidate, skills_roots, overwrite=index in overwrite)
+            )
+        elif candidate.action in PROMOTION_ACTIONS:
             outcomes.append(
                 _promote(index, candidate, root, targets, overwrite=index in overwrite)
             )
@@ -299,6 +341,157 @@ def _promote(
         f"wrote {'(overwriting) ' if overwrite else ''}{len(candidate.draft or '')} chars",
         path=str(resolved),
     )
+
+
+# -- promote_to_skill: a NESTED target under a DIFFERENT root -------------------------------------
+
+
+def _promote_skill(
+    index: int,
+    candidate: AssembledCandidate,
+    skills_roots: dict[str, Path | None],
+    *,
+    overwrite: bool,
+) -> ApplyOutcome:
+    """Write the assembled draft to `<skills_root>/<slug>/SKILL.md` — gap #6.
+
+    Separate from `_promote` on purpose. A skill's real on-disk shape is a DIRECTORY per skill under
+    a root that is never `memory_dir`, so sharing the flat-file function would mean either bending
+    its containment check (the thing that makes the memory write safe) or carrying two meanings in
+    one code path. The scope→root selection is refused, never defaulted: guessing between a
+    user-global install and a project-local one is not a guess this module is entitled to make.
+    """
+    scope = (candidate.key_fields or {}).get("scope")
+    if not isinstance(scope, str) or scope not in ARTIFACT_SCOPES:
+        return _outcome(
+            index,
+            candidate,
+            STATUS_REFUSED,
+            f"a {SKILL_ACTION} candidate must set key_fields['scope'] to one of "
+            f"{list(ARTIFACT_SCOPES)}; got {scope!r}. The two scopes are different directories on "
+            f"disk, so this is never guessed at",
+        )
+    root = skills_roots.get(scope)
+    if root is None:
+        return _outcome(
+            index,
+            candidate,
+            STATUS_REFUSED,
+            f"no {scope} skills root was given to apply_plan, so there is nowhere to install this "
+            f"skill — pass {scope}_skills_dir= (see adapters.claude_code.global_skills_root / "
+            f"project_skills_root) if you intend to allow {scope} skill writes",
+        )
+
+    meta, _body = frontmatter.parse(candidate.draft or "")
+    name = meta.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return _outcome(
+            index,
+            candidate,
+            STATUS_REFUSED,
+            "the draft's frontmatter carries no usable `name`, so no skill directory can be derived",
+        )
+    slug = slugify(name)
+    if not slug:
+        return _outcome(
+            index,
+            candidate,
+            STATUS_REFUSED,
+            f"frontmatter name {name!r} slugifies to nothing — refusing rather than inventing a "
+            f"fallback skill directory name",
+        )
+
+    target, refusal = _skill_target(root, slug, overwrite=overwrite)
+    if target is None:
+        return _outcome(index, candidate, STATUS_REFUSED, refusal)
+
+    try:
+        # The skill DIRECTORY is part of the artifact here, unlike the flat memory path — but its own
+        # try, for the same reason `_promote` isolates the store's mkdir: a FileExistsError from a
+        # file sitting where the directory belongs must not be reported as the write's collision.
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return _outcome(
+            index, candidate, STATUS_REFUSED, f"could not create the skill directory {target.parent}: {exc}"
+        )
+    try:
+        with open(target, "w" if overwrite else "x", encoding="utf-8") as handle:
+            handle.write(candidate.draft or "")
+    except FileExistsError:
+        return _outcome(
+            index,
+            candidate,
+            STATUS_REFUSED,
+            f"name collision: {target} was created between the check and the write "
+            f"(exclusive-create refused it). Rename the draft, or approve this ONE candidate for "
+            f"overwrite explicitly.",
+        )
+    except OSError as exc:
+        return _outcome(index, candidate, STATUS_REFUSED, f"could not write {target}: {exc}")
+    return _outcome(
+        index,
+        candidate,
+        STATUS_APPLIED,
+        f"wrote {'(overwriting) ' if overwrite else ''}{len(candidate.draft or '')} chars to a "
+        f"{scope} skill",
+        path=str(target),
+    )
+
+
+def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | None, str]:
+    """`(<root>/<slug>/SKILL.md, "")`, or `(None, reason)` — the SKILL containment check.
+
+    A DIFFERENT check from the flat-file one, per `docs/DESIGN.md`, and in this order deliberately
+    (an escape attempt is diagnosed before a mere collision):
+
+    1. `slug` carries no path separator and is not a `.`/`..` traversal segment. `slugify` already
+       makes that impossible by character class; checked anyway, because this function's whole job is
+       to be the check — a future caller deriving the slug differently must still hit a wall here.
+    2. `<root>/<slug>` resolves to a DIRECT child of `root`. This is what catches an existing
+       symlinked skill directory pointing outside the store, the nested analogue of the flat check.
+    3. the file itself resolves to `<that directory>/SKILL.md` — so a symlinked `SKILL.md` inside an
+       otherwise-legitimate skill directory cannot redirect the write either.
+    4. `<root>/<slug>` does not already exist as something else. A NON-directory there is refused
+       outright (`overwrite` means "replace this draft's file", never "replace a file with a
+       directory"); an existing skill directory is a collision the caller may explicitly overwrite.
+    """
+    if slug in (".", "..") or any(sep and sep in slug for sep in (os.sep, os.altsep, "/", "\\")):
+        return None, (
+            f"skill slug {slug!r} contains a path separator or traversal segment — a skill "
+            f"directory name must be a single path component"
+        )
+    skill_dir = root / slug
+    try:
+        resolved_dir = skill_dir.resolve()
+        resolved_root = root.resolve()
+    except OSError as exc:  # pragma: no cover — an unresolvable path cannot be written
+        return None, f"could not resolve {skill_dir}: {exc}"
+    if resolved_dir.parent != resolved_root or resolved_dir.name != slug:
+        return None, (
+            f"refusing to write outside {resolved_root}: skill directory {slug!r} resolves to "
+            f"{resolved_dir}"
+        )
+    target = skill_dir / SKILL_FILENAME
+    try:
+        resolved = target.resolve()
+    except OSError as exc:  # pragma: no cover — as above
+        return None, f"could not resolve {target}: {exc}"
+    if resolved.parent != resolved_dir or resolved.name != SKILL_FILENAME:
+        return None, (
+            f"refusing to write outside {resolved_dir}: {SKILL_FILENAME} there resolves to {resolved}"
+        )
+    if skill_dir.is_symlink() or (skill_dir.exists() and not skill_dir.is_dir()):
+        return None, (
+            f"{skill_dir} already exists and is not a skill directory — refusing to replace it "
+            f"(overwrite only ever replaces a drafted {SKILL_FILENAME}, never a different kind of "
+            f"file)"
+        )
+    if skill_dir.is_dir() and not overwrite:
+        return None, (
+            f"name collision: the skill directory {skill_dir} already exists. Rename the draft, or "
+            f"approve this ONE candidate for overwrite explicitly."
+        )
+    return resolved, ""
 
 
 # -- prune ----------------------------------------------------------------------------------------

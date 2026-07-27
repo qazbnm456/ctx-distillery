@@ -35,7 +35,7 @@ from rlm_kit.tools.model import ChatFn, make_model_tool
 from rlm_kit.trace import record_tool_call
 
 from .. import frontmatter
-from ..adapters.base import ArtifactRef
+from ..adapters.base import ARTIFACT_SCOPES, ArtifactRef
 from ..adapters.claude_code import MEMORY_TYPES
 
 #: Consecutive invalid drafts before `make_model_tool`'s breaker short-circuits the model. A
@@ -57,8 +57,23 @@ class FormatCheck:
     meta: dict = field(default_factory=dict)
 
 
-def _existing_names(memory_index: Sequence[ArtifactRef], kind: str) -> set[str]:
-    return {ref.name.strip().lower() for ref in memory_index if ref.kind == kind}
+def _existing_names(
+    memory_index: Sequence[ArtifactRef], kind: str, scope: str | None = None
+) -> set[str]:
+    """Names already taken for `kind`, narrowed to one `scope` when given.
+
+    Scope-awareness lives HERE rather than only in the caller (`docs/DESIGN.md`, corrected per
+    audit): a skill exists at two independent scopes — user-global `~/.claude/skills/` and
+    project-relative `<project>/.claude/skills/` — and the same name in the OTHER scope is not a
+    collision at all. `scope=None` keeps the pre-existing behaviour (every scope), which is the
+    right conservative superset for a caller that has no scope to check against; a memory/index ref
+    is inherently project-scoped, so passing a scope for those changes nothing.
+    """
+    return {
+        ref.name.strip().lower()
+        for ref in memory_index
+        if ref.kind == kind and (scope is None or ref.scope == scope)
+    }
 
 
 def make_memory_validator(
@@ -123,28 +138,46 @@ def make_memory_validator(
     return validate
 
 
-def make_skill_validator(memory_index: Sequence[ArtifactRef]) -> Callable[[str], FormatCheck]:
+def make_skill_validator(
+    memory_index: Sequence[ArtifactRef], scope: Callable[[], str | None] | None = None
+) -> Callable[[str], FormatCheck]:
     """Build the deterministic skill-file format check (the Agent-Skills shape) over a SNAPSHOT.
 
-    The collision set is the snapshot's `kind="skill"` refs, which the Claude Code adapter does not
-    yet enumerate (a stated pass-1 gap) — so today this checks against an empty set: not wrong, just
-    weaker than it will be once skill enumeration exists.
+    REQUIRED frontmatter is `name` + `description`, and nothing more. `when_to_use` and
+    `dispatch_intent` are OPTIONAL: every real installed skill the research inspected carries them,
+    but all of those were a single author's one suite, so requiring them would generalize from N=1
+    while Anthropic's own documented convention requires neither (`docs/DESIGN.md`, corrected per
+    audit). They pass through verbatim when the model supplies them — the drafted bytes are what
+    `apply.py` writes — and their absence is never an error. `ClaudeCodeAdapter.schema_for("skill")`
+    reports this SAME shape; if one of the two changes, both must.
+
+    `scope`, when given, returns the scope ("global" / "project") the planner declared for the
+    CURRENT call, so the collision check runs against the RIGHT namespace: the two skill stores are
+    independent, and a global skill's name is not a collision for a project-scoped one. Without it,
+    every scope's names are treated as taken — the conservative superset.
     """
-    taken = _existing_names(memory_index, "skill")
 
     def validate(raw: str) -> FormatCheck:
         errors: list[str] = []
+        requested = scope() if scope is not None else None
+        if requested is not None and requested not in ARTIFACT_SCOPES:
+            errors.append(f"scope must be one of {list(ARTIFACT_SCOPES)}, got {requested!r}")
+            requested = None  # fall back to the superset rather than checking a namespace that
+            #                   does not exist; the bad scope is already reported above.
+        taken = _existing_names(memory_index, "skill", requested)
         text = raw or ""
         if not text.strip():
-            return FormatCheck(ok=False, errors=["empty draft: the model returned no text"])
+            return FormatCheck(ok=False, errors=errors + ["empty draft: the model returned no text"])
         meta, body = frontmatter.parse(text)
         if not meta:
             return FormatCheck(
                 ok=False,
-                errors=[
+                errors=errors
+                + [
                     (
                         "no parseable YAML frontmatter: a SKILL.md must open with a `---` block "
-                        "carrying `name` and `description`."
+                        "carrying `name` and `description` (`when_to_use` / `dispatch_intent` are "
+                        "optional extras)."
                     )
                 ],
             )
@@ -152,7 +185,8 @@ def make_skill_validator(memory_index: Sequence[ArtifactRef]) -> Callable[[str],
         if not isinstance(name, str) or not name.strip():
             errors.append("frontmatter `name` is missing or not a non-empty string")
         elif name.strip().lower() in taken:
-            errors.append(f"frontmatter `name` {name!r} collides with an existing skill")
+            where = f" in the {requested} scope" if requested else ""
+            errors.append(f"frontmatter `name` {name!r} collides with an existing skill{where}")
         description = meta.get("description")
         if not isinstance(description, str) or not description.strip():
             errors.append("frontmatter `description` is missing or not a non-empty string")
@@ -175,13 +209,24 @@ def _spec_for_memory(topic: str, memory_type: str, evidence: str) -> str:
     )
 
 
-def _spec_for_skill(procedure: str, evidence: str) -> str:
+def _spec_for_skill(procedure: str, scope: str, evidence: str) -> str:
+    """The MODEL-FACING prompt text — kept in lockstep with `make_skill_validator` on purpose.
+
+    `docs/DESIGN.md` calls out this exact drift risk: a model following prompt text that never
+    mentions `when_to_use` / `dispatch_intent` would simply never volunteer them (harmless while
+    they are OPTIONAL), but if this text is ever tightened to describe them as required it must match
+    what the validator actually enforces. So it names them here as optional extras, which is what the
+    validator and `schema_for("skill")` both say.
+    """
     return (
         f"Draft ONE SKILL.md documenting a reusable procedure.\n"
         f"procedure: {procedure}\n"
+        f"scope (where this skill would be installed): {scope}\n"
         f"evidence from the session transcript(s):\n{evidence}\n"
         f"Output the complete file: a YAML frontmatter block delimited by `---` lines carrying "
-        f"`name` and `description`, then the procedure body in markdown. Output nothing else."
+        f"`name` and `description` (REQUIRED), optionally also `when_to_use` and/or "
+        f"`dispatch_intent` if you have something concrete to say in them, then the procedure body "
+        f"in markdown. Output nothing else."
     )
 
 
@@ -249,29 +294,38 @@ def make_draft_memory_file_tool(
 
 def make_draft_skill_file_tool(
     chat_fn: ChatFn, memory_index: Sequence[ArtifactRef]
-) -> Callable[[str, str], dict]:
+) -> Callable[[str, str, str], dict]:
     """Wrap an injected `chat_fn` into the sync `draft_skill_file` tool (same shape as above)."""
     snapshot = list(memory_index)
+    # The current call's declared scope, read back by the validator so the collision check runs
+    # against the right namespace. Same plain-closure reasoning as `draft_memory_file`'s `pending`:
+    # dspy's interpreter invokes a tool with ONE plain synchronous call, so this call's validate()
+    # runs before the next call can overwrite it.
+    pending: dict[str, str | None] = {"scope": None}
     call_model = make_model_tool(
         chat_fn,
-        make_skill_validator(snapshot),
+        make_skill_validator(snapshot, lambda: pending["scope"]),
         max_consecutive_invalid=MAX_CONSECUTIVE_INVALID,
     )
 
-    def draft_skill_file(procedure: str, evidence: str) -> dict:
+    def draft_skill_file(procedure: str, scope: str, evidence: str) -> dict:
         """Draft the text of ONE candidate SKILL.md. Writes nothing — text only.
 
         Use this for a reusable HOW-TO discovered in the session (a workflow, technique, or recipe),
         as opposed to a fact about the user or project — that is ``draft_memory_file``'s job.
+        ``scope`` must be "global" (a portable technique, installed for every project) or "project"
+        (tied to THIS project's own tooling or conventions); it selects which existing-skill names
+        count as a collision, and must match the ``key_fields["scope"]`` you put on the candidate.
         Returns ``{"artifact_id", "ok", "errors", "draft"}``; put the ``artifact_id`` on the matching
         ``promote_to_skill`` candidate in your final plan rather than copying the text."""
         artifact_id = uuid.uuid4().hex[:12]
-        result = call_model(_spec_for_skill(procedure, evidence))
+        pending["scope"] = scope
+        result = call_model(_spec_for_skill(procedure, scope, evidence))
         draft = result.raw or ""
         errors = _errors_with_infra(result)
         record_tool_call(
             "draft_skill_file",
-            args={"procedure": procedure, "evidence": evidence},
+            args={"procedure": procedure, "scope": scope, "evidence": evidence},
             ok=result.ok,
             artifact_id=artifact_id,
             kind="skill",

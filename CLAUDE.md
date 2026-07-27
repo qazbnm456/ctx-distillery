@@ -79,7 +79,44 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
    PARENT is still `memory_dir` itself. Exact-match-on-request and containment-at-enumeration are
    two separate checks; neither substitutes for the other. `apply.py` mirrors the second one on the
    WRITE side with the identical test (`resolved.parent == memory_dir`), before any write.
-6. **`apply.py` is the ONE writer, and it is unreachable from the RLM.** It is human-called
+6. **Storage discovery is CONFIRMED for some paths and INHERITED/UNCONFIRMED for others — keep the
+   distinction visible.** `ClaudeCodeAdapter.for_project(project_dir)` locates the real storage, and
+   the evidence behind each part is NOT equal. Say so wherever it is described, and never upgrade one
+   to sound like another:
+   - **CONFIRMED**: `sanitize(project_dir)` (every `/` of the absolute path → `-`, nothing else
+     transformed) giving `~/.claude/projects/<sanitized>/`; transcripts as one `<session-id>.jsonl`
+     per past conversation, sibling to `memory/`; global skills at `~/.claude/skills/<name>/SKILL.md`
+     (each skill is a DIRECTORY, not a flat file).
+   - **INHERITED, not re-verified**: the `memory/` sub-path inside the project storage directory. No
+     `memory/` directory existed on the machine the research ran on; the convention is this project's
+     pre-existing assumption, carried forward honestly. Auto-discovery only needs the sanitization
+     rule to be right.
+   - **UNCONFIRMED, a hypothesis**: that Claude Code reads a project-repo-relative
+     `<project>/.claude/skills/<name>/SKILL.md` at all. Nobody has verified it (that needs a fresh
+     session in a directory seeded with a test skill, checking whether it is offered). It is motivated
+     by real precedent — this repo's own `.claude/rules/` IS read project-relative — and this project
+     TARGETS it for project-scoped promotions as the best available option. Do NOT write anything
+     anywhere that implies this pass proved it works, and do the empirical check before relying on the
+     project-skill path in anger.
+   The transcript RENDERING is deliberately LOSSY and its rules are pinned by tests: filter to
+   `user`/`assistant` FIRST (no other event type carries `message` at all), handle `message.content`
+   as either a plain string or a list of blocks, size a `tool_result` in chars OR blocks depending on
+   ITS OWN content's shape, and name an unrecognized block rather than dropping it. `isSidechain` is
+   filtered as a DEFENSIVE NO-OP — it was `false` on all 1216 real events checked, because subagent
+   messages live in separate files and are not inlined; do not re-describe it as "removing subagent
+   noise". Every discovery helper takes a `home=` override, and no test may read this machine's real
+   `~/.claude` (non-hermetic, and it would pull real user content into a fixture).
+7. **A skill's REQUIRED frontmatter is `name` + `description`, full stop — in all three places.**
+   `when_to_use` and `dispatch_intent` are OPTIONAL extras: accepted and passed through verbatim when
+   present, never required. Every real installed skill inspected carried them, but all of those were
+   one author's single suite, and Anthropic's documented Agent-Skills convention requires neither —
+   mandating them would generalize from N=1. The three encodings must move TOGETHER or they drift:
+   `make_skill_validator` (`tools/drafting.py`), `_spec_for_skill`'s model-facing PROMPT TEXT (same
+   module), and `ClaudeCodeAdapter.schema_for("skill")`. A skill draft is also collision-checked
+   SCOPE-AWARELY: `drafting._existing_names(index, "skill", scope)` filters by scope, because the
+   global and project stores are independent namespaces and the same name in the other scope is not a
+   collision.
+8. **`apply.py` is the ONE writer, and it is unreachable from the RLM.** It is human-called
    (`apply_plan(memory_dir, assembled_plan, approved_ids)`), takes EXPLICIT per-candidate
    approval (never "apply the whole plan"), re-scans `list_targets()` ITSELF at apply time as the
    sole collision/target authority (the run's snapshot is stale by construction), creates a
@@ -92,6 +129,19 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
    the exemption is guarded by `test_apply_is_unreachable_from_the_planner_path`, which asserts no
    module on the RLM path imports it. Never import `apply` from `task.py`, `session.py`, a tool, or
    `__init__.py`; never give the planner a way to reach it.
+9. **`apply_plan`'s roots are PER KIND, and a skill's containment check is its OWN check.** A skill is
+   NOT a flat `<slug>.md` in the memory store: it is `<skills_root>/<slug>/SKILL.md` — one directory
+   deeper, under a root that is never `memory_dir` (`~/.claude/skills` for global,
+   `<project>/.claude/skills` for project). The flat check (`resolved.parent == memory_dir`) would
+   REFUSE every legitimate skill write, so do not try to bend it: `_skill_target` is a separate
+   function asserting the slug carries no path separator, that `<root>/<slug>` resolves to a DIRECT
+   child of the root, that `SKILL.md` there resolves inside that directory, and that `<root>/<slug>`
+   does not already exist as something else. Which root is chosen comes from the candidate's own
+   `key_fields["scope"]` ("global"/"project"), a documented convention exactly like `prune`'s
+   `target_path` — a missing or bogus scope is REFUSED, never defaulted, and a scope whose root the
+   caller did not pass is refused too (the caller decides where a skill may be installed). Derive the
+   roots with `adapters.claude_code.global_skills_root()` / `project_skills_root(project_dir)` — the
+   same functions `for_project` uses, so the reader and the writer cannot disagree about a location.
 
 ## Known simplifications (stated, not hidden)
 
@@ -100,11 +150,21 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
   demand"; every in-scope harness is a local filesystem, so a plain read of the enumerated,
   already-resolved path is honest. Whether a future non-filesystem harness needs a different read
   seam is deferred to when that harness is actually designed.
-- **`ClaudeCodeAdapter` does not locate Claude Code's transcript storage.** The caller supplies
-  already-loaded transcript text; finding the real on-disk location is future work.
-- **`list_targets()` never returns `kind="skill"` entries yet** (that storage location hasn't been
-  inspected), so `draft_skill_file`'s collision check currently runs against an empty set — weaker
-  than it will be, not wrong.
+- **Transcript discovery reads the MAIN THREAD only.** `for_project` renders every
+  `<session-id>.jsonl` in the project's storage directory. A SUBAGENT's messages are not in those
+  files at all — they live in `subagents/agent-<id>.jsonl` (with a paired `.meta.json` carrying
+  `agentType`/`description`/`spawnDepth`). Distilling those is a real deferred extension: the same
+  file shape, a different glob. Not built.
+- **The project-scoped skills location is UNCONFIRMED** — see invariant 6. `<project>/.claude/skills/`
+  is where this project writes a project-scoped promotion, but whether Claude Code actually discovers
+  a skill there has never been verified. Treat a project-scoped write as "installed where we believe
+  it belongs", not as "installed and known to be picked up."
+- **A skill's `references/` and `scripts/` are out of scope.** A real skill directory may carry them;
+  `draft_skill_file` authors the `SKILL.md` body only, and `apply.py` writes only that one file.
+- **Skill enumeration is opt-in on the explicit constructor.** `ClaudeCodeAdapter(memory_dir)` (what
+  `apply.py`'s re-scan builds) enumerates no skills at all; pass `global_skills_dir=` /
+  `project_skills_dir=`, or use `for_project`, which resolves the real roots. Deliberate: a bare
+  adapter silently reaching into a real `~/.claude/skills` would make the re-scan machine-dependent.
 - **No CLI entry point**, and no adapter for any harness other than Claude Code. `apply_plan` is
   called from Python (or a REPL) by a human who has read the plan; a thin CLI wrapper over it is
   future work.
@@ -112,8 +172,9 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
   `_ctx_distillery_archive/`, never deleted; deleting the archive for real is a separate, explicit
   `purge` operation that does not exist yet. That is deliberate — "still recoverable" beats
   "irreversible" even at the human-approved step.
-- **`apply_plan` only knows the Claude Code layout** (it builds a `ClaudeCodeAdapter` directly).
-  Generalising the apply step across harnesses waits for a second adapter to actually exist.
+- **`apply_plan` only knows the Claude Code layout** (it builds a `ClaudeCodeAdapter` directly, and
+  its per-kind roots are Claude Code's). Generalising the apply step across harnesses waits for a
+  second adapter to actually exist.
 
 ## Harness scope
 

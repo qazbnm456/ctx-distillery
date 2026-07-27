@@ -47,6 +47,30 @@ def memory_dir(tmp_path):
 
 
 @pytest.fixture
+def claude_home(tmp_path):
+    """A FAKE `~/.claude`, with a real `skills/` directory.
+
+    Every discovery helper takes a `home=` override precisely so no test ever reads this machine's
+    actual `~/.claude` — that would be non-hermetic (it varies per developer and per CI runner) and
+    would pull real user content into a fixture. Nothing here touches the real home directory.
+    """
+    home = tmp_path / "fake-home" / ".claude"
+    (home / "skills").mkdir(parents=True)
+    return home
+
+
+def write_skill(root, slug, *, name=None, description="A reusable procedure.", extra=""):
+    """Create `<root>/<slug>/SKILL.md` the way Claude Code really stores a skill (a DIRECTORY)."""
+    directory = root / slug
+    directory.mkdir(parents=True, exist_ok=True)
+    text = (
+        f"---\nname: {name or slug}\ndescription: {description}\n{extra}---\nDo the thing.\n"
+    )
+    (directory / "SKILL.md").write_text(text, encoding="utf-8")
+    return directory / "SKILL.md"
+
+
+@pytest.fixture
 def adapter(memory_dir):
     return ClaudeCodeAdapter(memory_dir, transcripts=["user: hello\nassistant: hi\n"])
 
