@@ -149,11 +149,14 @@ def _skill_refs():
     ]
 
 
-def test_a_global_skill_name_is_not_a_collision_for_a_project_scoped_draft():
+def test_a_global_skill_name_is_not_a_FILE_collision_for_a_project_scoped_draft():
     """`~/.claude/skills/` and `<project>/.claude/skills/` are independent stores, so the SAME name
-    at the other scope is not a collision at all — checking the union would refuse a legitimate draft."""
+    at the other scope is not a file collision — but for a "project" draft it is now refused for the
+    DIFFERENT reason a same-name global skill would shadow it (below); a name unique to neither store
+    is the case that is actually clean."""
     validate = make_skill_validator(_skill_refs(), lambda: "project")
-    assert validate(_GOOD_SKILL).ok is True
+    unique = _GOOD_SKILL.replace("name: rerun-flaky-ci", "name: totally-unique-name")
+    assert validate(unique).ok is True
 
 
 def test_a_same_scope_name_still_collides():
@@ -183,6 +186,26 @@ def test_an_unrecognized_scope_is_reported_and_falls_back_to_the_superset():
     assert check.ok is False
     assert any("scope must be one of ['global', 'project']" in e for e in check.errors)
     assert any("collides" in e for e in check.errors)
+
+
+# -- precedence: a project skill sharing a name with a GLOBAL one is shadowed, not colliding ------
+
+
+def test_a_project_draft_matching_an_existing_global_skill_name_is_refused_as_shadowed():
+    """Not a file collision (the two stores are separate directories) but a real usability trap:
+    Claude Code's confirmed precedence means the personal/global skill would always win, so the
+    project skill drafted here would install and then never be reachable."""
+    check = make_skill_validator(_skill_refs(), lambda: "project")(_GOOD_SKILL)
+    assert check.ok is False
+    assert any("shadowed" in e and "precedence" in e for e in check.errors)
+
+
+def test_a_global_draft_is_never_flagged_as_shadowed_by_a_project_skill():
+    """Precedence runs one way only: nothing shadows a global skill, so a global-scoped draft is
+    checked for same-scope collisions only, exactly as before."""
+    draft = _GOOD_SKILL.replace("name: rerun-flaky-ci", "name: this-repo-only")
+    check = make_skill_validator(_skill_refs(), lambda: "global")(draft)
+    assert check.ok is True
 
 
 def test_a_memory_name_is_scope_filtered_without_changing_anything(snapshot):
@@ -235,8 +258,10 @@ def test_draft_skill_file_records_the_full_text_keyed_by_artifact_id(snapshot, t
 
 
 def test_the_skill_tool_passes_its_scope_to_the_validators_collision_check(tmp_path):
-    """The tool-level half of the scope-aware check: the SAME name is refused at one scope and
-    accepted at the other, decided by the `scope` argument the planner passed."""
+    """The tool-level half of the scope-aware check: a "global" request against an existing global
+    name refuses as a same-scope collision; a "project" request against that SAME name refuses too,
+    but for the shadowing reason (below) rather than a file collision — the tool routes `scope`
+    through to the validator either way."""
     index = [
         ArtifactRef(
             name="rerun-flaky-ci", description="d", kind="skill", path="/g/s.md", scope="global"
@@ -245,7 +270,9 @@ def test_the_skill_tool_passes_its_scope_to_the_validators_collision_check(tmp_p
     tool = make_draft_skill_file_tool(_chat(_GOOD_SKILL), index)
     with TraceRecorder(str(tmp_path / "t.jsonl"), run_id="r0"):
         assert tool("p", "global", "e")["ok"] is False
-        assert tool("p", "project", "e")["ok"] is True
+        project_result = tool("p", "project", "e")
+        assert project_result["ok"] is False
+        assert any("shadowed" in e for e in project_result["errors"])
 
 
 def test_each_call_mints_a_distinct_artifact_id(snapshot):
