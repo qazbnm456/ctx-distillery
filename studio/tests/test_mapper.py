@@ -1,0 +1,164 @@
+"""The trace-event -> SSE mapping (the public event surface), verified per event type. Pure — no
+server, mirroring `diff_sentry_studio.mapper`'s own test-file separation. Hand-rolled event dicts
+here are fine (unlike `test_app.py`) because `to_event` is a pure function over `{type, payload}`
+shapes already pinned by `rlm_kit`'s own trace/v1 contract — no `TraceRecorder` round trip is needed
+to exercise its branches."""
+
+from ctx_distillery_studio.mapper import _scalar_fields, to_event
+
+
+def test_run_start_carries_transcripts_memory_artifacts_and_a_rubric_hint():
+    ev = to_event(
+        {
+            "type": "run_start",
+            "payload": {
+                "meta": {
+                    "transcripts": 2,
+                    "memory_artifacts": 5,
+                    "rubric": [
+                        {"name": "n1", "category": "TF", "weight": 1.0, "description": "d"},
+                        {"name": "n2", "category": "TA", "weight": 1.0, "description": "d"},
+                    ],
+                }
+            },
+        }
+    )
+    assert ev["event"] == "distill.run.created"
+    assert ev["data"]["transcripts"] == 2 and ev["data"]["memory_artifacts"] == 5
+    assert ev["data"]["rubric"] == {"categories": ["TA", "TF"], "criteria": 2}
+
+
+def test_run_start_rubric_hint_empty_when_absent():
+    ev = to_event({"type": "run_start", "payload": {"meta": {}}})
+    assert ev["data"]["rubric"] == {"categories": [], "criteria": 0}
+    assert ev["data"]["transcripts"] is None and ev["data"]["memory_artifacts"] is None
+
+
+def test_main_step_is_a_plan_step_carrying_the_planners_own_reasoning():
+    ev = to_event({"type": "main_step", "payload": {"turn": 3, "reasoning": "read first", "code": "x = 1"}})
+    assert ev == {
+        "event": "distill.plan.step",
+        "data": {"turn": 3, "reasoning": "read first", "has_code": True},
+    }
+
+
+def test_main_step_has_code_false_when_no_code_was_emitted():
+    ev = to_event({"type": "main_step", "payload": {"turn": 0, "reasoning": "thinking", "code": None}})
+    assert ev["data"]["has_code"] is False
+
+
+def test_sub_call_is_a_sub_lm_call_preferring_processed_over_raw():
+    # rlm-kit's sub-LM records input/processed/raw — NOT question/answer.
+    ev = to_event(
+        {"type": "sub_call", "payload": {"input": "escalate this", "processed": "cleaned", "raw": "dirty"}}
+    )
+    assert ev["event"] == "distill.sub_lm.call"
+    assert ev["data"] == {"input": "escalate this", "processed_or_raw": "cleaned"}
+
+
+def test_sub_call_falls_back_to_raw_when_no_processed_output():
+    ev = to_event({"type": "sub_call", "payload": {"input": "escalate this", "raw": "dirty"}})
+    assert ev["data"]["processed_or_raw"] == "dirty"
+
+
+def test_evidence_read_tools_are_surfaced_with_scalar_fields():
+    for tool in ("list_memory_files", "read_memory_file", "read_transcript_chunk"):
+        ev = to_event(
+            {
+                "type": "tool_call",
+                "payload": {
+                    "tool": tool,
+                    "args": {"path": "irrelevant"},
+                    "ok": True,
+                    "count": 3,
+                    "kinds": ["memory", "skill"],
+                    "chars": 120,
+                },
+            }
+        )
+        assert ev["event"] == "distill.evidence.read"
+        assert ev["data"]["tool"] == tool
+        assert ev["data"]["count"] == 3 and ev["data"]["chars"] == 120
+        # dict/list-shaped fields (args, kinds) are dropped — scalars only.
+        assert "args" not in ev["data"] and "kinds" not in ev["data"]
+
+
+def test_draft_created_never_leaks_the_full_draft_text():
+    ev = to_event(
+        {
+            "type": "tool_call",
+            "payload": {
+                "tool": "draft_memory_file",
+                "artifact_id": "a1",
+                "ok": True,
+                "errors": [],
+                "circuit_broken": False,
+                "draft": "---\nname: x\n---\nsecret body text",
+            },
+        }
+    )
+    assert ev["event"] == "distill.draft.created"
+    assert ev["data"] == {
+        "tool": "draft_memory_file",
+        "artifact_id": "a1",
+        "ok": True,
+        "errors": [],
+        "circuit_broken": False,
+    }
+    assert "draft" not in ev["data"]
+    assert "secret body text" not in str(ev["data"])
+
+
+def test_draft_skill_file_is_also_a_draft_created_event():
+    ev = to_event(
+        {
+            "type": "tool_call",
+            "payload": {
+                "tool": "draft_skill_file",
+                "artifact_id": "s1",
+                "ok": False,
+                "errors": ["bad frontmatter"],
+                "circuit_broken": True,
+            },
+        }
+    )
+    assert ev["event"] == "distill.draft.created"
+    assert ev["data"]["ok"] is False and ev["data"]["circuit_broken"] is True
+    assert ev["data"]["errors"] == ["bad frontmatter"]
+
+
+def test_an_unrecognized_tool_call_is_skipped_never_guessed_at():
+    assert to_event({"type": "tool_call", "payload": {"tool": "mystery_tool", "ok": True}}) is None
+
+
+def test_result_run_end_and_final():
+    assert to_event({"type": "result", "payload": {"output": {}}}) == {"event": "distill.plan.done", "data": {}}
+    assert to_event({"type": "run_end", "payload": {"ok": True}}) == {
+        "event": "distill.run.completed",
+        "data": {},
+    }
+    # `final` is SKIPPED: a real finished trace holds BOTH `final` (record_main_trajectory) and
+    # `run_end` (the recorder's __exit__) — mapping both would emit the terminal event TWICE per
+    # replay, and `final` lands BEFORE `result`. `run_end` is the sole terminal.
+    assert to_event({"type": "final", "payload": {"final_reasoning": "done"}}) is None
+
+
+def test_unknown_event_type_is_skipped():
+    assert to_event({"type": "something_else", "payload": {}}) is None
+
+
+def test_scalar_fields_drops_tool_ok_args_and_any_bulky_or_nested_value():
+    out = _scalar_fields(
+        {
+            "tool": "read_memory_file",
+            "ok": True,
+            "args": {"path": "x"},
+            "name": "conventions",
+            "kind": "memory",
+            "chars": 42,
+            "truncated": False,
+            "long": "x" * 500,
+            "nested_list": [1, 2, 3],
+        }
+    )
+    assert out == {"name": "conventions", "kind": "memory", "chars": 42, "truncated": False}

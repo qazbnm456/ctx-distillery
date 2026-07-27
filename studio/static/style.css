@@ -1,0 +1,152 @@
+/* ctx-distillery-studio — zero-build vanilla CSS; DESIGN.md is the contract. Mono-forward, same
+   visual family as the sibling studios (dark slate + a single signal accent), but this project's
+   own content — a KNOWN SIMPLIFICATION vs. diff-sentry-studio's literal precedent: no vendored
+   JetBrains Mono binary is copied into this new package (avoids binary bloat in a fresh repo); the
+   font-family stack below still PREFERS "JetBrains Mono" if the visitor's system has it installed,
+   falling back to the platform's own monospace stack otherwise. */
+
+:root {
+  --bg:#0a0e13; --surface-1:#121a24; --surface-2:#1a2431; --surface-3:#232f3e;
+  --border:#313e4d; --border-strong:#45566a;
+  --text:#e8eef4; --text-dim:#a2b4c4; --text-faint:#6a7c8d;
+  --signal:#22d3c2; --signal-dim:#3fb3a8; --signal-glow:rgba(34,211,194,0.24);
+  --ok:#3fb950; --bad:#f85149; --warn:#d29922;
+  --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --radius:2px;
+}
+:root[data-theme="light"] {
+  --bg:#eef2f6; --surface-1:#ffffff; --surface-2:#f4f7fa; --surface-3:#e7edf3;
+  --border:#cdd8e2; --border-strong:#aebccb;
+  --text:#132029; --text-dim:#41566a; --text-faint:#6a7c8d;
+  --signal:#0f9c8f; --signal-dim:#0d8a7f; --signal-glow:rgba(15,156,143,0.18);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:#eef2f6; --surface-1:#ffffff; --surface-2:#f4f7fa; --surface-3:#e7edf3;
+    --border:#cdd8e2; --border-strong:#aebccb;
+    --text:#132029; --text-dim:#41566a; --text-faint:#6a7c8d;
+    --signal:#0f9c8f; --signal-dim:#0d8a7f; --signal-glow:rgba(15,156,143,0.18);
+  }
+}
+
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+html, body { margin:0; height:100%; }
+body {
+  background:var(--bg); color:var(--text); font-family:var(--mono); font-size:15px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.dim { color:var(--text-faint); }
+button { font-family:var(--mono); cursor:pointer; }
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+.app-header {
+  position:sticky; top:0; z-index:20; height:56px; display:flex; align-items:center;
+  justify-content:space-between; padding:0 24px; gap:16px;
+  background:color-mix(in srgb, var(--bg) 88%, transparent); border-bottom:1px solid var(--border);
+}
+.wordmark { font-weight:700; font-size:1.25rem; letter-spacing:.02em; white-space:nowrap; }
+.wordmark .mark { color:var(--signal); }
+.header-right { display:flex; align-items:center; gap:12px; min-width:0; }
+.chip {
+  display:inline-flex; align-items:center; gap:6px; min-width:0; padding:4px 9px; border-radius:999px;
+  background:var(--surface-2); border:1px solid var(--border); font-size:.72rem; color:var(--text-dim);
+}
+.chip .role-name { text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); flex:none; }
+.chip .role-model { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:22ch; }
+.theme-toggle {
+  width:32px; height:32px; border-radius:var(--radius); background:var(--surface-2);
+  border:1px solid var(--border); color:var(--text-dim); font-size:1rem; flex:none;
+}
+.theme-toggle:hover { border-color:var(--border-strong); color:var(--text); }
+
+/* ── layout ─────────────────────────────────────────────────────────────── */
+.layout {
+  display:grid; grid-template-columns:320px minmax(0,1fr) 300px; gap:16px;
+  max-width:1720px; margin:0 auto; padding:20px 24px;
+  height:calc(100vh - 56px);
+}
+.rail { display:flex; flex-direction:column; gap:16px; min-height:0; }
+.panel { background:var(--surface-1); border:1px solid var(--border); border-radius:var(--radius); padding:12px; overflow-y:auto; }
+.panel-label {
+  font-size:.6875rem; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint);
+  margin-bottom:10px;
+}
+
+/* ── load box ───────────────────────────────────────────────────────────── */
+.row { display:flex; gap:8px; align-items:center; }
+.text-input {
+  width:100%; padding:8px 10px; border-radius:var(--radius); background:var(--surface-2);
+  border:1px solid var(--border); color:var(--text); font-family:var(--mono); font-size:.82rem;
+  outline:none;
+}
+.text-input:focus { border-color:var(--signal); box-shadow:0 0 0 2px var(--signal-glow); }
+.btn {
+  padding:8px 12px; border-radius:var(--radius); border:1px solid var(--border); background:var(--surface-2);
+  color:var(--text); font-size:.8rem; white-space:nowrap;
+}
+.btn-primary { background:var(--signal); border-color:var(--signal); color:#04211e; font-weight:700; }
+.btn-primary:hover { box-shadow:0 0 0 2px var(--signal-glow); }
+.arrow { margin-left:2px; }
+.hint { margin-top:8px; font-size:.7rem; color:var(--text-faint); }
+
+/* ── live feed ──────────────────────────────────────────────────────────── */
+.feed-panel { flex:1; min-height:220px; display:flex; flex-direction:column; }
+.feed { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
+.feed-row {
+  display:flex; gap:8px; padding:8px 6px; border-radius:var(--radius); align-items:flex-start;
+  border-left:2px solid var(--border);
+}
+.feed-row.enter { animation:rowin .16s ease-out; }
+@keyframes rowin { from { opacity:0; transform:translateY(3px); } }
+.feed-row.fam-ok { border-left-color:var(--ok); }
+.feed-row.fam-bad { border-left-color:var(--bad); }
+.fr-badge {
+  flex:none; font-size:.66rem; text-transform:uppercase; letter-spacing:.03em; color:var(--text-faint);
+  padding:2px 6px; background:var(--surface-2); border-radius:999px; white-space:nowrap;
+}
+.fr-body { min-width:0; flex:1; }
+.fr-line { font-size:.82rem; color:var(--text); }
+.fr-reasoning { font-size:.76rem; color:var(--text-dim); white-space:pre-wrap; margin-top:2px; }
+.fr-fields { font-size:.74rem; color:var(--text-faint); word-break:break-word; margin-top:2px; }
+
+/* ── plan panel (the money shot) ───────────────────────────────────────── */
+.plan-panel { min-width:0; }
+.plan-empty { color:var(--text-faint); font-size:.85rem; padding:12px 4px; }
+.plan-list { display:flex; flex-direction:column; gap:12px; }
+.candidate-row {
+  border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; background:var(--surface-2);
+}
+.candidate-row.has-problems { border-color:var(--bad); }
+.candidate-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.candidate-index { color:var(--text-faint); font-size:.75rem; }
+.candidate-action {
+  font-size:.72rem; text-transform:uppercase; letter-spacing:.03em; padding:2px 8px; border-radius:999px;
+  background:var(--surface-3); color:var(--text-dim);
+}
+.candidate-action.action-promote_to_memory, .candidate-action.action-promote_to_skill { color:var(--signal); }
+.candidate-action.action-prune { color:var(--warn); }
+.candidate-artifact { font-size:.72rem; color:var(--text-faint); }
+.chip-ok, .chip-bad { font-size:.7rem; padding:1px 7px; border-radius:999px; }
+.chip-ok { color:var(--ok); background:color-mix(in srgb, var(--ok) 16%, transparent); }
+.chip-bad { color:var(--bad); background:color-mix(in srgb, var(--bad) 16%, transparent); }
+.candidate-key-fields { margin-top:6px; font-size:.74rem; color:var(--text-dim); word-break:break-word; }
+.candidate-draft {
+  margin-top:8px; padding:10px; background:var(--surface-1); border:1px solid var(--border);
+  border-radius:var(--radius); font-family:var(--mono); font-size:.78rem; white-space:pre-wrap;
+  max-height:260px; overflow-y:auto; color:var(--text);
+}
+.candidate-problems { margin-top:8px; }
+.problem-line { font-size:.76rem; color:var(--bad); }
+.run-problems { margin-top:4px; padding:8px; border:1px solid var(--bad); border-radius:var(--radius); }
+
+/* ── rubric panel ───────────────────────────────────────────────────────── */
+.rubric-panel { min-width:0; }
+.rubric-empty { color:var(--text-faint); font-size:.85rem; }
+.rubric-category { margin-bottom:14px; }
+.rubric-category-label {
+  font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--signal); margin-bottom:6px;
+}
+.rubric-fact { display:flex; justify-content:space-between; gap:8px; font-size:.76rem; padding:2px 0; }
+.rubric-fact-key { color:var(--text-dim); }
+.rubric-fact-value { color:var(--text); text-align:right; word-break:break-word; }

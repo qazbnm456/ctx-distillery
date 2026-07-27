@@ -97,7 +97,7 @@ def rubric_from_meta(events: list[dict]) -> RubricCriteria:
     return _kit_rubric_from_meta(events, categories=CRITERION_CATEGORIES)
 
 
-def _plan_from_events(events: list[dict]):
+def plan_from_events(events: list[dict]):
     """Reconstruct the `DistillPlan` from the run's LAST `result` event.
 
     `trace_facts`'s single-arg signature (matching `diff_sentry.rubric.trace_facts`) has no `plan=`
@@ -137,7 +137,7 @@ def trace_facts(events: list[dict]) -> dict:
     """
     from .session import assemble
 
-    plan = _plan_from_events(events)
+    plan = plan_from_events(events)
     a = assemble(events, plan)
     read_steps = [
         e.get("step_id")

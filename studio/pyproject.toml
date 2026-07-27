@@ -1,0 +1,30 @@
+[project]
+name = "ctx-distillery-studio"
+version = "0.1.0"
+description = "SSE server + web frontend for ctx-distillery — replay a distillation run's trace, and render each promotion candidate's drafted text next to its plan entry (the reviewer's money shot before apply_plan)."
+requires-python = ">=3.11"
+# Unlike diff-sentry-studio (whose REPLAY mode needs no diff-sentry import at all, since diff-sentry
+# writes a full pre-rendered response JSON), ctx-distillery writes NO such artifact — replay itself
+# must call session.assemble/rubric.trace_facts directly. So ctx-distillery is a CORE dependency
+# here, not behind a `live` extra — there is no live extra, because there is no live endpoint (v1).
+dependencies = [
+    "ctx-distillery",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.uv.sources]
+ctx-distillery = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ctx_distillery_studio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
