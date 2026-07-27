@@ -158,3 +158,22 @@ neither). Three encodings must move together or they drift: `make_skill_validato
 one exemption. What makes that safe is not the absence of a write call but its unreachability: no
 module on the RLM path imports `apply`, and a test asserts it. Never import it from `task.py`,
 `session.py`, a tool, or `__init__.py`.
+
+## Layout
+
+```
+ctx_distillery/
+  README.md            # this file — module map, internals, testing
+  task.py              # DistillSession(RLMTask) — signature, output_model, instructions
+  session.py           # run_distillation (ingest once, redact once, run once) + assemble()
+  apply.py             # apply_plan — the human-gated writer, outside the RLM entirely
+  redact.py            # host-side redaction, applied before any text reaches the model
+  frontmatter.py       # nested-YAML frontmatter parsing (memory + skill shapes)
+  tools/               # the five READ-ONLY planner tools
+  adapters/
+    base.py            # the read-only harness-adapter seam
+    claude_code.py     # the one in-scope adapter
+docs/
+  DESIGN.md            # the full design doc this project is built against
+tests/                 # fully offline: no live model, no Deno, no network
+```

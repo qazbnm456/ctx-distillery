@@ -21,12 +21,11 @@ from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
 adapter = ClaudeCodeAdapter.for_project("/path/to/your/project")
 ```
 
-That's the whole setup. `for_project` finds Claude Code's real storage for that project — every past
-conversation's transcript, the project's memory store, and the skills it can already see — instead of
-making you assemble paths and text by hand. Concretely: a project's storage lives at
-`~/.claude/projects/<the project's absolute path with every "/" replaced by "-">/`, each past
-conversation is one `<session-id>.jsonl` file in there, and skills live one directory per skill
-(`<name>/SKILL.md`) under `~/.claude/skills/` globally or `<project>/.claude/skills/` per project.
+That's the whole setup. `for_project` finds Claude Code's real on-disk storage for that project —
+every past conversation's transcript, the project's memory store, and the skills it can already see
+— instead of making you assemble paths and text by hand. See the guide's
+[Storage auto-discovery](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#storage-auto-discovery-claudecodeadapterfor_project)
+for exactly what's derived and how confirmed each piece is.
 
 Two things worth knowing, because they are honest limits rather than polish:
 
@@ -35,13 +34,10 @@ Two things worth knowing, because they are honest limits rather than polish:
   what was said and decided — message text and thinking verbatim, tool calls as short
   `[used tool: X]` labels, tool results as size labels. Subagent conversations are stored separately
   and aren't read yet.
-- **The project-scoped skills location is not confirmed to work.** `~/.claude/skills/` is verified —
-  it's where your installed skills actually live. `<project>/.claude/skills/` is where this tool
-  writes a project-scoped skill, and it is a *reasoned guess*: nobody has verified that Claude Code
-  discovers a skill there. (The precedent is real — this repo's own `.claude/rules/` files are read
-  project-relative — but precedent isn't proof.) If you care, check it first: seed a test skill in a
-  project, start a fresh session there, and see whether it's offered. Until then, treat a
-  project-scoped promotion as "written where we believe it belongs," not "installed and picked up."
+- **A project skill can be silently shadowed by a global one of the same name.** Claude Code gives a
+  personal/global skill precedence over a project skill sharing its name — confirmed by a direct
+  empirical test, not assumed — so both `draft_skill_file` and `apply_plan` refuse a project-scope
+  name a global skill already holds, rather than installing a skill that could never be reached.
 
 ## It never touches your files
 
@@ -81,31 +77,15 @@ for outcome in apply_plan(
     print(outcome.index, outcome.action, outcome.status, outcome.reason)
 ```
 
-There is deliberately no "apply everything" call. A reviewer who approves eight of ten candidates
-shouldn't have to fight the API to reject the other two — for an irreversible operation the safe
-path should be the default one. What `apply_plan` guarantees:
-
-- **A prune archives, it never deletes.** The file is moved to
-  `_ctx_distillery_archive/<timestamp>-<name>` *beside* your memory directory — outside it, so no
-  future scan mistakes an archived file for a live one. Deleting the archive for real would be a
-  separate `purge` step, which doesn't exist yet.
-- **It re-scans your memory store itself, at apply time.** The plan you're applying may be hours or
-  days old; its own view of what exists is stale by construction, so it is never used as the
-  authority for "does this name already exist" or "is this prune target real."
-- **A promotion is created with an exclusive create** (`O_CREAT|O_EXCL`), so a name collision is
-  caught atomically instead of by a racy check-then-write. It refuses that one candidate with a
-  clear message; overwriting is an explicit opt-in for that one candidate, never a global flag.
-- **Nothing is written outside the directory that kind of artifact belongs in.** A memory file must
-  resolve to a direct child of your memory directory — the same containment check the read side uses,
-  for the same reason (a symlink in the store resolves elsewhere). A *skill* has a different real
-  shape, so it gets its own check: it goes to `<skills root>/<slug>/SKILL.md`, and that must resolve
-  to exactly that, with nothing already sitting there. Which skills root comes from the candidate's
-  own declared scope — global or project — and if you didn't pass a root for that scope, the
-  promotion is refused rather than installed somewhere it wasn't invited.
-- **A candidate the run itself flagged is refused even if you approved it** — a draft that failed
-  its format check, an empty draft, or any assembled candidate carrying problems.
-- **Every candidate comes back with an outcome**, including the ones you didn't approve. The step
-  that mutates disk should be the last place to keep no record.
+There is deliberately no "apply everything" call — for an irreversible operation, the safe path
+should be the default one. `apply_plan` archives instead of deleting on a prune, re-scans the real
+store at apply time rather than trusting the plan's own (possibly stale) snapshot, and refuses a
+candidate the run itself flagged even if you approved it. Every candidate comes back with an
+outcome, including the ones you didn't approve — the step that mutates disk should be the last
+place to keep no record. See the guide's
+[`apply.py` — the only module that writes](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#applypy--the-only-module-that-writes)
+for the exact write-safety guarantees (exclusive create, per-kind containment checks, per-scope
+skill roots).
 
 ## Two distinct promotion targets
 
@@ -122,10 +102,10 @@ Not every durable finding belongs in the same bucket. The planner distinguishes:
   `dispatch_intent` are accepted if the draft offers them, never demanded.
 
 These are authored by two separate drafting tools and validated against two separate structural
-schemas (frontmatter shape, non-colliding name) — never one undifferentiated "promote" action.
-The plan's own output only ever carries `{action, artifact_id, key_fields}` per candidate; the
-actual drafted text is re-sourced, on read, from the tool-call event that produced it — never
-trusted from the plan's own claim about what it wrote.
+schemas — never one undifferentiated "promote" action. The drafted text is never trusted from the
+plan's own claim about what it wrote; see the guide's
+[The shape of one run](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#the-shape-of-one-run)
+for the assemble-on-read mechanics.
 
 ## Harness-agnostic by design — Claude Code today
 
@@ -144,23 +124,19 @@ dressed as design, not genuine multi-harness support. When one of them is actual
 honest next step is the same one taken for Claude Code: read its real current format first, then
 write the adapter.
 
-## Project layout
+## Documentation — the guide
 
-```
-ctx_distillery/
-  task.py              # DistillSession(RLMTask) — signature, output_model, instructions
-  session.py           # run_distillation (ingest once, redact once, run once) + assemble()
-  apply.py             # apply_plan — the human-gated writer, outside the RLM entirely
-  redact.py            # host-side redaction, applied before any text reaches the model
-  frontmatter.py       # nested-YAML frontmatter parsing (memory + skill shapes)
-  tools/               # the five READ-ONLY planner tools
-  adapters/
-    base.py            # the read-only harness-adapter seam
-    claude_code.py     # the one in-scope adapter
-docs/
-  DESIGN.md            # the full design doc this project is built against
-tests/                 # fully offline: no live model, no Deno, no network
-```
+The deep reference lives in the package doc, [`ctx_distillery/README.md`](ctx_distillery/README.md)
+— the module map, the storage-discovery derivations and their confirmation status, and the exact
+write-safety guarantees `apply_plan` enforces:
+
+- [The shape of one run](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#the-shape-of-one-run) — what each module owns, end to end
+- [Storage auto-discovery](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#storage-auto-discovery-claudecodeadapterfor_project) — the derivations, and which are confirmed vs. inherited
+- [`apply.py` — the only module that writes](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#applypy--the-only-module-that-writes) — collision handling, containment checks, the skill-shadowing refusal
+- [Why it may write when nothing else in the package may](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#why-it-may-write-when-nothing-else-in-the-package-may) — the unreachability guarantee, test-enforced
+- [Layout](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#layout) — the module-by-module tree
+
+For the full design and rationale, see [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Relationship to rlm-kit
 
