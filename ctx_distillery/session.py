@@ -25,6 +25,7 @@ from rlm_kit.trace import EVENT_TOOL_CALL, TraceRecorder, load_events
 
 from .adapters.base import ArtifactRef, HarnessAdapter
 from .redact import redact_transcript
+from .rubric import default_rubric, rubric_to_meta
 from .task import DistillPlan, DistillSession
 
 #: Which drafting tool authors each promotion action's artifact.
@@ -197,6 +198,7 @@ async def run_distillation(
     )
     rid = run_id or uuid.uuid4().hex[:12]
     run_meta = {"transcripts": len(redacted_transcripts), "memory_artifacts": len(memory_index)}
+    run_meta["rubric"] = rubric_to_meta(default_rubric())
     run_meta.update(meta or {})
     with TraceRecorder(trace_path, run_id=rid, meta=run_meta):
         plan = await task.arun(
