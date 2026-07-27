@@ -12,6 +12,38 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **ATLAS rubric facts + `ctx-distillery-eval` (Phase 1 of the rubric/eval/studio initiative)** —
+  `ctx_distillery/rubric.py` (new): a reward-free, deterministic TF/TA/TG/PA rubric on top of
+  `rlm_kit.rubric`. `default_rubric()` is the same fixed four-criterion skeleton every run carries
+  (`DistillSession`'s task shape never varies); `trace_facts(events)` sources candidate-level facts
+  from `session.assemble()`'s output (never re-derived from raw events) plus two trace-only facts
+  `assemble` doesn't surface — `min_read_step`/`min_draft_step` (the MINIMUM `step_id` among
+  evidence-gathering vs. drafting tool_calls, a real ordering fact, not an inference from two
+  counts) and `any_circuit_broken`. `trace_facts` takes only `events` (matching
+  `diff_sentry.rubric.trace_facts`'s single-arg signature), so it reconstructs the `DistillPlan`
+  itself via `_plan_from_events` (the run's LAST `EVENT_RESULT` payload) before calling `assemble`.
+  Adds `n_bad_skill_scope` (a `promote_to_skill` candidate whose `key_fields["scope"]` isn't
+  `"project"`/`"global"`) as its own dedicated PA fact, since `session.assemble()` never inspects
+  `key_fields` at all. `session.run_distillation` now records the rubric into `run_meta["rubric"]`
+  (`rubric_to_meta(default_rubric())`) on every run — two new lines in `session.py`, per the
+  implementation plan's own correction.
+- **`eval/` — a new `ctx-distillery-eval` workspace member** (root `pyproject.toml` gains
+  `[tool.uv.workspace] members = ["eval"]`), an offline, reward-free evaluation harness scoring the
+  assembled PLAN artifact (not the trajectory) plus its transcript excerpt(s) against the same
+  TF/TA/TG/PA codes, artifact-framed. A ONE-WAY reader of `ctx_distillery`'s public surface
+  (`session.assemble`, `task.DistillPlan`) — never imported back (`eval/tests/test_boundary.py`),
+  rubric-free judge prompt, static read only. **Resolved per implementation-plan audit**: a
+  finished trace never carries the raw transcript verbatim (redacted host-side, passed as a task
+  input, never a `tool_call`), and scoring against `read_transcript_chunk`/`read_memory_file`
+  tool_call results is not a viable substitute either — those payloads carry only
+  offset/length/path/chars metadata, never the body. So `score_run`/the CLI take the transcript
+  path(s) as a MANDATORY second input alongside the trace path; there is no trace-only fallback.
+  Ships with a fully offline, deterministic `StubJudge` (fixed scores) as the tested default path;
+  a real judge is opt-in behind the `judge` extra, not wired up this pass. CLI:
+  `ctx-distillery-eval score <trace_glob> <transcript_path> [<transcript_path> ...]` — one
+  invocation's transcript(s) apply to every run `trace_glob` matches, a stated simplification for
+  batches spanning more than one transcript set (documented in `cli.py`'s module docstring).
+  `.github/workflows/ci.yml` gains a matching `eval-test` job.
 - **Real Claude Code storage auto-discovery** — `ClaudeCodeAdapter.for_project(project_dir)`, a new
   alternate constructor (the explicit `ClaudeCodeAdapter(memory_dir, transcripts)` is UNCHANGED and
   still the right entry point for a test or advanced caller). It computes `sanitize(project_dir)`

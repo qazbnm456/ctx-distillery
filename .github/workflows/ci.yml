@@ -31,6 +31,24 @@ jobs:
       - name: Tests
         run: uv run --python ${{ matrix.python-version }} python -m pytest
 
+  eval-test:
+    name: eval (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+      - name: Sync
+        run: uv sync --python ${{ matrix.python-version }}
+      - name: Eval member tests
+        run: uv run --python ${{ matrix.python-version }} --package ctx-distillery-eval python -m pytest
+
   lint:
     name: ruff
     runs-on: ubuntu-latest

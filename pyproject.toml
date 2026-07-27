@@ -59,3 +59,6 @@ target-version = "py311"
 # an editable install on top: `uv pip install -e ../rlm-kit` (see CLAUDE.md).
 [tool.uv.sources]
 rlm-kit = { git = "https://github.com/qazbnm456/rlm-kit.git", branch = "main" }
+
+[tool.uv.workspace]
+members = ["eval"]
