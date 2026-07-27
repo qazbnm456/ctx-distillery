@@ -17,9 +17,9 @@ from rlm_kit.trace import EVENT_RESULT, EVENT_RUN_START, EVENT_TOOL_CALL, TraceR
 from ctx_distillery.rubric import (
     _CATEGORY_LENS,
     CRITERION_CATEGORIES,
-    _plan_from_events,
     criteria_facts,
     default_rubric,
+    plan_from_events,
     rubric_from_meta,
     rubric_to_meta,
     trace_facts,
@@ -57,7 +57,7 @@ def _tool_call(tool, artifact_id=None, *, step_id=0, draft=_DRAFT, ok=True, erro
 
 def _result(plan: dict):
     """A hand-rolled `result` event carrying a plan's `model_dump()`-shaped output — the ONE fact
-    `_plan_from_events` reads (`payload["output"]`), built by hand rather than through a real
+    `plan_from_events` reads (`payload["output"]`), built by hand rather than through a real
     `TraceRecorder`, per the file docstring."""
     return {"type": EVENT_RESULT, "payload": {"output": plan}}
 
@@ -99,19 +99,19 @@ def test_rubric_from_meta_is_empty_when_no_run_start_carries_one():
     assert rubric_from_meta([]).criteria == []
 
 
-# -- _plan_from_events --------------------------------------------------------------------------
+# -- plan_from_events --------------------------------------------------------------------------
 
 
 def test_plan_from_events_reconstructs_the_last_result_events_plan():
     plan = _plan_dict({"action": "promote_to_memory", "artifact_id": "abc123"})
     events = [_result({"candidates": []}), _result(plan)]  # LAST result wins
-    recovered = _plan_from_events(events)
+    recovered = plan_from_events(events)
     assert isinstance(recovered, DistillPlan)
     assert recovered.candidates[0].artifact_id == "abc123"
 
 
 def test_plan_from_events_is_none_with_no_result_event():
-    assert _plan_from_events([]) is None
+    assert plan_from_events([]) is None
 
 
 def test_plan_from_events_is_none_with_a_malformed_result_output():
@@ -121,7 +121,7 @@ def test_plan_from_events_is_none_with_a_malformed_result_output():
     malformed trace in a glob took the entire scoring batch down. Must degrade to None, matching
     `assemble(events, None)`'s own "none of them raise" philosophy."""
     malformed = {"candidates": [{"artifact_id": "x"}]}  # missing the REQUIRED `action` field
-    assert _plan_from_events([_result(malformed)]) is None
+    assert plan_from_events([_result(malformed)]) is None
 
 
 def test_plan_from_events_round_trips_through_a_real_recorder(tmp_path):
@@ -142,7 +142,7 @@ def test_plan_from_events_round_trips_through_a_real_recorder(tmp_path):
         rec.record_result(plan)
     events = load_events(trace_path, run_id="r0")
 
-    recovered = _plan_from_events(events)
+    recovered = plan_from_events(events)
     assert isinstance(recovered, DistillPlan)
     assert recovered.candidates[0].action == "promote_to_skill"
     assert recovered.candidates[0].artifact_id == "s1"

@@ -30,6 +30,20 @@ Run BOTH before pushing — the suite is fully offline (no live model, no Deno, 
   plain host-side file I/O, so it runs against real files under `tmp_path`.
 - A LIVE run additionally needs real credentials and a Deno/pyodide sandbox
   (`brew install deno`). Don't do it in CI; it costs money.
+- The `eval/` and `studio/` workspace members each carry their OWN test suite and must be run
+  separately — they are not collected by a bare root `pytest -q` (each has its own
+  `pyproject.toml` `testpaths`; `--directory eval`/`--directory studio` is what makes `uv run`
+  resolve the RIGHT `testpaths` — `--package` alone does not, an earlier Phase-1 fix). `uv run
+  --directory eval --package ctx-distillery-eval --extra dev python -m pytest` / `uv run
+  --directory studio --package ctx-distillery-studio --extra dev python -m pytest` (matching
+  `.github/workflows/ci.yml`'s `eval-test`/`studio-test` jobs). **`--extra dev` is added for
+  explicitness, not because it's load-bearing — corrected per adversarial review, which found an
+  earlier draft's claim that omitting it breaks the job was FALSE**: this is a `uv` workspace,
+  which shares ONE venv across all members, and the ROOT `pyproject.toml`'s `[dependency-groups]
+  dev = ["pytest>=8.0"]` already installs pytest into that shared venv on every `uv sync`,
+  regardless of which member a given `uv run --package` is scoped to. In a plain-pip environment
+  (no `uv`), install each member editable instead: `pip install -e . -e ./eval -e ./studio` from
+  the repo root, then run `pytest` from inside each member's own directory.
 
 ## Invariants — do not break
 
@@ -143,6 +157,31 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
    roots with `adapters.claude_code.global_skills_root()` / `project_skills_root(project_dir)` — the
    same functions `for_project` uses, so the reader and the writer cannot disagree about a location.
 
+10. **`studio/` (`ctx-distillery-studio`) is READ-ONLY of the trace file and unreachable from the
+    RLM path — it is a THIRD workspace member, never a fork of the harness.** It replays a finished
+    `DistillSession` run's trace/v1 JSONL file (`plan_from_events` -> `session.assemble` ->
+    `rubric.trace_facts`, via `GET /v1/runs/{run_id}` and an SSE `GET /v1/runs/{run_id}/events`) and
+    NEVER calls `ctx_distillery.apply.apply_plan` — applying a plan stays a separate, human-invoked
+    action outside any web request, exactly as invariant 8 already requires. There is no
+    live-drive endpoint (no `POST /v1/distill` or similar): `run_distillation` needs a
+    caller-supplied `HarnessAdapter` + `chat_fn` already wired, a materially heavier precondition
+    than a self-contained one-shot driver a web request could reasonably own end-to-end — building
+    one is real, additional scope this project has not taken on. `run_id` is sanitized (`_slug_id`)
+    before it ever becomes a path component, and the PLAN panel renders a candidate's `draft` via
+    `el.textContent` **only** — never `innerHTML` — because a drafted memory/skill body is
+    untrusted model output, not markup to render. Root `pyproject.toml`'s `[tool.uv.workspace]
+    members` includes `"studio"` alongside `"eval"`.
+11. **`rubric.plan_from_events` is the ONE public plan-from-trace reconstruction — `eval/` (and
+    `studio/`) call it, neither keeps its own copy.** It used to be private
+    (`rubric._plan_from_events`) with a duplicate local copy in `eval/ctx_distillery_eval/score.py`
+    (kept separate only because `eval/`'s own convention is to never reach across the package
+    boundary into an underscore-prefixed helper). `studio/` needing the SAME reconstruction a third
+    time is what forced the actual fix: promote it to public on `rubric.py` (already public,
+    top-level, and already imported-from by `eval/` for `rubric_to_meta`) and have `eval/score.py`
+    import it instead of duplicating it again. Don't reintroduce a second copy anywhere — the
+    `ValidationError`-degrade fix below has already needed applying to two copies once; a third copy
+    means a third place a future fix can drift out of sync.
+
 ## Known simplifications (stated, not hidden)
 
 - **`read_memory_file` reads through `ArtifactRef.path` directly**, not through a fourth adapter
@@ -188,10 +227,17 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
   must NEVER import `ctx_distillery_eval` back (test-enforced, `eval/tests/test_boundary.py`). The
   eval CLI's transcript path(s) are MANDATORY and must be non-empty — `_read_transcripts` refuses an
   empty or whitespace-only file loudly (`SystemExit`), because a real judge would otherwise silently
-  score a plan against nothing. Both `_plan_from_events` reconstructions (in `rubric.py` and in
-  `eval/ctx_distillery_eval/score.py`) must degrade to `None` on a malformed `result` payload rather
-  than raise — `assemble()`'s own stated philosophy is "none of them raise," and a malformed shape
-  must fail the same way, never crash a batch scoring run over one bad trace.
+  score a plan against nothing. The now-public `rubric.plan_from_events` (see invariant 11 — `eval/`
+  and `studio/` both call it rather than keeping their own copy) must degrade to `None` on a
+  malformed `result` payload rather than raise — `assemble()`'s own stated philosophy is "none of
+  them raise," and a malformed shape must fail the same way, never crash a batch scoring run (or a
+  studio replay) over one bad trace.
+- **`studio/`'s frontend does not vendor a JetBrains Mono binary**, unlike the literal
+  `diff-sentry-studio` precedent it otherwise mirrors. `static/style.css`'s `--mono` font stack
+  PREFERS `"JetBrains Mono"` (matching the sibling studios' visual family when the visitor's system
+  already has it installed) and falls back to the platform's own monospace stack otherwise — a
+  stated simplification to avoid checking a font binary into a brand-new package, not an attempt to
+  literally copy every asset of the cloned reference.
 
 ## Harness scope
 

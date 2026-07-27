@@ -6,42 +6,22 @@ Reconstructs the plan the SAME way `ctx_distillery.rubric.trace_facts` does (the
 never a private helper reached across the package boundary (this package is a one-way READER of
 `ctx_distillery`, per `docs/DESIGN.md`'s eval-member boundary; `tests/test_boundary.py` in the root
 package pins that `ctx_distillery` never imports this package back).
+
+Studio pass, step 0: `plan_from_events` used to be a private, per-package-duplicated helper
+(`ctx_distillery.rubric._plan_from_events`, and a local copy here). It is now PUBLIC on
+`ctx_distillery.rubric` — already this package's own established boundary (public, top-level,
+already imported-from for `rubric_to_meta` elsewhere in this initiative) — so this module imports
+and calls it instead of keeping a second copy of the same reconstruction + `ValidationError`-degrade
+logic. See `docs/DESIGN.md`'s Studio section for the full boundary-ambiguity resolution.
 """
 
 from __future__ import annotations
 
-from pydantic import ValidationError
-from rlm_kit.trace import EVENT_RESULT
-
+from ctx_distillery.rubric import plan_from_events
 from ctx_distillery.session import AssembledPlan, assemble
-from ctx_distillery.task import DistillPlan
 
 from .judge import Judge, StubJudge
 from .schema import EvalReport, EvalRow, compute_means
-
-
-def _plan_from_events(events: list[dict]) -> DistillPlan | None:
-    """The run's LAST `result` event's output, re-validated as a `DistillPlan` — or `None`.
-
-    Same reconstruction `ctx_distillery.rubric._plan_from_events` performs, kept as its own small
-    local copy here (rather than importing that underscore-prefixed helper across the package
-    boundary) so this package only ever touches `ctx_distillery`'s PUBLIC surface.
-
-    FIXED per adversarial review: a well-formed-but-wrong-shaped `output` dict (e.g. missing a
-    required field) used to raise an uncaught `pydantic.ValidationError`, reproduced end-to-end
-    scoring a glob where ONE malformed trace took the entire batch down. Returns `None` on that
-    shape too — `assemble(events, None)` already reports a missing plan as a run-level problem
-    rather than raising, and this must degrade the same way, matching `.rubric`'s own fix.
-    """
-    for event in reversed(events):
-        if event.get("type") == EVENT_RESULT:
-            output = (event.get("payload") or {}).get("output")
-            if isinstance(output, dict):
-                try:
-                    return DistillPlan.model_validate(output)
-                except ValidationError:
-                    return None
-    return None
 
 
 def render_plan(plan: AssembledPlan) -> str:
@@ -83,7 +63,7 @@ def score_run(
     """
     if judge is None:
         judge = StubJudge()
-    plan = _plan_from_events(events)
+    plan = plan_from_events(events)
     assembled = assemble(events, plan)
     plan_text = render_plan(assembled)
     score = judge(plan_text, transcript_texts)

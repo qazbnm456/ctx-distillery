@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ctx-distillery studio</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="wordmark"><span class="mark">▣</span> ctx-distillery <span class="dim">studio</span></div>
+    <div class="header-right">
+      <span class="chip" id="traces-dir-chip"><span class="role-name">traces</span><span class="role-model" id="traces-dir-value"></span></span>
+      <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark" aria-label="Toggle theme">☾</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="rail">
+      <div class="panel load-panel">
+        <div class="panel-label">▾ Load a run</div>
+        <div class="row">
+          <input id="load-id" class="text-input" list="runs" placeholder="pick or type a run id…" spellcheck="false" />
+          <button id="load" class="btn btn-primary">Load <span class="arrow">▶</span></button>
+        </div>
+        <datalist id="runs"></datalist>
+        <div class="hint" id="runs-hint"></div>
+      </div>
+
+      <div class="panel feed-panel">
+        <div class="panel-label">▾ Live feed <span class="dim" id="feed-status"></span></div>
+        <div class="feed" id="feed" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="panel plan-panel" id="plan-panel">
+      <div class="panel-label">▾ Plan — the money shot: candidate + drafted text, side by side</div>
+      <div class="plan-empty" id="plan-empty">Load a run to see its assembled plan.</div>
+      <div class="plan-list" id="plan-list"></div>
+    </section>
+
+    <aside class="panel rubric-panel" id="rubric-panel">
+      <div class="panel-label">▾ Rubric facts (ATLAS)</div>
+      <div class="rubric-empty" id="rubric-empty">—</div>
+      <div class="rubric-list" id="rubric-list"></div>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

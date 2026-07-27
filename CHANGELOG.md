@@ -12,6 +12,56 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **`studio/` — a new `ctx-distillery-studio` workspace member (Phase 2 of the rubric/eval/studio
+  initiative)** (root `pyproject.toml`'s `[tool.uv.workspace] members` now `["eval", "studio"]`): a
+  REPLAY-ONLY FastAPI + zero-build vanilla-JS console over a finished `DistillSession` run's
+  trace/v1 JSONL file — the only artifact `run_distillation` ever produces (it writes no
+  `responses/{run_id}.json` or similar; the in-memory `AssembledPlan` is inert by design). Five
+  endpoints: `GET /` (frontend shell), `GET /v1/config` (`{"traces_dir": ...}` only — this project's
+  model is an injected `chat_fn`, not an env-var-selected one, so there is no `CTXD_ROOT_LM` to
+  report), `GET /v1/runs` (discovery by globbing `{TRACES_DIR}/*.jsonl`, env `CTXD_TRACES_DIR`),
+  `GET /v1/runs/{run_id}` (`plan_from_events` -> `session.assemble` -> `rubric.trace_facts`,
+  returned as `{"plan": {...}, "rubric_facts": {...}}`), and `GET /v1/runs/{run_id}/events` (SSE
+  replay via a pure `mapper.to_event`, sorted by `step_id`, synthesizing a terminal
+  `distill.run.completed` when a truncated trace never emitted one). `run_id` is sanitized
+  (`_slug_id`, copied verbatim from the real, cloned `diff-sentry-studio` precedent) before it ever
+  becomes a path component. No live-drive endpoint this pass — `run_distillation` needs a
+  caller-supplied `HarnessAdapter` + `chat_fn` already wired, a materially heavier precondition than
+  a self-contained one-shot driver a web request could reasonably own end-to-end. Never calls
+  `apply.apply_plan`. `mapper.to_event` maps `main_step`/`sub_call` (the planner's own reasoning
+  turns and any recursive sub-LM escalation) IN ADDITION to `run_start`/`tool_call`/`result`/
+  `run_end`/`final` — an earlier draft of this table silently dropped the first two, a real gap
+  against this initiative's own motivating goal, fixed before it shipped. The frontend (a Load box,
+  a live feed panel, the PLAN panel — the money shot: each candidate's `draft` rendered via
+  `el.textContent` **only**, never `innerHTML`, and a Rubric panel) is zero-build vanilla JS/CSS, no
+  bundler, no `node_modules`. `.github/workflows/ci.yml` gains a matching `studio-test` job.
+- **Promoted `rubric._plan_from_events` to public `plan_from_events`** (prerequisite refactor for
+  the Studio pass above — the Studio needed the SAME plan-from-trace reconstruction a third time,
+  and neither "reach across `eval/`'s own package boundary into an underscore-prefixed helper" nor
+  "duplicate it a third time" was an acceptable choice). `eval/ctx_distillery_eval/score.py` now
+  imports and calls it instead of keeping its own local copy — deleting a real duplicate (and the
+  three now-unused imports that deletion left behind: `pydantic.ValidationError`,
+  `rlm_kit.trace.EVENT_RESULT`, `ctx_distillery.task.DistillPlan`, confirmed unused with `ruff`, not
+  just by eye — F401 is a default-enabled rule and this repo's `lint` CI job runs a bare `ruff check
+  .`). `tests/test_rubric.py`'s existing tests are renamed to match, with a new
+  `eval/tests/test_score.py` regression guard asserting `ctx_distillery_eval.score` no longer
+  defines its own `_plan_from_events` (drift between two copies of the same reconstruction has
+  already bitten this project once — see the malformed-`ValidationError` fix below).
+- **Added `--extra dev` to the `eval-test` job and the new `studio-test` job, for explicitness —
+  CORRECTED per adversarial review, this was NOT fixing a live bug.** An earlier draft of this
+  entry claimed `eval-test` (added in the Phase-1 fix, `--directory eval --package
+  ctx-distillery-eval python -m pytest`) had been silently failing with "No module named pytest"
+  since it landed, because `pytest` supposedly lives only in `ctx-distillery-eval`'s
+  `[project.optional-dependencies] dev`. An adversarial review reproduced the EXACT pre-existing
+  invocation against a real `uv` binary, from a fully fresh `.venv`, and it passed cleanly, every
+  time — the claim was false. Root cause of the misunderstanding: this is a `uv` WORKSPACE, which
+  shares ONE venv across all members; the ROOT `pyproject.toml`'s `[dependency-groups] dev =
+  ["pytest>=8.0"]` installs pytest into that shared venv by default (no `[tool.uv]
+  default-groups` override exists to disable it), regardless of which member's `--package`
+  context a given `uv run` is scoped to — `--directory`/`--package` change which member's OWN
+  `dependencies` resolve, not whether the shared venv already has pytest from the root's dev
+  group. So `--extra dev` was never load-bearing for either job; it is added anyway because it is
+  more explicit/self-contained and does not hurt, not because anything was broken.
 - **Fixed three real bugs an adversarial review found in the rubric/eval pass**, before merge: (1)
   the `eval-test` CI job never actually ran `eval/tests/` — `--package` only selects which
   workspace member's ENVIRONMENT to use, not pytest's cwd/`testpaths` resolution, so it silently

@@ -54,7 +54,40 @@ jobs:
         # test under eval/tests/, including the one-way-boundary test that is supposed to gate
         # the whole eval-member invariant. `--directory eval` makes pytest resolve eval's own
         # pyproject.toml and testpaths, verified against a real uv binary before landing this.
-        run: uv run --python ${{ matrix.python-version }} --directory eval --package ctx-distillery-eval python -m pytest
+        # `--extra dev` added for explicitness — CORRECTED per adversarial review, this is NOT a
+        # bug fix. This is a uv WORKSPACE: one shared venv across all members, and the ROOT
+        # pyproject.toml's [dependency-groups] dev = ["pytest>=8.0"] already installs pytest into
+        # that shared venv on every `uv sync`, regardless of which member `--package` scopes a
+        # given `uv run` to. So omitting `--extra dev` here does NOT reproduce "No module named
+        # pytest" — verified against a real `uv` binary, from a fresh `.venv`, before adding this.
+        # `--extra dev` is added anyway because it makes this job self-contained (correct even if
+        # the root's dev group ever changed), not because anything here was broken.
+        run: uv run --python ${{ matrix.python-version }} --directory eval --package ctx-distillery-eval --extra dev python -m pytest
+
+  studio-test:
+    name: studio (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+      - name: Sync
+        run: uv sync --python ${{ matrix.python-version }}
+      - name: Studio member tests
+        # Mirrors eval-test's own `--directory` fix: `--package` alone only selects which
+        # workspace member's ENVIRONMENT to use, not pytest's cwd/`testpaths` resolution —
+        # `--directory studio` makes pytest resolve studio's own pyproject.toml and testpaths.
+        # `--extra dev` is added for the SAME explicitness reason as eval-test's (see its comment
+        # above) — this is a shared-venv uv workspace, so the root's own dev group already
+        # provides pytest regardless; not a bug fix. Verified end-to-end against a real `uv`
+        # binary before landing this.
+        run: uv run --python ${{ matrix.python-version }} --directory studio --package ctx-distillery-studio --extra dev python -m pytest
 
   lint:
     name: ruff

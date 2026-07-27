@@ -107,3 +107,19 @@ def test_aggregate_computes_means_reward_free():
 def test_aggregate_of_zero_rows_has_empty_means():
     report = aggregate([])
     assert report.rows == [] and report.means == {}
+
+
+def test_ctx_distillery_eval_score_no_longer_defines_its_own_plan_from_events():
+    """Regression guard, added for the Studio pass's step-0 refactor: `score.py` used to keep its OWN
+    local `_plan_from_events` copy (duplicate reconstruction + `ValidationError`-degrade logic) rather
+    than importing the now-public `ctx_distillery.rubric.plan_from_events`. If a future edit
+    accidentally re-adds a local copy here, drift between the two reconstructions (e.g. a bug fixed in
+    one but not the other, exactly as happened once already) would silently return."""
+    import ctx_distillery_eval.score as score_mod
+
+    import ctx_distillery.rubric as rubric_mod
+
+    assert not hasattr(score_mod, "_plan_from_events")
+    # `plan_from_events` IS a name in this module's namespace (imported), but it must be THE SAME
+    # function object `ctx_distillery.rubric` defines — never a locally re-defined shadow.
+    assert score_mod.plan_from_events is rubric_mod.plan_from_events
