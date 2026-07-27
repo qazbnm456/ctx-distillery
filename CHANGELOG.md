@@ -12,6 +12,33 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- `ctx_distillery/apply.py` — **the apply step**: `apply_plan(memory_dir, assembled_plan,
+  approved_ids)`, the human-gated, host-side action that finally turns an approved plan into real
+  file changes. Structurally outside the RLM (nothing on the planner's path imports it; no adapter
+  method was added for it), it takes explicit per-candidate approval by list index, and returns one
+  `ApplyOutcome` per candidate (`applied` / `refused` + reason / `skipped`-not-approved / `noop` for
+  a `keep`) so the one step that mutates disk is not the one step that leaves no audit record. The
+  five gaps an independent design review found are all closed in the implementation: the collision
+  authority is a FRESH `ClaudeCodeAdapter(memory_dir).list_targets()` re-scan at apply time (a plan's
+  own snapshot is stale by construction); a promotion's filename is `slugify(frontmatter["name"]) +
+  ".md"` with a degenerate slug refused rather than replaced by an invented fallback; the write side
+  enforces the same containment check the read side does (`resolved.parent == memory_dir`) so a
+  symlink in the memory store cannot redirect a write outside it; the file is created with
+  `open(path, "x")` (O_EXCL) so a collision is caught atomically rather than by a racy
+  check-then-write, with an `overwrite_ids` escape hatch scoped to individual candidates and never
+  global; and `prune` ARCHIVES to `<memory_dir's parent>/_ctx_distillery_archive/<timestamp>-<name>`
+  — outside the memory store, so no future scan can re-surface it as live — never deletes. A
+  candidate carrying `problems`, `draft_ok is False`, or an empty promotion draft is refused
+  regardless of approval, and `MEMORY.md` is never a valid promotion or prune target.
+- `task.py`'s `_INSTRUCTIONS` (and `DistillCandidate.key_fields`' description) now state the
+  `prune` target convention: a prune candidate MUST set `key_fields["target_path"]` to the exact
+  path of an existing artifact, verbatim from `list_memory_files()`. `key_fields` stays the
+  free-form dict it always was — the convention is documented and enforced at apply time (a
+  missing / non-matching / `kind="index"` target is refused, never guessed at), and pinned by a test
+  so the prompt half and the apply half cannot drift apart.
+- `tests/test_no_write_capability.py` exempts `apply.py` from the mutation scan — it IS the
+  human-gated writer — and pins the property that makes the exemption safe instead: a new
+  reachability test asserts no module on the RLM path imports it.
 - `DistillSession` is wired and offline-tested end to end: five READ-ONLY tools
   (`list_memory_files`, `read_memory_file`, `read_transcript_chunk`, `draft_memory_file`,
   `draft_skill_file`), the `pyodide` pin ENFORCED in code (`dataclasses.replace` on the config

@@ -23,8 +23,11 @@ Run BOTH before pushing — the suite is fully offline (no live model, no Deno, 
   `scripted_lm`, so the planner → tools → SUBMIT chain executes (each tool's own tracing runs)
   at zero cost; they `importorskip("dspy")`.
 - `tests/test_no_write_capability.py` is the tripwire for invariant (1): a static scan over
-  every module under `ctx_distillery/` asserting none contains a write/delete call. If it goes
-  red, someone added a writer — that is the finding, not a test to relax.
+  every module under `ctx_distillery/` — except the deliberate, human-gated `apply.py` — asserting
+  none contains a write/delete call. If it goes red, someone added a writer — that is the finding,
+  not a test to relax, and `apply.py` is not a precedent for a second exemption.
+- `tests/test_apply.py` needs no dspy, no rlm-kit model wiring, and no network: applying a plan is
+  plain host-side file I/O, so it runs against real files under `tmp_path`.
 - A LIVE run additionally needs real credentials and a Deno/pyodide sandbox
   (`brew install deno`). Don't do it in CI; it costs money.
 
@@ -58,8 +61,10 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
    untrusted content (fetched URLs, MCP output).
 4. **The harness-adapter seam (`ingest` / `schema_for` / `list_targets`) is read-only, full
    stop.** See `ctx_distillery/adapters/base.py`. No adapter may ever expose a write/emit path
-   reachable from an RLM tool — the actual "apply" step, if it's ever built, stays a separate,
-   human-gated action outside the RLM trajectory entirely.
+   reachable from an RLM tool — the actual "apply" step (now built: `ctx_distillery/apply.py`)
+   stays a separate, human-gated action outside the RLM trajectory entirely, and gained NO adapter
+   method: writing into `memory_dir` is ordinary host-side Python, the same reasoning
+   `tools/memory_reader.py` gives for reading.
 5. **Tools close over an immutable SNAPSHOT, never a live adapter.** `run_distillation` calls
    `adapter.ingest()` EXACTLY ONCE; that `list[ArtifactRef]` is what all five tool factories
    receive. Nothing in `HarnessAdapter` promises `list_targets()` is cheap or stable across
@@ -72,7 +77,21 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
    inside `memory_dir` fold its outside target into the snapshot in the first place (an
    adversarial review reproduced exactly that escape) — it only enumerates a resolved path whose
    PARENT is still `memory_dir` itself. Exact-match-on-request and containment-at-enumeration are
-   two separate checks; neither substitutes for the other.
+   two separate checks; neither substitutes for the other. `apply.py` mirrors the second one on the
+   WRITE side with the identical test (`resolved.parent == memory_dir`), before any write.
+6. **`apply.py` is the ONE writer, and it is unreachable from the RLM.** It is human-called
+   (`apply_plan(memory_dir, assembled_plan, approved_ids)`), takes EXPLICIT per-candidate
+   approval (never "apply the whole plan"), re-scans `list_targets()` ITSELF at apply time as the
+   sole collision/target authority (the run's snapshot is stale by construction), creates a
+   promotion with `open(path, "x")` (O_EXCL — the atomic, TOCTOU-proof enforcement; the re-scan is
+   only the friendly early message), derives the filename as `slugify(frontmatter["name"]) + ".md"`
+   with a degenerate slug being a hard refusal, ARCHIVES a prune to
+   `<memory_dir's parent>/_ctx_distillery_archive/` instead of deleting it, and refuses any
+   candidate carrying `problems` / `draft_ok is False` / an empty promotion draft. Because it
+   writes, it is the one module EXEMPT from `tests/test_no_write_capability.py`'s mutation scan —
+   the exemption is guarded by `test_apply_is_unreachable_from_the_planner_path`, which asserts no
+   module on the RLM path imports it. Never import `apply` from `task.py`, `session.py`, a tool, or
+   `__init__.py`; never give the planner a way to reach it.
 
 ## Known simplifications (stated, not hidden)
 
@@ -86,7 +105,15 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
 - **`list_targets()` never returns `kind="skill"` entries yet** (that storage location hasn't been
   inspected), so `draft_skill_file`'s collision check currently runs against an empty set — weaker
   than it will be, not wrong.
-- **No CLI entry point**, and no adapter for any harness other than Claude Code.
+- **No CLI entry point**, and no adapter for any harness other than Claude Code. `apply_plan` is
+  called from Python (or a REPL) by a human who has read the plan; a thin CLI wrapper over it is
+  future work.
+- **`apply.py` archives, and nothing purges.** A pruned file is moved to
+  `_ctx_distillery_archive/`, never deleted; deleting the archive for real is a separate, explicit
+  `purge` operation that does not exist yet. That is deliberate — "still recoverable" beats
+  "irreversible" even at the human-approved step.
+- **`apply_plan` only knows the Claude Code layout** (it builds a `ClaudeCodeAdapter` directly).
+  Generalising the apply step across harnesses waits for a second adapter to actually exist.
 
 ## Harness scope
 

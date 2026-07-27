@@ -56,7 +56,10 @@ class DistillCandidate(BaseModel):
         description=(
             "Structured, deterministic-check-friendly fields for this candidate — e.g. which "
             "transcript segment(s) it covers, a one-line reason, or a cross-reference to another "
-            "candidate flagged as an overlap/conflict. Never the drafted artifact body itself."
+            "candidate flagged as an overlap/conflict. Never the drafted artifact body itself. "
+            "For a `prune` candidate, `target_path` is REQUIRED by convention: the exact `path` of "
+            "the existing artifact being pruned, verbatim from list_memory_files() (see "
+            "ctx_distillery/apply.py — a prune with no matching target_path is refused)."
         ),
     )
 
@@ -86,6 +89,12 @@ during a session is a SKILL candidate. These are two distinct target shapes, not
 When multiple transcripts independently confirm the same thing, say so explicitly rather than
 silently deduplicating. When two transcripts disagree, flag it as a conflict for human review
 rather than picking a side.
+
+For a `prune` candidate you MUST set `key_fields["target_path"]` to the exact `path` of the
+existing artifact you are proposing to prune, copied verbatim from `list_memory_files()`. That is
+the only way a human's apply step can tell WHICH file a prune refers to; a prune whose
+`target_path` is missing, altered, or not one of the listed paths is refused rather than guessed
+at, and the harness's own memory index (`kind: "index"`) is never a valid prune target.
 
 See docs/DESIGN.md for the full design and acceptance criteria this task is built against.
 """

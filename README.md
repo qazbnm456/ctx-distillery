@@ -6,10 +6,11 @@ propose a distillation plan: what's safe to prune, what should be cross-referenc
 across sessions, and what durable knowledge is worth promoting into a standing memory file or a
 reusable Skill. It is a judgement engine, nothing more.
 
-**Status: early scaffold.** This repo pins down the project structure, the dependency on
-rlm-kit, and the output contract. The actual planning tools (transcript/memory readers, drafting
-tools) are not implemented yet — see `ctx_distillery/task.py` for the honest, clearly-marked
-skeleton and `docs/DESIGN.md` for the full design this scaffold is built against.
+**Status: the planner is wired and offline-tested; the apply step exists.** The five read-only
+planning tools, the Claude Code adapter, the assemble-on-read convention, and the human-gated
+`apply_plan` are implemented. Still missing: a CLI, transcript auto-discovery, skill-file
+enumeration, and any harness other than Claude Code. See `docs/DESIGN.md` for the full design and
+`CLAUDE.md` for the invariants.
 
 ## It never touches your files
 
@@ -19,17 +20,49 @@ wrong:
 
 1. **Every run produces a proposed plan, never a mutation.** The output is a list of judgements
    (`keep` / `prune` / `promote_to_memory` / `promote_to_skill`) over your transcripts and memory
-   index. Nothing is deleted, rewritten, or created on disk by the run itself. Applying a plan —
-   if that step exists at all — is a separate, explicit action a human takes outside the RLM
-   trajectory, after reading the plan.
+   index. Nothing is deleted, rewritten, or created on disk by the run itself. Applying a plan is a
+   separate, explicit action a human takes outside the RLM trajectory, after reading the plan —
+   `ctx_distillery/apply.py`, described below.
 2. **This is structural, not a convention we promise to honor.** rlm-kit's sandboxed interpreter
    (`pyodide`/Deno, the default and the only one this task uses) has no host filesystem write
    access at all. Combined with wiring zero write-capable tools, the model has no code path to
    mutate a file — full stop, not "we told it not to." See `CLAUDE.md` for the specific
    invariants this rests on.
-3. **A human applies the plan, if anything ever does.** The dry-run plan is the only mode. There
-   is no "auto-apply" flag now, and if one is ever added it will be a separate, explicit,
-   human-confirmed action — never something the planner's own tools can trigger.
+3. **A human applies the plan, if anything ever does.** The dry-run plan is the only mode the RLM
+   has. There is no "auto-apply" flag and never will be: the apply step is a separate module a
+   human calls by hand, and nothing the planner can reach imports it.
+
+## Applying a plan (the human-gated step)
+
+```python
+from ctx_distillery.apply import apply_plan
+
+# You read the plan first. Then you name the candidates you approve, by list index.
+for outcome in apply_plan("path/to/project/memory", assembled_plan, approved_ids={0, 3, 7}):
+    print(outcome.index, outcome.action, outcome.status, outcome.reason)
+```
+
+There is deliberately no "apply everything" call. A reviewer who approves eight of ten candidates
+shouldn't have to fight the API to reject the other two — for an irreversible operation the safe
+path should be the default one. What `apply_plan` guarantees:
+
+- **A prune archives, it never deletes.** The file is moved to
+  `_ctx_distillery_archive/<timestamp>-<name>` *beside* your memory directory — outside it, so no
+  future scan mistakes an archived file for a live one. Deleting the archive for real would be a
+  separate `purge` step, which doesn't exist yet.
+- **It re-scans your memory store itself, at apply time.** The plan you're applying may be hours or
+  days old; its own view of what exists is stale by construction, so it is never used as the
+  authority for "does this name already exist" or "is this prune target real."
+- **A promotion is created with an exclusive create** (`O_CREAT|O_EXCL`), so a name collision is
+  caught atomically instead of by a racy check-then-write. It refuses that one candidate with a
+  clear message; overwriting is an explicit opt-in for that one candidate, never a global flag.
+- **Nothing is written outside your memory directory.** The derived path must resolve to a direct
+  child of it — the same containment check the read side uses, for the same reason (a symlink in the
+  store resolves elsewhere).
+- **A candidate the run itself flagged is refused even if you approved it** — a draft that failed
+  its format check, an empty draft, or any assembled candidate carrying problems.
+- **Every candidate comes back with an outcome**, including the ones you didn't approve. The step
+  that mutates disk should be the last place to keep no record.
 
 ## Two distinct promotion targets
 
@@ -67,13 +100,18 @@ write the adapter.
 
 ```
 ctx_distillery/
-  task.py            # DistillSession(RLMTask) — signature, output_model, instructions
+  task.py              # DistillSession(RLMTask) — signature, output_model, instructions
+  session.py           # run_distillation (ingest once, redact once, run once) + assemble()
+  apply.py             # apply_plan — the human-gated writer, outside the RLM entirely
+  redact.py            # host-side redaction, applied before any text reaches the model
+  frontmatter.py       # nested-YAML frontmatter parsing (memory + skill shapes)
+  tools/               # the five READ-ONLY planner tools
   adapters/
-    base.py           # the read-only adapter interface (no implementation yet)
+    base.py            # the read-only harness-adapter seam
+    claude_code.py     # the one in-scope adapter
 docs/
-  DESIGN.md            # the full design doc this scaffold is built against
-tests/
-  test_import.py       # smoke test
+  DESIGN.md            # the full design doc this project is built against
+tests/                 # fully offline: no live model, no Deno, no network
 ```
 
 ## Relationship to rlm-kit

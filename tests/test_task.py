@@ -30,7 +30,14 @@ from rlm_kit.trace import (
     load_events,
 )
 
-from ctx_distillery.task import PINNED_INTERPRETER, DistillPlan, DistillSession, _forced_config
+from ctx_distillery.task import (
+    _INSTRUCTIONS,
+    PINNED_INTERPRETER,
+    DistillCandidate,
+    DistillPlan,
+    DistillSession,
+    _forced_config,
+)
 
 _TRANSCRIPT = (
     "user: from now on we freeze merges during a release\n"
@@ -90,6 +97,18 @@ def test_all_five_tools_are_wired_in_order_and_repl_safe(snapshot):
     ]
     for tool in task.tools:
         assert_repl_safe(tool)
+
+
+def test_the_prompt_asks_for_the_prune_target_path_convention():
+    """`apply.py` refuses a prune whose `key_fields["target_path"]` doesn't match the memory index.
+
+    That convention only works if the PROMPT side asks for it — `key_fields` is a free-form dict, so
+    nothing else would ever tell the planner to fill it in. Pinned here so the two halves cannot
+    drift apart silently (docs/DESIGN.md, "The apply step", gap #1).
+    """
+    assert "target_path" in _INSTRUCTIONS
+    assert "prune" in _INSTRUCTIONS
+    assert "target_path" in (DistillCandidate.model_fields["key_fields"].description or "")
 
 
 def test_each_instance_gets_its_own_tools(snapshot):
