@@ -405,6 +405,10 @@ def _promote_skill(
     if target is None:
         return _outcome(index, candidate, STATUS_REFUSED, refusal)
 
+    # Empirically confirmed: an EXISTING skills root picks up a new skill mid-session, but a
+    # project's very FIRST top-level skills directory being created needs a Claude Code restart to
+    # be discovered at all. Checked before mkdir, since mkdir is what would make `root` exist.
+    is_new_root = not root.exists()
     try:
         # The skill DIRECTORY is part of the artifact here, unlike the flat memory path — but its own
         # try, for the same reason `_promote` isolates the store's mkdir: a FileExistsError from a
@@ -428,12 +432,18 @@ def _promote_skill(
         )
     except OSError as exc:
         return _outcome(index, candidate, STATUS_REFUSED, f"could not write {target}: {exc}")
+    restart_note = (
+        f" — this is the FIRST skill in {root}, so Claude Code needs a restart before it is "
+        f"discovered (an existing skills root picks up a new skill without one)"
+        if is_new_root
+        else ""
+    )
     return _outcome(
         index,
         candidate,
         STATUS_APPLIED,
         f"wrote {'(overwriting) ' if overwrite else ''}{len(candidate.draft or '')} chars to a "
-        f"{scope} skill",
+        f"{scope} skill{restart_note}",
         path=str(target),
     )
 

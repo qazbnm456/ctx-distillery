@@ -168,6 +168,45 @@ def test_a_project_scoped_skill_goes_to_the_project_root_not_the_global_one(memo
     assert not global_root.exists(), "a project-scoped skill must never touch the global store"
 
 
+def test_the_first_skill_in_a_brand_new_root_notes_the_restart_caveat(memory_dir, tmp_path):
+    """Empirically confirmed: an EXISTING skills root picks up a new skill mid-session, but a
+    project's very FIRST top-level skills directory needs a Claude Code restart to be discovered."""
+    project_root = tmp_path / "proj" / ".claude" / "skills"
+    assert not project_root.exists()
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope="project")),
+        [0],
+        project_skills_dir=project_root,
+    )
+
+    assert outcomes[0].status == "applied", outcomes[0].reason
+    assert "restart" in outcomes[0].reason
+
+
+def test_a_second_skill_in_an_ALREADY_existing_root_gets_no_restart_caveat(memory_dir, tmp_path):
+    project_root = tmp_path / "proj" / ".claude" / "skills"
+    first = "---\nname: First Skill\ndescription: d.\n---\nBody.\n"
+    apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope="project", draft=first)),
+        [0],
+        project_skills_dir=project_root,
+    )
+    assert project_root.exists()
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope="project")),
+        [0],
+        project_skills_dir=project_root,
+    )
+
+    assert outcomes[0].status == "applied", outcomes[0].reason
+    assert "restart" not in outcomes[0].reason
+
+
 @pytest.mark.parametrize("scope", ["global", "project"])
 def test_a_skill_promotion_with_no_root_for_its_scope_is_refused(memory_dir, tmp_path, scope):
     """Refused, never defaulted: guessing between a user-global install and a project-local one is

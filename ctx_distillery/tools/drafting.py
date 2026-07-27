@@ -155,6 +155,14 @@ def make_skill_validator(
     CURRENT call, so the collision check runs against the RIGHT namespace: the two skill stores are
     independent, and a global skill's name is not a collision for a project-scoped one. Without it,
     every scope's names are treated as taken — the conservative superset.
+
+    A "project" request ALSO checks the "global" namespace for a same-name skill, but for a
+    different reason than collision: empirically-confirmed Claude Code precedence gives a personal
+    (global) skill priority over a project one of the same name, so a project skill drafted under a
+    name that already exists globally would install cleanly but never actually be reachable — a
+    silent no-op, not a file conflict. Flagged here rather than only in `apply.py` because the model
+    can still pick a different name before anything is written; a "global" request needs no such
+    check, since nothing shadows a global skill.
     """
 
     def validate(raw: str) -> FormatCheck:
@@ -165,6 +173,7 @@ def make_skill_validator(
             requested = None  # fall back to the superset rather than checking a namespace that
             #                   does not exist; the bad scope is already reported above.
         taken = _existing_names(memory_index, "skill", requested)
+        shadowing = _existing_names(memory_index, "skill", "global") if requested == "project" else set()
         text = raw or ""
         if not text.strip():
             return FormatCheck(ok=False, errors=errors + ["empty draft: the model returned no text"])
@@ -187,6 +196,14 @@ def make_skill_validator(
         elif name.strip().lower() in taken:
             where = f" in the {requested} scope" if requested else ""
             errors.append(f"frontmatter `name` {name!r} collides with an existing skill{where}")
+        elif name.strip().lower() in shadowing:
+            errors.append(
+                f"frontmatter `name` {name!r} matches an existing GLOBAL skill of the same name — "
+                f"Claude Code's personal/global skills take precedence over project ones, so this "
+                f"project skill would install but never be reachable (silently shadowed). Pick a "
+                f"different name, or draft with scope='global' if the intent is to replace it "
+                f"everywhere."
+            )
         description = meta.get("description")
         if not isinstance(description, str) or not description.strip():
             errors.append("frontmatter `description` is missing or not a non-empty string")
