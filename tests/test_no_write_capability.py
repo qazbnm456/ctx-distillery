@@ -8,6 +8,11 @@ wires zero write-capable tools. This test is the tripwire: a static scan over ev
 It is intentionally crude (source text, not semantics) because its job is to fail LOUDLY the moment
 someone adds a writer, not to prove absence of every conceivable trick. It is a guard against drift,
 not against a determined author — the sandbox is the real boundary (CLAUDE.md invariant 1).
+
+ONE module is exempt, and the exemption is itself tested: `apply.py` IS the human-gated writer
+(docs/DESIGN.md, "The apply step"). What makes that safe is not the absence of a write call but its
+UNREACHABILITY from the RLM — so `test_apply_is_unreachable_from_the_planner_path` asserts no
+RLM-path module imports it, which is the property the scan was really protecting all along.
 """
 
 from __future__ import annotations
@@ -41,7 +46,14 @@ FORBIDDEN: dict[str, re.Pattern[str]] = {
     "os.system / os.exec* / os.popen": re.compile(r"\bos\.(?:system|exec\w*|popen)\s*\("),
 }
 
-SOURCES = sorted(PACKAGE.rglob("*.py"))
+#: The one deliberate, human-gated writer — see the module docstring. Exempt from the mutation scan,
+#: NOT from the reachability test below.
+WRITER = "apply.py"
+
+SOURCES = sorted(p for p in PACKAGE.rglob("*.py") if p.name != WRITER)
+
+#: Anything that imports `apply` (or `ctx_distillery.apply`) — the exemption's real guard rail.
+IMPORTS_APPLY = re.compile(r"^\s*(?:from\s+[\w.]*\.?apply\s+import|(?:from\s+\S+\s+)?import\s+.*\bapply\b)")
 
 
 def _code_lines(path: Path) -> list[tuple[int, str]]:
@@ -78,6 +90,28 @@ def test_the_scan_actually_sees_the_package():
         "task.py", "session.py", "redact.py", "frontmatter.py", "drafting.py",
         "memory_reader.py", "transcript_reader.py", "claude_code.py",
     }
+    assert (PACKAGE / WRITER).is_file(), "the exempt writer must exist, or the exemption is stale"
+    assert WRITER not in {p.name for p in SOURCES}
+
+
+def test_apply_is_unreachable_from_the_planner_path():
+    """`apply.py` may write BECAUSE nothing on the RLM path can reach it (docs/DESIGN.md).
+
+    `apply_plan` is called by a human, never by `run_distillation` or a tool — so no module the
+    planner's execution path touches (including `__init__.py`, whose imports would make it eagerly
+    loaded) may import it. This is the property that makes the mutation-scan exemption safe; if it
+    goes red, the writer just became reachable from the trajectory.
+    """
+    importers = [
+        f"{source.relative_to(PACKAGE)}:{number}: {line.strip()}"
+        for source in SOURCES
+        for number, line in _code_lines(source)
+        if IMPORTS_APPLY.search(line)
+    ]
+    assert not importers, (
+        "nothing on the RLM path may import the human-gated writer (docs/DESIGN.md, "
+        "'The apply step'):\n" + "\n".join(importers)
+    )
 
 
 @pytest.mark.parametrize("source", SOURCES, ids=lambda p: str(p.relative_to(PACKAGE)))
@@ -92,6 +126,33 @@ def test_no_module_contains_a_write_or_delete_call(source):
         "ctx-distillery must contain NO write/delete capability (CLAUDE.md invariant 1):\n"
         + "\n".join(offences)
     )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "from .apply import apply_plan",
+        "from ctx_distillery.apply import apply_plan",
+        "    from .apply import apply_plan",
+        "import ctx_distillery.apply",
+        "from ctx_distillery import apply",
+    ],
+)
+def test_the_reachability_check_would_catch_a_real_importer(line):
+    """Guard the guard: every plausible way to reach the writer must match."""
+    assert IMPORTS_APPLY.search(line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "from .redact import redact_transcript",
+        "from rlm_kit.trace import record_tool_call",
+        "    outcome = applied(candidate)",
+    ],
+)
+def test_the_reachability_check_does_not_fire_on_unrelated_lines(line):
+    assert not IMPORTS_APPLY.search(line)
 
 
 def test_the_scan_would_catch_a_real_writer(tmp_path):
