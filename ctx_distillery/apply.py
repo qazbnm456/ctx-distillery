@@ -176,8 +176,18 @@ def apply_plan(
         )
 
     # Gap #2: the CURRENT state of the memory store is the sole collision/target authority. The
-    # plan's own snapshot is older than this call by construction and is never consulted.
-    targets = _rescan(root)
+    # plan's own snapshot is older than this call by construction and is never consulted. Skills
+    # are included too (per skills_roots), so a global-name-shadows-project check below has
+    # something fresher than the plan's own stale snapshot to consult.
+    targets = _rescan(root, skills_roots)
+    # A MUTABLE seed of already-taken global skill names, re-checked (and grown) as this same call
+    # applies candidates: a plan approving BOTH a `global` and a `project` promotion of the same
+    # name must have the second one see the first's write, not just what existed before this call.
+    global_skill_names = {
+        ref.name.strip().lower()
+        for ref in targets.values()
+        if ref.kind == "skill" and ref.scope == "global"
+    }
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     outcomes: list[ApplyOutcome] = []
@@ -194,7 +204,13 @@ def apply_plan(
         if candidate.action == SKILL_ACTION:
             # A DIFFERENT write path, not a variant of the flat one — nested target, other root.
             outcomes.append(
-                _promote_skill(index, candidate, skills_roots, overwrite=index in overwrite)
+                _promote_skill(
+                    index,
+                    candidate,
+                    skills_roots,
+                    global_skill_names,
+                    overwrite=index in overwrite,
+                )
             )
         elif candidate.action in PROMOTION_ACTIONS:
             outcomes.append(
@@ -350,6 +366,7 @@ def _promote_skill(
     index: int,
     candidate: AssembledCandidate,
     skills_roots: dict[str, Path | None],
+    global_skill_names: set[str],
     *,
     overwrite: bool,
 ) -> ApplyOutcome:
@@ -360,6 +377,17 @@ def _promote_skill(
     its containment check (the thing that makes the memory write safe) or carrying two meanings in
     one code path. The scope→root selection is refused, never defaulted: guessing between a
     user-global install and a project-local one is not a guess this module is entitled to make.
+
+    `global_skill_names` is the write-time mirror of `make_skill_validator`'s draft-time "shadowed"
+    check (an adversarial review found the draft-time check alone left a real gap: `apply_plan`'s own
+    fresh re-scan is supposed to be the sole collision authority per gap #2, and a plan can be applied
+    long after — or even built without going through `draft_skill_file` at all — so a stale or
+    hand-built `project` candidate whose name a `global` skill has since taken must still be refused
+    here, not just at draft time). It is refused HARD, with no `overwrite` bypass: `overwrite` means
+    "replace the file this candidate targets," never "install a skill this project can never actually
+    reach." The caller MUTATES this set after a successful `global` write (below) so a plan approving
+    both a `global` and a `project` promotion of the same name in ONE call still catches it, even
+    though the pre-call re-scan could not have known about the `global` write yet.
     """
     scope = (candidate.key_fields or {}).get("scope")
     if not isinstance(scope, str) or scope not in ARTIFACT_SCOPES:
@@ -400,6 +428,17 @@ def _promote_skill(
             f"frontmatter name {name!r} slugifies to nothing — refusing rather than inventing a "
             f"fallback skill directory name",
         )
+    if scope == "project" and name.strip().lower() in global_skill_names:
+        return _outcome(
+            index,
+            candidate,
+            STATUS_REFUSED,
+            f"frontmatter name {name!r} matches an existing GLOBAL skill of the same name — Claude "
+            f"Code's personal/global skills take precedence over project ones, so writing this would "
+            f"install a project skill that is never actually reachable (silently shadowed). Refused "
+            f"regardless of `overwrite`: rename the draft, or apply it with scope='global' instead if "
+            f"the intent is to replace the existing skill everywhere.",
+        )
 
     target, refusal = _skill_target(root, slug, overwrite=overwrite)
     if target is None:
@@ -432,6 +471,11 @@ def _promote_skill(
         )
     except OSError as exc:
         return _outcome(index, candidate, STATUS_REFUSED, f"could not write {target}: {exc}")
+    if scope == "global":
+        # Grows the shadow set live: a LATER candidate in this same apply_plan call that promotes a
+        # `project` skill under this same name must see this write, not just what the pre-call
+        # re-scan already knew about.
+        global_skill_names.add(name.strip().lower())
     restart_note = (
         f" — this is the FIRST skill in {root}, so Claude Code needs a restart before it is "
         f"discovered (an existing skills root picks up a new skill without one)"
@@ -605,9 +649,18 @@ def _archive_destination(archive_dir: Path, source_name: str, stamp: str) -> Pat
 # -- plumbing -------------------------------------------------------------------------------------
 
 
-def _rescan(root: Path) -> dict[str, ArtifactRef]:
-    """`{resolved_path: ArtifactRef}` from a FRESH `list_targets()` — the sole authority (gap #2)."""
-    refs = ClaudeCodeAdapter(root).list_targets()
+def _rescan(root: Path, skills_roots: dict[str, Path | None]) -> dict[str, ArtifactRef]:
+    """`{resolved_path: ArtifactRef}` from a FRESH `list_targets()` — the sole authority (gap #2).
+
+    Skills roots are passed through so the re-scan also carries skill refs (both scopes, whichever
+    are set) — needed for the cross-scope shadow check, not just the flat memory/index collision
+    check this originally existed for.
+    """
+    refs = ClaudeCodeAdapter(
+        root,
+        global_skills_dir=skills_roots.get("global"),
+        project_skills_dir=skills_roots.get("project"),
+    ).list_targets()
     return {str(Path(ref.path).resolve()): ref for ref in refs}
 
 

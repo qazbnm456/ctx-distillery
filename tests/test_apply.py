@@ -185,6 +185,86 @@ def test_the_first_skill_in_a_brand_new_root_notes_the_restart_caveat(memory_dir
     assert "restart" in outcomes[0].reason
 
 
+# -- apply-time shadow check: a stale/hand-built plan is not the draft-time validator's job --------
+
+
+def test_a_project_skill_matching_an_ALREADY_existing_global_one_is_refused_at_apply_time(
+    memory_dir, tmp_path
+):
+    """`apply_plan`'s own fresh re-scan is the sole collision authority (gap #2) — a `project`
+    candidate whose name a `global` skill already occupies must be refused HERE too, not only by
+    `make_skill_validator` at draft time, since a plan can be applied long after drafting or be
+    built without going through the drafting tool at all."""
+    global_root = tmp_path / "global-skills"
+    project_root = tmp_path / "proj" / ".claude" / "skills"
+    existing = global_root / "shared-name" / "SKILL.md"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("---\nname: Shared Name\ndescription: d.\n---\nBody.\n", encoding="utf-8")
+
+    draft = "---\nname: Shared Name\ndescription: A project one.\n---\nBody.\n"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope="project", draft=draft)),
+        [0],
+        global_skills_dir=global_root,
+        project_skills_dir=project_root,
+    )
+
+    assert outcomes[0].status == "refused"
+    assert "shadow" in outcomes[0].reason.lower()
+    assert not (project_root / "shared-name").exists()
+
+
+def test_overwrite_does_not_bypass_the_shadow_refusal(memory_dir, tmp_path):
+    """`overwrite` is the escape hatch for replacing THIS candidate's own target file — it must not
+    also mean "install a project skill that can never actually be reached."""
+    global_root = tmp_path / "global-skills"
+    project_root = tmp_path / "proj" / ".claude" / "skills"
+    existing = global_root / "shared-name" / "SKILL.md"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("---\nname: Shared Name\ndescription: d.\n---\nBody.\n", encoding="utf-8")
+
+    draft = "---\nname: Shared Name\ndescription: A project one.\n---\nBody.\n"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(scope="project", draft=draft)),
+        [0],
+        overwrite_ids=[0],
+        global_skills_dir=global_root,
+        project_skills_dir=project_root,
+    )
+
+    assert outcomes[0].status == "refused"
+    assert "shadow" in outcomes[0].reason.lower()
+
+
+def test_a_same_call_global_then_project_promotion_of_the_same_name_is_still_caught(
+    memory_dir, tmp_path
+):
+    """The pre-call re-scan cannot know about a write THIS SAME call is about to make — the shadow
+    set has to grow live as candidates are applied in order, not just start from what pre-existed."""
+    global_root = tmp_path / "global-skills"
+    project_root = tmp_path / "proj" / ".claude" / "skills"
+    global_draft = "---\nname: Shared Name\ndescription: d.\n---\nBody.\n"
+    project_draft = "---\nname: Shared Name\ndescription: A project one.\n---\nBody.\n"
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(scope="global", draft=global_draft),
+            skill_promotion(scope="project", draft=project_draft),
+        ),
+        [0, 1],
+        global_skills_dir=global_root,
+        project_skills_dir=project_root,
+    )
+
+    assert outcomes[0].status == "applied", outcomes[0].reason
+    assert outcomes[1].status == "refused"
+    assert "shadow" in outcomes[1].reason.lower()
+    assert not (project_root / "shared-name").exists()
+
+
 def test_a_second_skill_in_an_ALREADY_existing_root_gets_no_restart_caveat(memory_dir, tmp_path):
     project_root = tmp_path / "proj" / ".claude" / "skills"
     first = "---\nname: First Skill\ndescription: d.\n---\nBody.\n"
