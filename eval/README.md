@@ -61,8 +61,13 @@ From the repo root (a `uv` workspace member — see the root `pyproject.toml`'s
 
 ```sh
 uv sync
-uv run --package ctx-distillery-eval pytest
+uv run --directory eval --package ctx-distillery-eval pytest
 ```
+
+(`--package` alone only selects which workspace member's *environment* to use — it does not
+change pytest's cwd or which `pyproject.toml`'s `testpaths` gets resolved, so it silently runs the
+root package's suite instead. `--directory eval` makes pytest resolve `eval/pyproject.toml`'s own
+`testpaths`; see `.github/workflows/ci.yml`'s `eval-test` job, fixed the same way.)
 
 Or, for a plain-pip environment where the workspace `[tool.uv.sources]` reference can't resolve
 (e.g. a bare venv, not a `uv` project): install `ctx-distillery` first, then this package in

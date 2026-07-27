@@ -12,6 +12,20 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **Fixed three real bugs an adversarial review found in the rubric/eval pass**, before merge: (1)
+  the `eval-test` CI job never actually ran `eval/tests/` — `--package` only selects which
+  workspace member's ENVIRONMENT to use, not pytest's cwd/`testpaths` resolution, so it silently
+  re-ran the root package's suite three times and never executed the one-way-boundary test gating
+  the whole eval-member invariant; fixed with `--directory eval`, verified against a real `uv`
+  binary. (2) `_plan_from_events` (duplicated in `rubric.py` and `eval/ctx_distillery_eval/score.py`)
+  raised an unhandled `pydantic.ValidationError` on a well-formed dict with the wrong shape,
+  reproduced end-to-end: one malformed trace in a glob killed the entire scoring batch. Now degrades
+  to `None` on that shape too, matching `assemble(events, None)`'s own "none of them raise"
+  philosophy. (3) "mandatory transcript" was only enforced structurally (a required CLI arg) — an
+  EMPTY transcript file slipped straight through and scored to completion. `_read_transcripts` now
+  refuses empty/whitespace-only content, loudly. Added `eval/tests/test_cli.py`, since the review
+  noted `cli.py`/`taskset.py` had zero test coverage before this — exactly the surface two of these
+  three bugs lived in.
 - **ATLAS rubric facts + `ctx-distillery-eval` (Phase 1 of the rubric/eval/studio initiative)** —
   `ctx_distillery/rubric.py` (new): a reward-free, deterministic TF/TA/TG/PA rubric on top of
   `rlm_kit.rubric`. `default_rubric()` is the same fixed four-criterion skeleton every run carries

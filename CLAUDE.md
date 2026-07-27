@@ -155,10 +155,14 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
   files at all — they live in `subagents/agent-<id>.jsonl` (with a paired `.meta.json` carrying
   `agentType`/`description`/`spawnDepth`). Distilling those is a real deferred extension: the same
   file shape, a different glob. Not built.
-- **The project-scoped skills location is UNCONFIRMED** — see invariant 6. `<project>/.claude/skills/`
-  is where this project writes a project-scoped promotion, but whether Claude Code actually discovers
-  a skill there has never been verified. Treat a project-scoped write as "installed where we believe
-  it belongs", not as "installed and known to be picked up."
+- **The project-scoped skills location is CONFIRMED** (empirically, via a real control experiment —
+  see `docs/DESIGN.md`'s "Project-scoped Skills" section), with real precedence/timing caveats to
+  respect: a GLOBAL skill of the same name SHADOWS a project one (`make_skill_validator` and
+  `apply_plan`'s `_promote_skill` both refuse a project-scope name a global skill already holds,
+  hard, with no `overwrite` bypass), and a project's very FIRST top-level skills directory needs a
+  Claude Code restart before it's discovered (`apply_plan`'s outcome says so explicitly for that
+  case). `<project>/.claude/skills/` is where this project writes a project-scoped promotion, and it
+  is now known to be picked up, subject to those two caveats — not merely "believed to belong there."
 - **A skill's `references/` and `scripts/` are out of scope.** A real skill directory may carry them;
   `draft_skill_file` authors the `SKILL.md` body only, and `apply.py` writes only that one file.
 - **Skill enumeration is opt-in on the explicit constructor.** `ClaudeCodeAdapter(memory_dir)` (what
@@ -175,6 +179,19 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
 - **`apply_plan` only knows the Claude Code layout** (it builds a `ClaudeCodeAdapter` directly, and
   its per-kind roots are Claude Code's). Generalising the apply step across harnesses waits for a
   second adapter to actually exist.
+- **`ctx_distillery/rubric.py` sources 100% of its facts from `session.assemble()`'s output, and
+  `eval/` (`ctx-distillery-eval`) never writes and is never imported back.** The rubric is
+  deterministic, reward-free ATLAS (TF/TA/TG/PA) facts, built on `rlm_kit.rubric` — it never decides
+  met/unmet, and no field anywhere functions as a score. `eval/` is a SEPARATE workspace member: a
+  static, offline LLM-as-judge that reads the assembled plan + the transcript(s) it was drawn from
+  as TEXT only (never executes anything, never touches `apply.py`), and `ctx_distillery` itself
+  must NEVER import `ctx_distillery_eval` back (test-enforced, `eval/tests/test_boundary.py`). The
+  eval CLI's transcript path(s) are MANDATORY and must be non-empty — `_read_transcripts` refuses an
+  empty or whitespace-only file loudly (`SystemExit`), because a real judge would otherwise silently
+  score a plan against nothing. Both `_plan_from_events` reconstructions (in `rubric.py` and in
+  `eval/ctx_distillery_eval/score.py`) must degrade to `None` on a malformed `result` payload rather
+  than raise — `assemble()`'s own stated philosophy is "none of them raise," and a malformed shape
+  must fail the same way, never crash a batch scoring run over one bad trace.
 
 ## Harness scope
 
