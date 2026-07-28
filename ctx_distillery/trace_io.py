@@ -74,9 +74,20 @@ def draft_cause(payload: dict) -> str:
     verdict) so an old trace classifies identically to a new one. A recorded value outside the closed
     vocabulary is ignored rather than trusted; deriving is always available.
 
-    `endpoint_error` is tested with `is not None`, NOT for truthiness, and that is load-bearing:
-    rlm-kit fills it with `str(exc)`, which is the EMPTY STRING for `httpx.ConnectTimeout` /
-    `ReadTimeout` / `ConnectError`, `TimeoutError`, `OSError` and `http.client.RemoteDisconnected`.
+    **The endpoint string is read under BOTH `endpoint_error` and `error`**, because the consumer
+    convention has used each. That half is taken from rlm-kit's own `trace.payload_cause` (added in
+    `f217cfad`), which is the read-side mirror of this function; without it a payload that recorded
+    the string under `error` classifies as a validator rejection.
+
+    **The other half of `payload_cause` is deliberately NOT taken, and this must not be "collapsed
+    into the kit" without fixing that first.** Upstream tests the string for TRUTHINESS
+    (`payload.get("endpoint_error") or payload.get("error")`); this function tests `is not None`, and
+    the difference is not stylistic. rlm-kit fills the field with `str(exc)`, which is the EMPTY
+    STRING for `httpx.ConnectTimeout` / `ReadTimeout` / `ConnectError`, `TimeoutError`, `OSError` and
+    `http.client.RemoteDisconnected` — measured, all six. Under truthiness every one of those falls
+    through to the validator branch, which is exactly the misclassification `payload_cause`'s own
+    docstring says it exists to prevent. Aliasing this to the kit today would REGRESS the common
+    transport failures while fixing the rarer key-name one. Take the key set, keep the test.
     Under a truthiness test every one of those fell through to the validator branch — a bare dropped
     connection reported to a human as "failed its format check", and to a trainer as model
     dishonesty, which is the exact harm `CLAUDE.md` invariant 12 exists to prevent.
@@ -91,7 +102,7 @@ def draft_cause(payload: dict) -> str:
         return recorded
     if payload.get("circuit_broken"):
         return CAUSE_CIRCUIT_BROKEN
-    if payload.get("endpoint_error") is not None:
+    if payload.get("endpoint_error") is not None or payload.get("error") is not None:
         return CAUSE_ENDPOINT
     return CAUSE_OK if payload.get("ok") else CAUSE_INVALID
 

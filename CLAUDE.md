@@ -598,10 +598,15 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   (`eval/ctx_distillery_eval/__init__.py`, `studio/ctx_distillery_studio/__init__.py`), so a check
   is writable; none exists. They are independent numbers; don't
   assume bumping the root moved them, and don't assume they must move together.
-- **0.1.0 is UNRELEASED.** `CHANGELOG.md` has `## [Unreleased]` as its ONLY version heading, so the
-  first real bump is a RENAME of that heading to the shipped version plus a fresh empty
-  `## [Unreleased]` above it — not a new section added underneath a shipped one. Getting this
-  backwards would leave the project's entire history filed under a version that never shipped.
+- **0.1.0 IS CUT** (`## [0.1.0] - 2026-07-29`), with an empty `## [Unreleased]` above it. That
+  ordering is the rule: a new version is a RENAME of `[Unreleased]` plus a fresh empty one ABOVE it,
+  never a section added underneath a shipped one — getting it backwards files the project's history
+  under a version that never shipped. **`[0.1.0]` and everything below it are now SHIPPED HISTORY:
+  correct a wrong claim there by superseding it in a newer section, not by editing it in place.**
+  That distinction did not exist while `[Unreleased]` was the only heading — until the cut, an
+  earlier entry and a later one correcting it were two drafts of the SAME release note, and carrying
+  both is what made this file 27 lines per entry against the siblings' 8-14. They were collapsed
+  before the cut, which is the right order and the reason to do it at all.
 
 ## Known simplifications (stated, not hidden)
 
