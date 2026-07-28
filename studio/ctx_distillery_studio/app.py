@@ -91,13 +91,36 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+#: Cap on a slugged run_id, matching `toolscout_studio.app._RUN_ID_MAX`. A slug becomes ONE
+#: filename component, and most filesystems cap a component at 255 BYTES — see `_slug_id`.
+#: The same number is now carried by every slugger in this workspace: `ctx_distillery.cli._slug`,
+#: `ctx_distillery.apply._SLUG_MAX` and `ctx_distillery_eval.cli._TASK_ID_MAX`. The last two arrived
+#: a review later than this one — the first pass capped only the two READ-side sluggers.
+_RUN_ID_MAX = 120
+
+
 def _slug_id(raw: str) -> str:
     """A filesystem-/URL-safe id token: keep `[A-Za-z0-9._-]`, fold the rest (incl. `/`) to `-`,
     strip leading/trailing `.`/`-` so it can NEVER become a traversal segment (`..`, an absolute
-    path, a nested dir). `run_id` becomes a file path — a studio reachable over HTTP must not open a
-    path-traversal hole on itself just because this project's OWN trace files are normally trusted.
-    Copied verbatim from `diff_sentry_studio.app._slug_id`."""
+    path, a nested dir), and cap at `_RUN_ID_MAX` chars — re-stripping after the cut so a truncation
+    landing on a `-`/`.` never leaves a trailing separator. `run_id` becomes a file path — a studio
+    reachable over HTTP must not open a path-traversal hole on itself just because this project's
+    OWN trace files are normally trusted.
+
+    Follows `toolscout_studio.app._slug_id`. This used to say "copied verbatim from
+    `diff_sentry_studio.app._slug_id`", and that provenance was TRUE — which was exactly the
+    problem, because diff-sentry has no cap either and we inherited the gap by copying the older
+    sibling. Reproduced before fixing: `GET /v1/runs/<5000 x's>` produced a 5000-char slug, so
+    `_load_trace`'s `path.exists()` raised a raw `OSError` (ENAMETOOLONG, errno 63 on macOS / 36 on
+    Linux) straight out of the endpoint — a 500 where a 404 belongs, and the one remaining hole in
+    this module's "never raise on a bad run_id" contract, alongside the non-dict-line guard.
+    `Path.exists()` does NOT swallow that errno.
+
+    The cut cannot empty the token (leading separators are already gone, so `token[0]` is
+    alphanumeric), and re-slugging a slug is the identity — which matters because every read path
+    slugs again."""
     token = re.sub(r"[^A-Za-z0-9._-]+", "-", raw or "").strip("-.")
+    token = token[:_RUN_ID_MAX].rstrip("-.")
     return token or "unknown"
 
 

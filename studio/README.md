@@ -89,7 +89,16 @@ loopback-bind / auth posture.
 
 `run_id` is sanitized (`_slug_id`) before it ever becomes a path component — a studio reachable over
 HTTP must not open a path-traversal hole on itself just because this project's own trace files are
-normally trusted.
+normally trusted. The sanitizer follows `toolscout_studio.app._slug_id`, not `diff_sentry_studio`'s:
+it also CAPS the slug at `_RUN_ID_MAX` (120) and re-strips after the cut, so a truncation landing on
+a `-`/`.` leaves no trailing separator. A slug becomes one filename component, capped at 255 bytes on
+most filesystems, and without the cap a 5000-char `run_id` raised a raw `OSError` (ENAMETOOLONG) out
+of `_load_trace` — a 500 where a 404 belongs.
+
+Worth knowing when testing this: Starlette normalises the request path before routing, so
+`GET /v1/runs/..%2F..%2Fetc%2Fpasswd` **never reaches `_slug_id`** — its 404 comes from the router.
+Assert on `_slug_id` directly, and use request-level cases that survive routing (`%2e%2e`, `a%00b`,
+an over-long id).
 
 ## Frontend
 

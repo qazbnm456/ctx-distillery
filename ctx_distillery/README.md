@@ -19,7 +19,12 @@ adapter.ingest()  ->  redact  ->  DistillSession (RLM)  ->  assemble()  ->  [a h
   the trusted snapshot — for the nested skill layout that means `<root>/<slug>/SKILL.md` specifically).
   `ClaudeCodeAdapter.for_project(project_dir)` discovers the real storage; see below.
 - **`redact.py`** — pattern-based host-side redaction, applied immediately after the single
-  `ingest()` so the redacted list is the only text the model can reach.
+  `ingest()` so the redacted list is the only text the model can reach. Three tiers, in order: 7
+  hand-written patterns (the DOTALL private-key block, the lookbehind-anchored `Authorization:`
+  header, the value-only `key = …` assignment, and private-proxy API keys — none of which a vendor
+  corpus can express), then 120 anchored rules ported from gitleaks into `patterns/`, then the
+  operator's own rules from `CD_REDACTIONS` (empty unless set). See `VENDOR.md` for the pin and the
+  refresh command, `CLAUDE.md` invariant 3 for the reasoning, and "Tier three" below for the schema.
 - **`task.py`** — `DistillSession(RLMTask)`: the signature, the judgement-only `output_model`
   (`{action, artifact_id, key_fields}` per candidate), the instructions, and the five read-only
   tools wired from an immutable index snapshot. The `pyodide` interpreter pin is enforced in code.
@@ -37,6 +42,90 @@ adapter.ingest()  ->  redact  ->  DistillSession (RLM)  ->  assemble()  ->  [a h
   `config.py` resolves the `CD_*` environment into an `RLMConfig` and the `chat_fn` the two drafting
   tools call; `render.py` owns the one plan rendering that `show`, the dry run, and the eval judge
   all read. The writer's own CLI lives in `apply.py` — see below for why.
+
+## Tier three — the operator's own redaction rules (`CD_REDACTIONS`)
+
+```bash
+cp redactions.example.json redactions.json     # then export CD_REDACTIONS=./redactions.json
+```
+
+Modelled on toolscout's `TS_TOOLSPACE`: an env var naming a JSON file, a checked-in `*.example.json`
+you copy and edit, and a README example that points at the shipped file directly so it works out of
+the box. One rule is `{label, regex, description, sample, replace_group?}`, and `redact.py` resolves
+the variable at IMPORT time.
+
+**The divergence, stated so nobody removes it: `CD_REDACTIONS` may only ADD.** `TS_TOOLSPACE`
+*replaces* toolscout's built-in catalog — safe there, where the worst case is fewer tools. Here the
+worst case is a leaked credential, so there is no `disable` key (an unknown key is a hard refusal, so
+adding one silently is not possible either), no label shadowing, and no ordering knob. Tier three
+runs last, after everything tiers one and two matched is already a placeholder.
+
+`load_operator_rules(path)` is public — point it at a file to validate one by hand. Every rule must
+survive four checks, each closing a way a redaction rule fails *silently*; every failure is a
+`SystemExit` naming the file, the rule's position and its label.
+
+| check | why it exists |
+| --- | --- |
+| the CLOSED key set | a mistyped `replace_group` would otherwise quietly mean "replace the whole match" |
+| strict compile (warnings → errors) | the Airtable `[[:alnum:]]` trap, arriving through the operator's file instead of the vendored corpus |
+| **ReDoS calibration** | Python's `re` has no timeout, and redaction is on the core path so the `regex` module is not an option |
+| **`sample`, EXECUTED** | a regex that compiles but never matches gives false confidence, and nothing downstream would ever say so |
+
+**The calibration**, and it is TWO gates over one probe grid — an ascending ladder of short synthetic
+adversarial strings, 2→32 characters.
+
+*Gate 1, growth.* Catastrophic backtracking is exponential in the input length, so it shows as a
+blowing-up **ratio** between adjacent probe lengths long before any one probe is expensive: every
+classic shape measures a remarkably consistent ~4.0× per two extra characters. A rule is refused the
+first time a probe costs ≥ 5 ms *and* ≥ 3× its own predecessor two characters shorter. The 5 ms floor
+is what makes that safe — the slowest of the 127 built-in patterns needs ~1.6 µs for the grid's worst
+probe, a ~3000× margin, pinned rule-by-rule by a test — and below it the ratio is ignored as noise. A
+breach is re-timed and the *smallest* measurement decides, because a refusal is permanent and a
+descheduled interpreter is not.
+
+*Gate 2, the absolute budget.* No single probe may exceed **20 ms**. This catches *polynomial*
+blow-up, which grows too gently for the ratio and is ruinous anyway: `a*a*a*a*a*a*b` stays under 2×
+per step and still needs 22.8 ms at 28 characters.
+
+The ladder starts at **2** characters, not 12, because gate 1 is also what bounds the load cost:
+`(a?a?a?a?a?a?a?a?a?a?)+$` costs 16.8 ms at four characters and 3.3 *seconds* at six, so a grid that
+began at 12 wedged the import outright instead of refusing anything. Every shape above is now refused
+within ~200 ms.
+
+The probe grid is built from the rule's *own* pattern in two ways: every distinct literal **character**
+(which is what catches `(x+x+)+y`, and why there is no cap — a cap of six let `(?:abcdef)?(z+z+)+Q`
+through), and a **reaching prefix** walked out of the pattern's own `re` parse tree, emitted with
+filler after it (which is what catches `CORPSECRETPREFIX-(\w+\s?)+$` — the most common operator rule
+shape, and one a probe of repeated single characters never reaches past position 0).
+
+The prefix is derived from the **tree**, not by scraping the pattern text. A scraper that took literal
+runs of 3+ characters was the first version, and it could not spell a 2-character marker
+(`X-(\w+\s?)+$`) or one containing a character class (`ORG-[0-9]{4}-(\w+\s?)+$`) — both loaded clean
+and then hung on real input. The walk emits a concrete string for every literal, class and bounded
+repeat until it reaches an ambiguous quantifier, and records one prefix at *each* such quantifier, so
+a marker sitting behind an earlier one (`\d+-CORPSECRET-(\w+\s?)+$`) is reachable too. It is
+`regex_walk.reaching_prefixes`, the same walk `scripts/derive_liveness_samples.py` derives its
+liveness fixture from.
+
+Both derived families are **capped**, and that is what bounds the load cost in *aggregate* — gate 1
+bounds what one probe may cost, not how many there are. Seeds are bounded by the alphabet itself
+(62 alphanumerics at most); prefixes by `_MAX_REACHING_PREFIXES`. Without the second cap a
+7,919-alternative pattern produced 1,014,880 probes and a 16.8 s load; it now produces 4,896.
+
+It is a heuristic, not a decision procedure. Two gaps are stated rather than papered over: a
+contrived pattern can still evade any finite probe set, and the load cost is bounded only *down to*
+the smallest probe — nothing can time a search without running it, so a pattern already astronomical
+on a two-character input would still wedge the import.
+
+**`replace_group`** is a closed vocabulary — `null`, or the name of a group the rule's own regex
+declares. It replaces that group's span only and keeps the rest of the match. This is the field
+finding `secret_assignment` forced: it is the one built-in a plain `{label, regex}` schema cannot
+express, and `redactions.example.json` carries it, with a test asserting the generic substitution is
+byte-identical to the hand-written `_replace_assignment`.
+
+**`redactions.example.json` is a REAL file, not a skeleton** — the seven tier-one patterns expressed
+in this schema plus one illustrative `corp-internal-token` entry. `tests/test_redact_operator.py`
+loads it through the real loader, so it cannot rot the way a decorative example can.
 
 ## Storage auto-discovery (`ClaudeCodeAdapter.for_project`)
 
@@ -203,7 +292,11 @@ ctx_distillery/
   apply.py             # apply_plan — the human-gated writer, outside the RLM entirely,
                        #   plus `ctx-distillery-apply`'s own main() (see above)
   render.py            # render_plan / plan_as_dict — the ONE plan rendering (eval/ imports it)
-  redact.py            # host-side redaction, applied before any text reaches the model
+  redact.py            # host-side redaction, applied before any text reaches the model: tier one
+                       #   (7 hand-written), tier two (the vendored gitleaks subset), tier three
+                       #   (load_operator_rules, from CD_REDACTIONS — ADDITIVE ONLY, empty by default)
+  patterns/            # gitleaks_subset.json — GENERATED by scripts/port_gitleaks.py, never
+                       #   hand-edited (MIT, see VENDOR.md)
   frontmatter.py       # nested-YAML frontmatter parsing (memory + skill shapes)
   rubric.py            # ATLAS TF/TA/TG/PA facts (reward-free), sourced from session.assemble()
   rl_export.py         # the reward-free SFT/RL bundle `ctx-distillery export` prints. No main(),
@@ -218,3 +311,6 @@ eval/                  # ctx-distillery-eval — a separate uv workspace member,
 studio/                # ctx-distillery-studio — replay-only console over a finished trace
 tests/                 # fully offline: no live model, no Deno, no network
 ```
+
+`redactions.example.json` lives at the REPO root (next to `.env.example`), mirroring where toolscout
+puts `toolspace.example.json` — it is operator configuration, not package data.

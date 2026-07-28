@@ -132,7 +132,65 @@ def test_run_id_path_is_slug_sanitized_against_traversal(tmp_path, monkeypatch):
     assert appmod._slug_id("../../etc/passwd") == "etc-passwd"
     assert appmod._slug_id("..") == "unknown"
     assert "/" not in appmod._slug_id("a/b/c")
-    assert client.get("/v1/runs/..%2F..%2Fetc%2Fpasswd").status_code == 404
+
+
+def test_a_traversal_shaped_request_that_survives_routing_still_reaches_the_slugger(
+    tmp_path, monkeypatch
+):
+    """The three direct `_slug_id(...)` assertions above are the real unit coverage. This is the
+    REQUEST-level half, and it is deliberately NOT `GET /v1/runs/..%2F..%2Fetc%2Fpasswd`.
+
+    That request used to be the last line of the test above, and an adversarial review instrumented
+    `_slug_id` and proved it NEVER REACHES IT: Starlette normalises the path before routing, so its
+    404 comes from the ROUTER, and deleting `_slug_id` entirely would not change the result. It was
+    a decorative assertion that could not fail. Measured, same probe: `..%2F..%2Fetc%2Fpasswd` and
+    `..%252f..%252fetc` do NOT reach `_slug_id`; `%2e%2e`, `a%00b` and a 250-char id DO.
+
+    So the two below are picked because they SURVIVE routing and arrive at `_slug_id` with the raw
+    token still intact — which is the only way a request can exercise this module's sanitizer at
+    all. Do not "restore" the traversal-looking one thinking it is stronger; it asserted nothing.
+    """
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    real = appmod._slug_id
+    seen: list[str] = []
+    monkeypatch.setattr(appmod, "_slug_id", lambda raw: seen.append(raw) or real(raw))
+
+    assert client.get("/v1/runs/%2e%2e").status_code == 404          # raw ".." -> "unknown"
+    assert client.get("/v1/runs/a%00b").status_code == 404           # a NUL would blow up open()
+    assert client.get("/v1/runs/%2e%2e/iterations").status_code == 404  # the same guard, 2nd route
+
+    tokens = list(seen)  # snapshot: `_trace_path` below re-enters the spy and would append again
+    monkeypatch.setattr(appmod, "_slug_id", real)  # done spying; every call from here is the real one
+    assert tokens == ["..", "a\x00b", ".."]  # every one of them actually got there
+    assert real("..") == "unknown" and real("a\x00b") == "a-b"
+    # and the paths they produce stay inside traces_dir, which is the property that matters
+    for raw in tokens:
+        assert appmod._trace_path(raw).resolve().parent == tmp_path.resolve()
+
+
+def test_run_id_is_length_capped(tmp_path, monkeypatch):
+    """An over-long run_id becomes a filename component, and most filesystems cap one at 255 BYTES.
+
+    Without the cap this was a genuine 500: reproduced before fixing, `GET /v1/runs/<5000 x's>`
+    raised `OSError: [Errno 63] File name too long` out of `_load_trace`'s `path.exists()` —
+    `Path.exists()` does not swallow ENAMETOOLONG. `_slug_id` used to be "copied verbatim from
+    `diff_sentry_studio.app._slug_id`", which was true and was the gap: diff-sentry has no cap
+    either. `toolscout_studio.app._slug_id` does, and this now follows toolscout's stricter form.
+    """
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    long_id = appmod._slug_id("x" * 5000)
+    assert len(long_id) == appmod._RUN_ID_MAX
+    assert len(appmod._trace_path("y" * 5000).name) < 255
+    assert client.get("/v1/runs/" + "x" * 5000).status_code == 404  # 404, never a raw OSError
+
+    # the truncation-lands-on-a-separator edge: the cut must not leave a trailing '-'/'.'
+    edge = appmod._slug_id("a" * (appmod._RUN_ID_MAX - 1) + "-tail")
+    assert len(edge) <= appmod._RUN_ID_MAX and not edge.endswith(("-", "."))
+    dot = appmod._slug_id("b" * (appmod._RUN_ID_MAX - 1) + ".tail")
+    assert len(dot) <= appmod._RUN_ID_MAX and not dot.endswith(("-", "."))
+
+    # idempotent: every read path re-slugs, so re-slugging a capped id must be the identity
+    assert appmod._slug_id(long_id) == long_id and appmod._slug_id(edge) == edge
 
 
 # ---- /v1/runs/{run_id}/events: SSE replay of a REAL recorded trace ---------------------------

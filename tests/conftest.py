@@ -7,6 +7,16 @@ resolved paths), which a mock cannot exercise.
 
 from __future__ import annotations
 
+import os
+
+# HERMETICITY, and it has to happen HERE, before the first `ctx_distillery` import below.
+# `redact._TIER3` is resolved from `CD_REDACTIONS` at IMPORT time (fail-closed: a broken operator
+# file must stop the process, not weaken the redactor silently), so a developer with that variable
+# exported would otherwise run the whole suite against their own private rule file — non-hermetic in
+# exactly the way `claude_home`'s docstring below refuses for `~/.claude`. The tier-three tests set
+# it explicitly and reload the module; nothing else may inherit it from the ambient environment.
+os.environ.pop("CD_REDACTIONS", None)
+
 import pytest
 
 from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter

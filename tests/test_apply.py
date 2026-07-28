@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from ctx_distillery import apply as apply_module
 from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
 from ctx_distillery.apply import (
     ARCHIVE_DIRNAME,
@@ -465,6 +466,106 @@ def test_a_skill_name_that_slugifies_to_nothing_is_a_hard_refusal(memory_dir, tm
     assert outcomes[0].status == "refused"
     assert "slugifies to nothing" in outcomes[0].reason
     assert not (tmp_path / "skills").exists()
+
+
+@pytest.mark.parametrize("length", [300, 5000])
+def test_an_over_long_drafted_skill_name_is_REFUSED_not_silently_truncated(
+    memory_dir, tmp_path, length
+):
+    """An over-long name is refused, and the distinction from the run-id sluggers is the point.
+
+    `frontmatter["name"]` is untrusted MODEL output, so an over-long one is a plan this project must
+    handle, not a hand-built curiosity — it reproduces at 300 characters, not only at 5000.
+
+    A first fix CAPPED it, matching what `cli._slug` / `studio.app._slug_id` / `eval.cli._slug` all
+    do. That was wrong HERE, for a reason those three do not share: a run id names a trace file
+    nobody approved, so shortening it loses nothing a human relied on, while `CLAUDE.md` invariant 9
+    says a project skill's DIRECTORY NAME is its real identifier — the slash command comes from it.
+    Truncating installs the candidate under an identity the operator never read in the plan, which is
+    the same failure `slugify`'s empty-result branch already refuses, one degree less obvious. So
+    `slugify` no longer truncates at all and the caller refuses, exactly as it does for an empty slug.
+
+    The refusal is NOT what prevents the `OSError` — `_skill_target` catches path errors independently
+    (the test below stubs `slugify` to prove that wall still stands). It is what makes the refusal
+    carry a reason a human can act on instead of an errno from three frames down.
+    """
+    draft = f'---\nname: "{"a" * length}"\ndescription: d\n---\nBody.\n'
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(draft=draft)),
+        [0],
+        global_skills_dir=tmp_path / "skills",
+    )
+    assert outcomes[0].status == "refused"
+    assert str(apply_module._SLUG_MAX) in (outcomes[0].reason or "")
+    assert not (tmp_path / "skills").exists(), "a refused promotion must write nothing"
+
+
+@pytest.mark.parametrize("length", [300, 5000])
+def test_a_slug_the_filesystem_cannot_stat_is_REFUSED_and_the_rest_of_the_batch_still_applies(
+    memory_dir, tmp_path, monkeypatch, length
+):
+    """`_skill_target`'s "never an exception escaping apply_plan" contract, over the check that broke it.
+
+    The final `is_symlink()`/`exists()`/`is_dir()` used to sit OUTSIDE the try, and `_ignore_error`
+    swallows only ENOENT/ENOTDIR/EBADF/ELOOP — so ENAMETOOLONG came out of `apply_plan` as a raw
+    `OSError`, leaving a multi-candidate `--approve 0,3` run half-applied under a stack trace.
+
+    The caller's own length refusal is raised OUT OF THE WAY on purpose (`_SLUG_MAX` is patched
+    enormous), because that gate would otherwise answer first and this test would silently stop
+    exercising the thing it exists for. The two are independent fixes, not one instead of the other:
+    the length refusal gives a human an actionable reason for the case that actually reaches a real
+    plan, and this wall catches ANY slug that arrives some other way — a hand-built plan, or a future
+    caller deriving one differently. `slugify` is stubbed to a pass-through for the same reason.
+
+    Both halves are asserted: the bad candidate is REFUSED, and the good candidate AFTER it in the
+    same call still gets applied.
+    """
+    monkeypatch.setattr(apply_module, "_SLUG_MAX", 10**6)
+    monkeypatch.setattr(apply_module, "slugify", lambda name: (name or "").strip().lower())
+    # The root EXISTS, so the stat really reaches the over-long component. Against a missing root a
+    # 300-character name short-circuits on the parent's own ENOENT (which `Path.exists()` does
+    # swallow) and lands on `mkdir`'s already-guarded refusal instead — also fine, but not this check.
+    skills_root = tmp_path / "skills"
+    skills_root.mkdir()
+    draft = f'---\nname: "{"a" * length}"\ndescription: d\n---\nBody.\n'
+    outcomes = apply_plan(
+        memory_dir,
+        plan(skill_promotion(draft=draft), promotion("Survivor")),
+        [0, 1],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "refused"
+    assert "could not stat" in outcomes[0].reason
+    assert outcomes[1].status == "applied", "a later candidate must not be lost to an earlier refusal"
+    assert (memory_dir / "survivor.md").is_file()
+
+
+@pytest.mark.parametrize("length", [300, 5000])
+def test_the_containment_check_refuses_an_unstattable_slug_rather_than_raising(tmp_path, length):
+    """The wall itself, reached directly — `slugify`'s cap is not the only thing holding it up.
+
+    A future caller deriving the slug some other way (or a hand-built plan) must still hit a refusal
+    here, which is why the cap and this try/except are BOTH fixes rather than one instead of the other.
+    """
+    target, reason = _skill_target(tmp_path, "a" * length, overwrite=False)
+    assert target is None
+    assert "could not stat" in reason
+
+
+def test_slugify_does_NOT_truncate_because_the_caller_refuses_instead():
+    """`slugify` diverges from the three run-id sluggers, and the divergence is the design.
+
+    `cli._slug`, `studio.app._slug_id` and `eval.cli._slug` all CAP at 120: a run id names a trace
+    file nobody approved, so shortening it costs a human nothing. This one produces an APPROVED
+    ARTIFACT IDENTITY — `CLAUDE.md` invariant 9 makes a project skill's directory name its real
+    identifier — so truncating would install the candidate under a name the operator never read in
+    the plan. That is the same failure the empty-slug branch refuses, one degree less obvious, so
+    this function stays a pure transform and the two promotion call sites refuse an over-long result.
+    """
+    assert len(slugify("x" * 5000)) == 5000, "no truncation here — the caller refuses instead"
+    assert slugify("Deploy Runbook") == "deploy-runbook", "short names are untouched"
+    assert slugify("!!!") == "", "a degenerate name still yields the empty slug the caller refuses"
 
 
 def test_a_memory_promotion_still_ignores_the_skills_roots_entirely(memory_dir, tmp_path):

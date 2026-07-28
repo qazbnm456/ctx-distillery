@@ -44,7 +44,10 @@ _DRAFT = (
 )
 
 
-def _tool_call(tool, artifact_id, *, draft=_DRAFT, ok=True, errors=()):
+def _tool_call(tool, artifact_id, *, draft=_DRAFT, ok=True, errors=(), **extra):
+    """`extra` carries the two infra fields `drafting.py` records beside `ok` —
+    `endpoint_error` / `circuit_broken` — which is how `assemble` tells the THREE causes of
+    `ok=False` apart (see `schema._not_ok_problem`)."""
     return {
         "type": EVENT_TOOL_CALL,
         "payload": {
@@ -53,6 +56,7 @@ def _tool_call(tool, artifact_id, *, draft=_DRAFT, ok=True, errors=()):
             "artifact_id": artifact_id,
             "draft": draft,
             "errors": list(errors),
+            **extra,
         },
     }
 
@@ -131,6 +135,78 @@ def test_a_failed_format_check_is_carried_through_with_its_errors():
     candidate = out.candidates[0]
     assert candidate.draft_ok is False
     assert any("bad metadata.type" in p for p in candidate.problems)
+    assert any("failed its format check" in p for p in candidate.problems)
+
+
+def test_an_endpoint_failure_is_not_reported_as_a_format_check_failure():
+    """`make_model_tool` sets `ok=False` for THREE causes, and this one never reaches the validator.
+
+    Reproduced before fixing: a bare connection failure rendered as ``artifact 'a1' failed its
+    format check: Connection refused`` — blaming the model for an infrastructure fault, in the exact
+    text `studio/`'s PLAN panel shows a human deciding what to apply (and, via
+    `apply._blocking_problem`, in the refusal reason too).
+    """
+    events = [_tool_call("draft_memory_file", "a1", draft="", ok=False,
+                         errors=["Connection refused"], endpoint_error="Connection refused")]
+    out = assemble(events, _plan({"action": "promote_to_memory", "artifact_id": "a1"}))
+    problems = out.candidates[0].problems
+    cause = next(p for p in problems if "Connection refused" in p)
+    assert "failed its format check" not in cause
+    assert "endpoint failed" in cause and "no format check ever ran" in cause
+
+
+def test_a_circuit_break_is_not_reported_as_a_format_check_failure():
+    """The breaker short-circuits BEFORE the model is called at all (`raw=""`), so neither the
+    drafter nor the validator produced this outcome. `rubric.py`'s TA criterion already names the
+    breaker honestly; this is the same vocabulary on the human-visible surface."""
+    events = [_tool_call("draft_skill_file", "s1", draft="", ok=False,
+                         errors=["circuit breaker: 3 consecutive invalid outputs"],
+                         circuit_broken=True)]
+    out = assemble(events, _plan({"action": "promote_to_skill", "artifact_id": "s1"}))
+    cause = next(p for p in out.candidates[0].problems if "circuit breaker" in p)
+    assert "failed its format check" not in cause
+    assert "tripped the circuit breaker" in cause and "never called" in cause
+
+
+def test_an_endpoint_failure_that_STRINGIFIED_TO_NOTHING_is_still_an_endpoint_failure():
+    """`endpoint_error` is `Optional[str]` and rlm-kit sets `str(exc)` — which is `''` for a whole
+    family of real faults: `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`,
+    `OSError`, `RemoteDisconnected`. A truthiness test dropped every one of them through to the
+    validator branch, rendering a dropped connection as ``failed its format check: no detail
+    recorded`` — invariant 12's harm, arrived at through an empty string instead of a wrong branch.
+    """
+    events = [_tool_call("draft_memory_file", "a1", draft="", ok=False, endpoint_error="")]
+    out = assemble(events, _plan({"action": "promote_to_memory", "artifact_id": "a1"}))
+    cause = next(p for p in out.candidates[0].problems if "never drafted" in p)
+    assert "failed its format check" not in cause
+    assert "endpoint failed" in cause and "no format check ever ran" in cause
+
+
+def test_a_circuit_break_outranks_an_endpoint_error_in_the_problem_line():
+    """The documented precedence, PINNED — swapping the two branches used to leave everything green.
+
+    `circuit_broken` wins because it is the stronger claim (the model was never called at all).
+    `make_model_tool` never sets both, so only a hand-written payload gets here; the point is that
+    the ORDER is a decision, and it is now stated ONCE — in `trace_io.draft_cause`, which
+    `_not_ok_problem` and `rl_export.run_metrics` both call. This pins the problem-line end of it;
+    `tests/test_draft_cause.py` pins that the two ends cannot come apart.
+    """
+    events = [_tool_call("draft_memory_file", "a1", draft="", ok=False,
+                         errors=["both"], endpoint_error="502", circuit_broken=True)]
+    out = assemble(events, _plan({"action": "promote_to_memory", "artifact_id": "a1"}))
+    cause = next(p for p in out.candidates[0].problems if "never drafted" in p)
+    assert "tripped the circuit breaker" in cause
+    assert "endpoint failed" not in cause
+
+
+def test_all_three_ok_false_causes_still_agree_that_the_draft_is_not_ok():
+    """The LABELS differ; `draft_ok` deliberately does not. It answers "did this call yield usable
+    bytes", which is the same answer for all three — and is what `apply_plan` and the studio's
+    `applyBlocker` both key on."""
+    for extra in ({}, {"endpoint_error": "boom"}, {"circuit_broken": True}):
+        events = [_tool_call("draft_memory_file", "a1", ok=False, errors=["x"], **extra)]
+        out = assemble(events, _plan({"action": "promote_to_memory", "artifact_id": "a1"}))
+        assert out.candidates[0].draft_ok is False and out.candidates[0].problems
 
 
 def test_an_empty_draft_is_flagged():

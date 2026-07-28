@@ -1,0 +1,58 @@
+[
+  {
+    "label": "private_key",
+    "regex": "(?s)-----BEGIN[ A-Z]*PRIVATE KEY-----.*?-----END[ A-Z]*PRIVATE KEY-----",
+    "description": "A whole BEGIN/END private-key block, body included. Non-greedy and (?s)/DOTALL so the body is consumed WHOLE rather than piecemeal — which is also why it is listed first. Known NOT to catch: a key pasted without its armour lines.",
+    "sample": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0000000000000000000000\nnot a real key, just the shape\n-----END RSA PRIVATE KEY-----",
+    "replace_group": null
+  },
+  {
+    "label": "bearer_token",
+    "regex": "(?i)(?<=authorization:\\s)(?:bearer|token)\\s+[A-Za-z0-9\\-._~+/]{8,}=*",
+    "description": "An Authorization header's value. Anchored with a LOOKBEHIND so the header name survives the redaction and the audit trail stays readable. Known NOT to catch: a token on a line that never names the header (that is what the shape-specific rules are for).",
+    "sample": "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+    "replace_group": null
+  },
+  {
+    "label": "api_key",
+    "regex": "\\b(?:sk|pk)-(?:[A-Za-z0-9]+-)?[A-Za-z0-9_\\-]{20,}",
+    "description": "A provider-shaped API key: an sk-/sk-ant-/pk- prefix plus a long opaque tail. This is the rule that catches a PRIVATE-PROXY key, which is nobody's published format and which no vendor corpus can know about. Known NOT to catch: a key with no recognisable prefix at all.",
+    "sample": "sk-1f4c2b7e-9a3d-4f21-8c5e-6b0d7a3e19f2",
+    "replace_group": null
+  },
+  {
+    "label": "aws_access_key_id",
+    "regex": "\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b",
+    "description": "An AWS access key id. Known NOT to catch: the paired SECRET access key, which is a bare 40-character base64 blob with no prefix to anchor on — use a `secret_assignment`-style rule for that.",
+    "sample": "AKIAIOSFODNN7EXAMPLE",
+    "replace_group": null
+  },
+  {
+    "label": "github_token",
+    "regex": "\\bgh[pousr]_[A-Za-z0-9]{16,}\\b",
+    "description": "A GitHub personal-access / OAuth / user / server / refresh token. Deliberately open-ended at {16,} rather than pinned to today's length, so a future GitHub token length is still caught. Known NOT to catch: a classic 40-hex GitHub token, which is indistinguishable from a git SHA-1.",
+    "sample": "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+    "replace_group": null
+  },
+  {
+    "label": "google_api_key",
+    "regex": "\\bAIza[0-9A-Za-z_\\-]{35}\\b",
+    "description": "A Google API key. Terminated by \\b rather than by a fixed set of delimiters, so it still fires on AIza<35> followed by a bracket or a backslash. Known NOT to catch: a Google OAuth client secret, which carries no AIza prefix.",
+    "sample": "AIzaSyD_ExampleNotARealKey-000000000000",
+    "replace_group": null
+  },
+  {
+    "label": "secret_assignment",
+    "regex": "(?i)(?<=\\b)(?P<key>password|passwd|secret|api[_-]?key|access[_-]?token)(?P<sep>\\s*[:=]\\s*)(?P<quote>[\"']?)(?P<value>[^\\s\"',;]{6,})(?P=quote)",
+    "description": "An explicit `password = \"...\"` / `api_key: '...'` binding. THE reason `replace_group` exists: only the named group `value` is replaced, so `password = ` and its quoting survive and a reviewer can still see WHAT was set without seeing it. Known NOT to catch: a value under six characters, or one containing a space, quote, comma or semicolon.",
+    "sample": "password = \"hunter2000\"",
+    "replace_group": "value"
+  },
+  {
+    "label": "corp-internal-token",
+    "regex": "\\bcorp_[A-Za-z0-9]{32}\\b",
+    "description": "THE ILLUSTRATIVE ONE — everything above this entry is a built-in expressed in this schema (pointing CD_REDACTIONS at this file verbatim therefore changes nothing about the first seven shapes); this is the kind of rule you actually add. An internal service token. Known NOT to catch: a `corp_` prefixed variable name (too short).",
+    "sample": "corp_abc123def456ghi789jkl012mno345pq",
+    "replace_group": null
+  }
+]

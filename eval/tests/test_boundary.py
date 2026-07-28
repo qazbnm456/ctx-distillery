@@ -157,11 +157,35 @@ def test_the_scrub_list_covers_every_CD_var():
 
     A missing name is not automatically a live-call risk (`CD_ROOT_LM` is the gate, and it is
     scrubbed), but "the gate happens to cover us" is not the property the fixture claims.
+
+    The scrape covers `ctx_distillery.redact` as well as `ctx_distillery.config`, because the list
+    rotted a second time in exactly the blind spot a single-module scrape leaves: `CD_REDACTIONS`
+    lives in `redact`, so nothing here could have flagged its absence.
     """
     from .conftest import CD_VARS, _cd_vars_actually_read
 
-    missing = _cd_vars_actually_read() - set(CD_VARS)
+    read = _cd_vars_actually_read()
+    assert "CD_REDACTIONS" in read, "the scrape must reach ctx_distillery.redact, not just config"
+    missing = read - set(CD_VARS)
     assert not missing, (
-        f"ctx_distillery.config reads {sorted(missing)}, which conftest.CD_VARS does not scrub — "
+        f"the root package reads {sorted(missing)}, which conftest.CD_VARS does not scrub — "
         f"add them there. This is the drift the 'keep in sync' comment could not prevent."
     )
+
+
+def test_this_suite_never_inherits_a_developers_private_redaction_rules():
+    """Hermeticity, and it needs its own test because the autouse fixture cannot provide it.
+
+    `ctx_distillery.redact` resolves `CD_REDACTIONS` at MODULE IMPORT, which happens during
+    collection — before any fixture runs. So the guarantee comes from `conftest.py` popping the
+    variable at its own import time, and the only way to state that is to assert the resolved tier.
+    An adversarial review found this member running non-hermetically while `CHANGELOG.md` claimed
+    "the suite can never inherit a developer's private rule file"; that claim was true of the ROOT
+    suite only.
+    """
+    import os
+
+    from ctx_distillery import redact
+
+    assert "CD_REDACTIONS" not in os.environ
+    assert redact._TIER3 == ()

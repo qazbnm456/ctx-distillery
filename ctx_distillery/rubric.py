@@ -87,9 +87,19 @@ def default_rubric(task: str = "") -> RubricCriteria:
                 category="TG",
                 weight=1.0,
                 description=(
-                    "Every promote_to_memory / promote_to_skill candidate is backed by a real, "
-                    "format-valid drafting tool call (not a fabricated artifact_id), and every "
-                    "prune candidate at least names a target_path."
+                    # CAUSE-BLIND ON PURPOSE, and worded to say so (CLAUDE.md invariant 12). The
+                    # fact behind this is `n_backed_promotions`, which counts `draft_ok` — and
+                    # `draft_ok` answers "did this call yield usable bytes", the same answer for all
+                    # three causes of `ok=False`. It used to read "format-valid drafting tool call",
+                    # which names the VALIDATOR for a fact that cannot tell the validator from a
+                    # dropped connection or a tripped breaker, and unlike the other two cause-blind
+                    # surfaces (`apply._blocking_problem`, the studio's `applyBlocker`) this one is
+                    # not gated behind a `problems`-first check — it goes to the eval judge
+                    # unconditionally, on every run. `evidence_gathered_before_drafting` above is
+                    # where the breaker IS named, using `rubric.py`'s own TA vocabulary.
+                    "Every promote_to_memory / promote_to_skill candidate is backed by a real "
+                    "drafting tool call that produced usable bytes (not a fabricated artifact_id), "
+                    "and every prune candidate at least names a target_path."
                 ),
             ),
             Criterion(
@@ -194,6 +204,14 @@ def trace_facts(events: list[dict]) -> dict:
         "plan_problems": list(a.problems),
         "min_read_step": min(read_steps) if read_steps else None,
         "min_draft_step": min(draft_steps) if draft_steps else None,
+        # Reads `circuit_broken` DIRECTLY, and deliberately does NOT go through
+        # `trace_io.draft_cause`. That helper answers "which ONE of the four outcomes was THIS call",
+        # a per-call classification whose whole point is that the four partition; this fact asks a
+        # different question — "did the breaker trip anywhere in this run" — which is a run-level
+        # existence check over one specific field. Routing it through the classifier would silently
+        # change its meaning for a payload the classifier resolves to a stronger cause, and would
+        # make a TA fact depend on a precedence order it has no stake in. Two questions, two
+        # readings; this is not the half of invariant 12's consolidation that was left undone.
         "any_circuit_broken": any(bool((p or {}).get("circuit_broken")) for p in draft_calls),
         "n_candidate_problems": sum(1 for c in a.candidates if c.problems),
         "n_backed_promotions": sum(

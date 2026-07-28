@@ -340,6 +340,25 @@ def test_run_gives_each_invocation_a_unique_trace_filename_but_keeps_run_id(tmp_
     assert len(set(seen)) == 4  # two invocations of two tasks, four distinct files
 
 
+def test_slug_is_length_capped_so_a_task_id_cannot_overflow_a_filename():
+    """A task id comes out of a hand-edited JSON file and becomes `<slug>-<stamp>.jsonl`, which is
+    ONE filename component — capped at 255 BYTES on most filesystems. Without the cap an over-long
+    id turned into an `OSError` (ENAMETOOLONG) inside `TraceRecorder` mid-batch rather than a task
+    that simply runs. Same gap, same fix, and the same review as
+    `ctx_distillery_studio.app._slug_id`'s — this is the WRITE side of it.
+    """
+    from ctx_distillery_eval.cli import _TASK_ID_MAX, _slug
+
+    assert len(_slug("x" * 5000)) == _TASK_ID_MAX
+    assert len(f"{_slug('y' * 5000)}-20260728T101500Z.jsonl") < 255
+    # the truncation-lands-on-a-separator edge: the cut must not leave a trailing '-'/'.'
+    for tail in ("-tail", ".tail"):
+        edge = _slug("a" * (_TASK_ID_MAX - 1) + tail)
+        assert len(edge) <= _TASK_ID_MAX and not edge.endswith(("-", "."))
+    # unchanged behaviour for everything short, including the degenerate "" the caller falls back on
+    assert _slug("demo-durable-fact") == "demo-durable-fact" and _slug("..") == ""
+
+
 def test_run_refuses_to_append_into_an_existing_trace_file(tmp_path, monkeypatch, capsys):
     """The one case the per-invocation stamp does not cover: two runs in the same second, or two
     distinct task ids that slug to the same token. `TraceRecorder` appends and nothing here may

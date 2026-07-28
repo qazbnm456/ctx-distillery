@@ -1,4 +1,11 @@
-"""Reading a trace file safely — the ONE place JSONL bytes become a list of events.
+"""Reading a trace safely — the ONE place JSONL bytes become events, and the ONE place a recorded
+drafting payload becomes a named CAUSE.
+
+Two jobs, both of them "interpret an untrusted recorded payload once, so every consumer inherits the
+answer instead of re-deriving it" (`CLAUDE.md` invariant 11). `dict_events`/`load_trace` are the
+shape guard; `draft_cause` is the cause classifier that `schema._not_ok_problem` and
+`rl_export.run_metrics` both read — see `draft_cause`'s own docstring for why having had TWO of
+those was the bug, not the redundancy.
 
 `rlm_kit.trace.load_events` does NO shape validation: a line that is syntactically valid JSON but
 NOT an object (`42`, `null`, `"x"`, `[1, 2, 3]`) parses fine — no `ValueError` — and lands in the
@@ -32,7 +39,61 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
 from rlm_kit.trace import load_events
+
+#: rlm-kit's own CLOSED cause vocabulary, re-exported so a reader of a RECORDED payload and a reader
+#: of a LIVE `ModelToolResult` name the four outcomes with the same four strings. Imported rather
+#: than restated: a parallel vocabulary is exactly the drift this module exists to prevent, and
+#: `rlm_kit.tools` is dspy-free (verified), so `schema.py`'s no-dspy property is untouched by it.
+DRAFT_CAUSES = (CAUSE_OK, CAUSE_INVALID, CAUSE_ENDPOINT, CAUSE_CIRCUIT_BROKEN)
+
+
+def draft_cause(payload: dict) -> str:
+    """Which of rlm-kit's four outcomes a RECORDED drafting `tool_call` payload describes.
+
+    Returns one of `DRAFT_CAUSES` — `"ok"` / `"invalid"` / `"endpoint"` / `"circuit_broken"` — never
+    `None`, so a caller counts by cause rather than by "is it None".
+
+    **Why this is ONE function and not two.** `schema._not_ok_problem` (the human/judge-visible
+    problem line) and `rl_export.run_metrics` (the per-cause training counters) each derived the
+    cause themselves, from the same two payload fields, in two files. They agreed on every payload
+    shape the suite covers — but nothing PINNED that they must, and a sibling consumer reported
+    getting the same classification wrong twice independently, in two places, with the second
+    "fix" looking complete while still counting an ENDPOINT failure as a gate rejection. A partial
+    fix that looks complete is the dangerous state, because nothing prompts a second look. So the
+    classification has one implementation and `tests/test_draft_cause.py` pins that the two surfaces
+    cannot disagree.
+
+    **Prefer the RECORDED cause; derive only as a fallback.** Since rlm-kit `4fcd50b2`,
+    `ModelToolResult` exposes `cause`/`validator_ran` directly and `tools/drafting.py` records both
+    onto every drafting `tool_call`, so a fresh trace SAYS what happened instead of leaving it to be
+    reconstructed. Every trace recorded before that has no `cause` key at all, and `rl_export` /
+    `schema` / `studio` all read historical traces — hence the fallback, which reproduces
+    `ModelToolResult.cause`'s own chain exactly (breaker first, then endpoint, then the validator's
+    verdict) so an old trace classifies identically to a new one. A recorded value outside the closed
+    vocabulary is ignored rather than trusted; deriving is always available.
+
+    `endpoint_error` is tested with `is not None`, NOT for truthiness, and that is load-bearing:
+    rlm-kit fills it with `str(exc)`, which is the EMPTY STRING for `httpx.ConnectTimeout` /
+    `ReadTimeout` / `ConnectError`, `TimeoutError`, `OSError` and `http.client.RemoteDisconnected`.
+    Under a truthiness test every one of those fell through to the validator branch — a bare dropped
+    connection reported to a human as "failed its format check", and to a trainer as model
+    dishonesty, which is the exact harm `CLAUDE.md` invariant 12 exists to prevent.
+
+    The breaker outranks the endpoint because it is the STRONGER claim (the model was never called at
+    all). `make_model_tool` never sets both, so the order only matters for a hand-written trace — but
+    it is a chain rather than three independent predicates precisely so the four causes PARTITION
+    every payload, which is what lets `run_metrics`'s slices sum exactly to its aggregate.
+    """
+    recorded = payload.get("cause")
+    if recorded in DRAFT_CAUSES:
+        return recorded
+    if payload.get("circuit_broken"):
+        return CAUSE_CIRCUIT_BROKEN
+    if payload.get("endpoint_error") is not None:
+        return CAUSE_ENDPOINT
+    return CAUSE_OK if payload.get("ok") else CAUSE_INVALID
 
 
 def dict_events(events: Iterable[object]) -> list[dict]:

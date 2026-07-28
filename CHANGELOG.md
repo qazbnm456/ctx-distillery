@@ -12,6 +12,367 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A drafting call's cause is now RECORDED by the source and READ by every consumer, and the two
+  places that used to derive it are one shared helper.** rlm-kit `4fcd50b2` added
+  `ModelToolResult.cause` (`"ok"` / `"invalid"` / `"endpoint"` / `"circuit_broken"`) and
+  `.validator_ran`, plus the `CAUSE_*` constants; the pin moved to it. Three changes, in order of how
+  much they matter:
+
+  1. **`tools/drafting.py` records `cause` + `validator_ran`** onto every drafting `tool_call`,
+     beside the `endpoint_error` / `circuit_broken` it already wrote, and `_errors_with_infra`
+     branches on `result.cause` instead of re-deriving from the two flags. This module is the only
+     one holding a live `ModelToolResult`; recording what it already knows beats every downstream
+     reader reconstructing it, and makes a fresh trace self-describing. Both are PROPERTIES upstream,
+     not dataclass fields — they never reach a trace unless someone puts them there.
+  2. **`rl_export._draft_cause` and `schema._not_ok_problem` no longer each derive the cause** —
+     both call the new `trace_io.draft_cause`, which PREFERS the recorded `cause` and falls back to
+     rlm-kit's own chain (`circuit_broken` → `endpoint_error is not None` → `ok`) for the traces
+     recorded before the key existed. This is the part that was a real finding rather than an
+     adoption: the two derivations AGREED on every payload shape in the suite, but nothing pinned
+     that they must, and one implementation per job is `CLAUDE.md` invariant 11. The argument came
+     from a sibling consumer of the same kit, against itself: it had made the same collapse in two
+     places and "fixed" it once already — first counting every `ok is False` as a gate rejection (a
+     real trace showed calls=3, breaks=7, rejections=10, a "rejection rate" of 3.33), then excluding
+     breaks, which looked correct while still counting an ENDPOINT failure as a gate rejection in a
+     field named for the gate. A partial fix that looks complete is the more dangerous state, because
+     nothing prompts a second look. `tests/test_draft_cause.py` pins both directions — identity (the
+     same function object; `rl_export._draft_cause` must not come back) and behaviour (over five
+     payload shapes, `_not_ok_problem`'s wording and `run_metrics`'s bucket name the same cause).
+     Verified by sabotaging each surface in turn: re-forking `schema`'s derivation with the old
+     truthiness bug reddens 2 cases, re-forking `rl_export`'s reddens 4.
+  3. `run_metrics`'s counters now count rlm-kit's constants directly, and `draft_not_ok` is the
+     complement of the `CAUSE_OK` count rather than "everything the classifier declined to label" —
+     the four causes partition the calls, so the slices sum to the aggregate as arithmetic rather
+     than as a property this module has to defend. The public metric key names are unchanged.
+
+  **Correct-by-construction, not observed — stated plainly because the sibling's report had the same
+  limit.** Their five real traces contained zero endpoint failures, so their second bug never fired
+  on real data. Ours are the same: the two real live-run traces
+  (`demo-durable-fact` / `demo-one-off-debugging`) carry six drafting calls between them, ALL
+  `ok=True`, with zero endpoint failures and zero circuit breaks. Nothing in this change fixes an
+  observed wrong number in a trace we hold; it removes the second place a future fix could drift out
+  of sync.
+
+  `rubric.trace_facts`'s `any_circuit_broken` deliberately did NOT move to the shared helper — it
+  asks "did the breaker trip anywhere in this run", a run-level existence check, not a per-call
+  classification. A comment at the fact says so, so a future reader does not "finish the job"
+  wrongly.
+
+- **`ctx_distillery/skills/memory-vs-skill-criteria.md` was reported as claiming the file is loaded
+  via `load_skills_as_tools`; it is not, and nothing changed.** The sentence is a NEGATIVE claim —
+  "not as something `ctx_distillery.task.DistillSession` reads via `load_skills_as_tools`" — and it
+  agrees with `VENDOR.md`. Recorded here so the same misreading does not get "fixed" next time.
+
+- **`apply_plan` no longer lets a raw `OSError` escape from a model-drafted skill name, and all four
+  sluggers in the workspace now cap at 120 characters.** `_skill_target`'s final
+  `is_symlink()`/`exists()`/`is_dir()` check sat OUTSIDE the `try/except (OSError, ValueError)` whose
+  own comment states the guarantee it broke — *"a refusal is the right answer to an unusable slug —
+  never an exception escaping `apply_plan` halfway through a run of candidates."* `_ignore_error`
+  swallows only ENOENT/ENOTDIR/EBADF/ELOOP, so ENAMETOOLONG (reproduced at **300** characters, not
+  only at 5000) came straight out of a multi-candidate `--approve 0,3` run as a stack trace, leaving
+  it half-applied. The input is `slugify(frontmatter["name"])` — untrusted MODEL output, which is
+  what made it reachable from a real plan; `promote_to_memory` and `prune` already refused correctly.
+  Two independent fixes, both kept: the check is inside the `try` (so ANY caller deriving a slug
+  differently still hits a wall), and `slugify` now caps its output. The cap closed the last two
+  uncapped sluggers — `ctx_distillery.cli._slug` (reachable via `--run-id`, and the WRITE side:
+  driving `_cmd_distill` really did raise) and `apply.slugify`. `eval`'s docstring had cited
+  `ctx_distillery.cli._slug` as "same reasoning" while that function had no cap at all; the
+  cross-references are now true rather than aspirational.
+
+- **`endpoint_error` is tested with `is not None`, never for truthiness — in all three places.**
+  rlm-kit declares it `Optional[str]` and fills it with `str(exc)`, which is the EMPTY STRING for
+  `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`, `OSError` and
+  `RemoteDisconnected`. Under truthiness every one of those fell through to the validator branch:
+  reported to a human as ``artifact 'a1' failed its format check: no detail recorded``
+  (`schema._not_ok_problem`), counted in `draft_validator_rejects` as TRAINING SIGNAL
+  (`rl_export._draft_cause`), and echoed with no message at all (`drafting._errors_with_infra`) —
+  precisely the harm invariant 12 exists to prevent, arrived at through an empty string rather than
+  a wrong branch. Severity is bounded (the shipped CLI uses the OpenAI SDK, which always supplies a
+  message), so it is reachable only via a caller-supplied `chat_fn`. `_draft_cause`'s
+  `validator_reject` fall-through is KEPT but now documented as a deliberate RESIDUAL with its own
+  exactness argument, and the dead `_DRAFT_CAUSES` tuple that carried the partition claim (setting it
+  to `()` left the suite green) is deleted in favour of stating it next to the chain that creates it.
+  `schema._not_ok_problem`'s documented circuit-over-endpoint PRECEDENCE is now pinned too — swapping
+  the two branches used to leave everything green, unlike its `rl_export` twin.
+
+- **`rubric.py`'s TG criterion no longer says "format-valid" for a cause-blind fact.** It was a THIRD
+  cause-blind surface and, unlike the two invariant 12 already lists (`apply._blocking_problem`, the
+  studio's `applyBlocker`), it is not gated behind a `problems`-first check — it goes to the eval
+  judge unconditionally on every run. The fact behind it is `draft_ok`, which answers "did this call
+  yield usable bytes", the same answer for all three causes; the description now says that instead.
+
+- **Doc-rot corrections, each independently verified.** (a) `redact.py`, `CLAUDE.md` and `README.md`
+  all claimed `private_key` was "a DOTALL BEGIN/END block matcher gitleaks has no equivalent for —
+  upstream's rules match the header, not the body." **That is FALSE.** The vendored `private-key`
+  regex ends `[\s\S-]{64,}?KEY(?: BLOCK)?-----` — RE2's own DOTALL idiom — and matched a full
+  202-character block at span `(0, 202)`, body included. `CLAUDE.md` contradicted itself eight lines
+  later by listing the pair as redundant-today. The honest justification is REFRESH RESILIENCE, the
+  same one the other redundancies carry; only `bearer_token` (RE2 cannot express its lookbehind) and
+  `secret_assignment` (replacement semantics) are genuinely unavailable from gitleaks, and the
+  redundancy count is **five** of seven, not four. (b) "the golden corpus only reaches 45 of them"
+  matched nothing computable — the corpus has **54** rule ids, **40** with a string the rules
+  actually match, **17** with an upstream true positive; every site now says which. (c) 505 KB vs
+  426 KB for the same transcript measurement, unified on 426. (d) "three lines apart" where the
+  `ModelToolResult` field comments are adjacent. (e) entropy delta 34 → the measured **33**.
+  (f) test-count deltas (+805 claimed vs +1202 measured) replaced with measured per-file numbers.
+  (g) "three things happen at load" vs the four checks `redact.py` enumerates.
+
+- **Test-quality gaps closed, each verified by mutation.** `_excerpt`/`_SAMPLE_ECHO_CHARS` (the
+  truncated `sample` echo) had ZERO coverage — deleting the truncation left the suite green, so the
+  mitigation was a comment; now pinned in both directions. `test_redact_golden.py`'s end-to-end
+  assertion checked only `"[REDACTED:" in out`, which passes for ANY label — 12 of 120 samples are
+  redacted under a *different* rule's label, and each is now an enumerated row in
+  `_COVERED_BY_ANOTHER_RULE` with a second test refusing a stale row.
+  `test_the_growth_gate_and_the_budget_gate_each_catch_what_the_other_misses` failed 1 run in 3 under
+  20-way CPU contention (the polynomial pattern got refused by the growth gate); it now tests each
+  gate with THE OTHER ONE DISABLED, which is both deterministic and a literal statement of the claim.
+
+- **A THIRD, operator-supplied redaction tier — `CD_REDACTIONS`, following toolscout's
+  `TS_TOOLSPACE` convention with ONE deliberate divergence: it may only ADD.** Point the variable at
+  a JSON file of `{label, regex, description, sample, replace_group?}` rules and they run after the
+  7 hand-written patterns and the 120 vendored gitleaks rules. `redactions.example.json` ships at the
+  repo root the way `toolspace.example.json` does in toolscout — `cp redactions.example.json
+  redactions.json`, edit, point at it; the copy is git-ignored like `.env`.
+
+  **The divergence is the whole design decision, and it is written down in four places so nobody
+  "fixes" it back into symmetry** (`.env.example`, `README.md`, `redact.py`, `CLAUDE.md` invariant
+  3). `TS_TOOLSPACE` REPLACES toolscout's built-in catalog, which is safe there because the worst
+  case of a bad toolspace is FEWER TOOLS. Here the worst case is a LEAKED CREDENTIAL. So there is no
+  `disable` key — the rule key set is CLOSED, so an unknown key is a hard refusal and one cannot be
+  smuggled in later — no label shadowing, and no ordering knob. An operator can never turn tier one
+  or tier two off.
+
+  **`sample` is MANDATORY and EXECUTED at load. This is the single most valuable line in the
+  feature.** A regex that compiles but never matches gives false confidence: the operator believes a
+  shape is covered, the redactor removes nothing, and there is no error anywhere — the same failure
+  class as the Airtable POSIX trap that motivated `scripts/port_gitleaks.py`'s strict compile,
+  arriving through a different door. So every rule's own regex must redact that rule's own `sample`,
+  or the load fails with `SystemExit` naming the file, the rule's position and its label. A second
+  pass pins idempotence per rule, which is how `redact_transcript`'s existing "redacting twice is a
+  no-op" promise survives an operator-supplied pattern.
+
+  **ReDoS is refused at LOAD, not survived at run time — on TWO gates, because an adversarial review
+  got past a single one three different ways.** Operator regexes run on Python's BACKTRACKING `re`
+  over ~500 KB transcripts, and `re` has no timeout; the `regex` module does, but redaction is on the
+  CORE path (`session.run_distillation` calls it unconditionally) and this project does not put a
+  dependency there. So the mitigation is CALIBRATION: after compiling, each rule is run against an
+  ascending ladder of short synthetic adversarial probes, 2→32 characters, and refused on either of
+  two gates.
+
+  *Gate 1, the GROWTH RATIO*, is the primary detector and it is what bounds what any ONE probe may
+  cost (the AGGREGATE bound is the derived-family caps, below).
+  Catastrophic backtracking is exponential in the input length, so it shows up as a blowing-up ratio
+  between adjacent probe lengths long before any single probe is expensive — every classic shape
+  measures a consistent ~4.0x per two extra characters. A rule is refused the first time a probe
+  costs ≥ 5 ms AND ≥ 3x its own predecessor two characters shorter. *Gate 2, the absolute 20 ms
+  per-probe budget*, catches POLYNOMIAL blow-up that grows too gently for the ratio and is ruinous
+  anyway: `a*a*a*a*a*a*b` stays under 2x per step and still needs 22.8 ms at 28 characters.
+
+  The 5 ms floor is the safety argument for the ratio: the slowest of the 127 built-in patterns needs
+  ~1.6 µs for the grid's worst probe, a ~3000x margin, and a per-rule test pins that measurement, so
+  gate 1 is structurally out of reach of a well-behaved pattern. A breach on either gate is re-timed
+  and the SMALLEST measurement decides, because a refusal is permanent and a descheduled interpreter
+  is not — this suite really did see a good rule refused by a scheduler spike under load.
+
+  The three evasions this replaced, each reproduced before and after:
+  - `CORPSECRETPREFIX-(\w+\s?)+$` — a literal marker plus a catastrophic tail, which is the MOST
+    COMMON operator rule shape (it is what `redactions.example.json`'s own `corp-internal-token` is,
+    and what any `X-Internal-Auth:` rule is). Probes of one repeated character never spell the
+    marker, so the match failed at position 0 and the tail was never reached: calibration passed in
+    0.3 ms while the rule really cost 1172 ms on `"CORPSECRETPREFIX-" + "a"*24`. The grid now emits
+    a REACHING PREFIX, walked out of the pattern's own parse tree, with filler after it.
+  - `(?:abcdef)?(z+z+)+Q` — `z` was the seventh distinct literal and derived seeds stopped at six.
+    The cap is gone; every distinct literal character is a seed, and the count is bounded by the
+    pattern's own length anyway.
+  - `(a?a?a?a?a?a?a?a?a?a?)+$` — already astronomical at the SMALLEST probe (16.8 ms at 4 characters,
+    3.3 s at 6). The old ladder started at 12 and measured elapsed time only after `search` RETURNED,
+    so this did not fail the budget, it HUNG the import outright (still running at 120 s). Starting
+    at 2 characters is what makes the ratio gate see 0.09 ms → 22 ms and refuse in ~40 ms.
+
+  **The probe PREFIX is derived from the parse TREE, not scraped from the pattern text — and the
+  probe COUNT is capped.** Both were found by a THIRD adversarial review, both reproduced through the
+  real loader before and after. The first fix scraped literal RUNS of 3+ characters out of the
+  pattern source, which a real operator rule can trivially fail to contain: `X-(\w+\s?)+$` (a
+  2-character marker, under the minimum) loaded in ~107 ms and then hung for over 15 SECONDS on a
+  46-character line, and `ORG-[0-9]{4}-(\w+\s?)+$` (a character CLASS inside the marker — the
+  scraped run was `ORG-`, and no filler spells `1234-`) did the same. `XY-(\w+\s?)+$` WAS caught,
+  which is exactly what made the 3-character cutoff invisible. Lowering the minimum to 1 would have
+  closed only the first. `ctx_distillery/regex_walk.py` now walks the pattern's own `re` parse tree,
+  emitting a concrete string for each literal, class and bounded repeat and recording a prefix at
+  EVERY ambiguous quantifier — so a marker behind an earlier quantifier (`\d+-CORPSECRET-…`) is
+  reachable too, as are backreferences and leading lookbehinds. It is ONE implementation shared with
+  `scripts/derive_liveness_samples.py` (invariant 11), whose fixture regenerates byte-identically.
+  Separately, the old scraper's prefix count was UNBOUNDED in pattern length: a 7,919-alternative
+  pattern produced **1,014,880 probes and a 16.8 s load**, every individual probe cheap and gate 1
+  therefore silent. Seeds were already bounded by the alphabet; prefixes are now capped by
+  `_MAX_REACHING_PREFIXES`, and the same pattern produces **4,896**. Zero false refusals across the
+  127 built-ins plus 24 realistic org-credential patterns (prefixed tokens, header/lookbehind rules,
+  UUID/base64/JWT shapes, DSNs, alternation-heavy vendor lists); all 151 calibrate in 124 ms total.
+
+  Calibration still runs BEFORE the sample check, because the sample check executes the pattern.
+  Stated honestly in the module, including the gaps that are NOT closed: a contrived pattern can still
+  evade any finite probe set; the load cost is bounded only down to the smallest probe, because
+  nothing can time a search without running it; and the filler following a reaching prefix is a fixed
+  set, so `X-(z+z+)+Q` is reached but not fed.
+
+  **A tier-three `sample` must be SYNTHETIC, and now the docs say so.** It is the one field the
+  schema requires to be credential-SHAPED, and a load refusal echoes it to stderr — into scrollback,
+  a CI log, a crash report — with nothing anywhere previously warning against pasting a real one.
+  `.env.example` and `README.md` both say to invent a token of the right shape, and the echo is
+  capped at 64 characters as a mitigation rather than a licence.
+
+  **`replace_group` — a closed vocabulary, still data, never code**, and finding it is *why* the
+  schema has five keys rather than two. `secret_assignment` keeps `password = ` and replaces only the
+  value; that is the one built-in a plain `{label, regex}` pair cannot express. Its pattern already
+  uses named groups, so `"replace_group": "value"` says "substitute only the named group `value`,
+  leave the rest of the match intact". Legal values are exactly `null` and a group the rule's own
+  regex declares — anything else is refused at load, listing what IS available. Implemented
+  generically, and independently useful: it is how you redact the value after `X-Internal-Auth:`
+  while keeping the header name.
+
+  **`redactions.example.json` is a REAL working file, not a fill-in-the-blank skeleton** — toolscout's
+  example is what its own README tells you to point at, and ours has to hold that standard. It
+  carries all seven built-in patterns expressed in this schema (the dogfood; including
+  `secret_assignment` with its `replace_group`, which proves the field is necessary — a test asserts
+  the generic substitution is byte-identical to the hand-written `_replace_assignment`) plus one
+  illustrative `corp-internal-token` entry showing what an operator would actually add.
+  `tests/test_redact_operator.py` loads it through the REAL loader and re-asserts every rule's
+  sample, which is what keeps it from rotting.
+
+  **The 4/7 overlap between tier one and tier two is now DELIBERATE rather than incidental.**
+  Empirically, 4 of the 7 hand-written patterns are also covered by the vendored corpus
+  (`private_key`→`private-key`, `aws_access_key_id`→`aws-access-token`, `github_token`→`github-pat`,
+  `google_api_key`→`gcp-api-key`) and 3 are not (`bearer_token` — RE2 cannot express its lookbehind;
+  `api_key` — private-proxy `sk-<uuid>` shapes are in no vendor corpus, measured against a real key;
+  `secret_assignment` — replacement semantics). All 7 stay: tier two is REGENERATED from a moving
+  upstream, so a refresh that renamed, narrowed or dropped `github-pat` would otherwise reduce
+  coverage silently. `test_redact_golden.py` now carries an `_OVERLAP` table asserting both halves, so
+  such a refresh surfaces as "this shape is now TIER-ONE-ONLY" instead of as nothing at all. Note
+  `google_api_key` is not even fully redundant today: gitleaks' `gcp-api-key` requires a terminator
+  from a fixed set where tier one ends on `\b`, so `AIza<35>]` is tier-one-only — also pinned.
+
+  No new runtime dependency (stdlib `re`/`json`/`time`/`os`), no network, and `redact.py` stays
+  inside `tests/test_no_write_capability.py`'s mutation scan — the tier reads a file and never writes
+  one. The variable is resolved at IMPORT time and a broken file stops the process (`import
+  ctx_distillery` exits non-zero, asserted in a subprocess): fail-closed, the same stance
+  `_load_gitleaks_subset` already takes about a missing vendored artifact, because a redactor that
+  silently gets weaker is the failure this module exists to avoid. **All THREE workspace suites** pop
+  the variable at conftest IMPORT time — root, `eval/` and `studio/` — so none of them can inherit a
+  developer's private rule file. That fix originally landed in the root suite only, and an
+  adversarial review showed what the other two cost: both import `ctx_distillery` during COLLECTION,
+  so a BROKEN file turned each into a collection-time `INTERNALERROR` and a VALID one just made them
+  quietly non-hermetic. An autouse fixture cannot fix it — `redact` resolves the variable when the
+  MODULE is imported, long before any fixture runs — so `eval/tests/conftest.py` pops it beside its
+  existing `CD_*`/`CDEVAL_*` scrub list (`CD_REDACTIONS` joins that list too, and the list's drift
+  test now scrapes `redact.py` as well as `config.py`, which is the blind spot that hid the name in
+  the first place), and `studio/` gets a `conftest.py` whose entire job is that one line. Each member
+  asserts its own hermeticity (`redact._TIER3 == ()`) rather than trusting the arrangement.
+  Cost on a 500 KB rendered transcript: ~135 ms for tiers one and two, **+5.6 ms for one operator
+  rule** (+49 ms for the example file's full 8); loading and calibrating those 8 rules takes 4.4 ms.
+  `tests/test_redact_operator.py` carries **361** of them (this number is MEASURED, per a review
+  that found the earlier `+221`/`+584` pair understated the batch by ~400: the two redaction test
+  files hold 1,208 tests between them against a pre-batch root suite of 434).
+
+- **Host-side redaction (invariant 3) goes TWO-TIER: 7 hand-written patterns + 120 gitleaks rules,
+  vendored under MIT and graded against gitleaks' own regression corpus.** `redact.py` used to be
+  seven regexes and an honest disclaimer. It still is — first — and then runs
+  `ctx_distillery/patterns/gitleaks_subset.json`, a mechanical port of the ANCHORED subset of
+  gitleaks `v8.30.1`'s rules (commit `83d9cd684c87d95d656c1458ef04895a7f1cbd8e`), generated by the
+  checked-in `scripts/port_gitleaks.py`. Measured on shaped provider tokens, coverage went
+  **4/14 → 14/14**; on a real 426 KB rendered Claude Code transcript the whole thing costs
+  **~110 ms** (tier one alone: ~32 ms) with **zero false positives** on real content.
+
+  **Why tier one had to stay, and stay first.** This was the finding that settled the design rather
+  than an act of politeness to the old code. `private_key` is a DOTALL BEGIN/END *block* matcher
+  gitleaks has no equivalent for; `bearer_token` is anchored with a **lookbehind, which RE2 cannot
+  express**, so no gitleaks rule ever will; `secret_assignment` replaces the VALUE ONLY, keeping
+  `api_key = ` legible. And on the real transcript, the operator's own live API key — an
+  `sk-<uuid-shaped>` **private-proxy** key — was matched by **none** of the 120 vendored rules,
+  because it is not a published provider format. Tier one caught it. An anchored corpus of vendor
+  prefixes is structurally blind to a key minted by whoever is in front of you. Running tier one
+  first also keeps this project's own labels stable (`[REDACTED:github_token]`, not
+  `[REDACTED:github-pat]`) no matter how the vendored corpus is refreshed later.
+
+  **The load-bearing line in the porter is `warnings.simplefilter("error")`.** gitleaks'
+  `airtable-personnal-access-token` is `pat[[:alnum:]]{14}\.[a-f0-9]{64}`. Handed to Python
+  *unported* it COMPILES, emitting nothing but a `FutureWarning: Possible nested set` — and then
+  means something else entirely (`[[:alnum:]]{14}` parses as a character set plus 14 literal `]`),
+  so a real Airtable PAT never matches. In a scanner that is a missed finding; in a **redactor** it
+  is a live credential flowing into a language model's context with no error anywhere. Compiling
+  under `error` makes that class of silent mis-port a build failure, `redact.py` repeats the check
+  at import, and `tests/test_redact_golden.py` pins the specific case in both directions (the
+  unported form matches a real PAT *not at all*; the ported one does).
+
+  **Two divergences from upstream, both deliberate, both argued next to the code.**
+  (a) **Entropy floors are loaded for provenance and never enforced.** gitleaks tunes them for a
+  SCANNER, where a false positive wastes an engineer's time; here a false negative ships a live
+  credential, so the asymmetry is inverted — and since the port already dropped every rule whose
+  confidence came from a nearby keyword, what is left is anchored on a literal prefix that IS the
+  evidence. Measured against upstream's own corpus: all 85 true positives match either way, and
+  dropping the floors redacts 33 more credential-SHAPED strings (documentation samples, `AIzaaaa…`
+  placeholders) that cost the planner nothing. (b) **The keyword gate is kept exactly as upstream
+  ships it** — an earlier draft here ungated any rule whose keywords its own pattern did not imply
+  (to protect vendor-name-keyed rules like `airtable`), and on the real transcript that immediately
+  redacted a genuine **git commit SHA**, because `sourcegraph-access-token` carries a bare
+  `[a-fA-F0-9]{40}` alternative that only its keywords make safe. Reverted, and the measurement is
+  recorded in the module. The gate's remaining false-negative direction is stated, not hidden.
+
+  **What makes the vendored copy trustworthy rather than hopeful** is `tests/test_redact_golden.py`
+  (**847** tests — measured, not the `+584` an earlier draft claimed): it replays gitleaks' OWN true/false-positive cases — scraped from upstream's Go
+  generator by the checked-in `scripts/extract_gitleaks_golden.py` into
+  `tests/data/gitleaks_golden.json`, 54 rule ids / 85 TPs / 180 FPs — against the ported patterns.
+  The FPs are PARTITIONED on purpose: `fps_rejected` (109) must stay rejected, which is what catches
+  a port transformation that silently WIDENED a rule into meaninglessness, and `fps_over_redacted`
+  (71) records the over-redaction the dropped entropy floors and allowlists buy. A case moving
+  between the two buckets goes red and forces a human to look.
+
+  **That golden corpus carries a matching string for only 40 of the 120 rules, so every rule now
+  also has a LIVENESS sample.** (54 rules have a case of SOME kind; just 17 have an upstream TRUE
+  POSITIVE. An earlier draft said "45", which corresponds to none of the three counts.) Upstream
+  hand-wrote `tps`/`fps` for the rules it felt like, which left 80 vendored rules
+  with no test anywhere asserting they still MATCH anything — and an adversarial review showed the
+  price: rewriting `adobe-client-secret`'s regex to the literal `ZZZ_MATCHES_NOTHING`, and separately
+  widening its `{32}` to `{288}`, each left the whole suite green. A dead redaction rule is invisible
+  by construction: nothing is removed, and nothing errors. `tests/data/liveness_samples.json`
+  (generated by the checked-in `scripts/derive_liveness_samples.py`, which walks each rule's own `re`
+  parse tree; 119 of 120 derived automatically, `kubernetes-secret-yaml` hand-written because its
+  word boundaries need real YAML around them) pins one matching string per rule, and every rule is
+  asserted to still match it AND to still be redacted end to end. The samples are CHECKED IN rather
+  than derived inside the test on purpose: a sample derived from the rule's own current pattern moves
+  with the rule, so the `{288}` mutation would regenerate a 288-character sample and stay green.
+  This proves nothing about semantic fidelity to a vendor's real format — the golden TPs remain that
+  gate — but it catches the dead-rule class, and `VENDOR.md`'s refresh recipe now regenerates and
+  diffs the fixture as its own step.
+
+  **The keyword gate's accepted false-negative direction is now ENUMERATED, and it is exactly two
+  rules.** `redact.py` named `airtable-personnal-access-token` as "the" case where the gate is keyed
+  on the vendor's NAME rather than on anything the token's shape implies; an adversarial review found
+  a second, `facebook-access-token` (gated on `facebook`, pattern `\d{15,16}(\||%)[0-9a-z\-_]{27,40}`).
+  The list is derived rather than hand-kept: a test checks each rule's liveness sample against its own
+  gate and asserts the set is precisely those two, so a refresh that adds a third says so.
+
+  **`_load_gitleaks_subset` gained the `re.purge()` its two siblings already document as
+  load-bearing, and a test that pins the loader rather than the artifact.** `re.compile` caches by
+  `(pattern, flags)` and a cache HIT never re-parses, so it never re-emits the `FutureWarning` the
+  strict compile exists to catch — with the cache primed, a hand-edited artifact carrying the raw
+  Airtable POSIX pattern imported cleanly and shipped a dead rule. Separately, the loader's
+  `warnings.simplefilter("error")` was entirely unpinned: replacing it with `if True:` turned nothing
+  red, because `test_every_ported_pattern_recompiles_with_warnings_as_errors` compiles the ARTIFACT's
+  regexes itself and never runs the loader. There is now a test that drives the real loader against a
+  hand-made artifact with the cache deliberately primed, under `simplefilter("always")` so only the
+  loader's own filter can raise; each mutation turns it red on its own.
+
+  No new runtime dependency (stdlib `re`/`json` only — redaction is on the core path and must not
+  drag in an HTTP stack), and **no network call, ever**: TruffleHog's verify-by-POSTing-the-secret
+  model is the exact inversion of a module that runs over the operator's own private history.
+  `redact_transcript` stays idempotent and non-raising across both tiers, pinned over the whole
+  golden corpus. `scripts/` sits outside `tests/test_no_write_capability.py`'s scan (the porter
+  writes files; `redact.py` and everything else under `ctx_distillery/` stay write-free) — asserted,
+  not assumed. Licence (MIT, Copyright (c) 2019 Zachary Rice), the pin, the transformation list,
+  what was NOT taken (the 101 generic keyword-near-assignment rules, which need gitleaks'
+  1,446-entry stopword allowlist; and `secrets-patterns-db`, whose CC-BY-SA-4.0 share-alike would
+  poison this project's MIT status) and the **refresh command** are in `VENDOR.md`.
+
 - **The studio's Trajectory drawer — the frontend half, REBUILT against `el()`/`clear()` rather than
   ported.** `studio/DESIGN.md` used to carry this as an explicit deferral ("*Not copied:* a §5.7
   Trajectory drawer … describing one would be fabrication"); the data layer
@@ -140,6 +501,62 @@ never applies anything itself.
     a textual scan: that file's own docstring names `apply_plan`. `eval/tests/conftest.py`'s autouse
     offline fixture also now scrubs `CD_*` alongside `CDEVAL_*`, so a developer machine with
     `CD_ROOT_LM` exported cannot start a live billed distillation from the suite.
+- **FIXED: three different drafting failures were labelled as one, and the label named the wrong
+  half — the user-visible surface said a 502 was the model's fault.** `rlm_kit.tools.model.make_model_tool`
+  reports `ok=False` for THREE distinct causes (its `ModelToolResult` field comments say so three
+  lines apart): the deterministic host-side validator declined the text, the model ENDPOINT failed
+  after its transient retries (`endpoint_error`, `raw=""` — the validator never ran), or the CIRCUIT
+  BREAKER short-circuited (`circuit_broken`, `raw=""` — the model was never called). `drafting.py`
+  has always recorded both flags on the `tool_call` event, so the cause was always recoverable; three
+  surfaces threw it away anyway. Reproduced before fixing: a pure connection failure rendered as
+  ``artifact 'a1' failed its format check: Connection refused``, in the exact text `studio/`'s PLAN
+  panel puts in front of a human deciding what to apply.
+
+  `schema._not_ok_problem` (new) now names the real cause in that problem line, using the vocabulary
+  `rubric.py`'s TA criterion already established for the breaker. `rl_export.run_metrics` splits its
+  old `draft_rejects` into `draft_validator_rejects` / `draft_endpoint_errors` /
+  `draft_circuit_breaks` — disjoint (`_draft_cause` classifies in a CHAIN, not as three independent
+  predicates) and summing exactly to a new `draft_not_ok` aggregate. That is training signal, and
+  folding a 502 into "rejects" would have taught a trainer to read flaky infrastructure as model
+  dishonesty. `AssembledCandidate.draft_ok` and `run_labels`'s `n_draft_not_ok` stay deliberately
+  cause-blind aggregates — they answer "did this call yield usable bytes", the same answer either
+  way — but their docstrings no longer claim to be validator verdicts. Recorded as `CLAUDE.md`
+  invariant 12.
+
+  **Also fixed, in the same neighbourhood: an inline comment that its own green test disproved.**
+  `run_metrics` claimed the circuit-break count was "a subset of the first's *cause*, not of its
+  count"; `test_run_metrics_counts_rejects_and_breaks_separately` right beside it asserted
+  `draft_rejects == 2` and `draft_circuit_breaks == 1` over two calls — the break WAS inside the
+  total. The new partition makes the relation statable, and
+  `test_run_metrics_causes_partition_the_aggregate` pins it (including a hand-written payload
+  setting both flags, which `make_model_tool` never does, precisely because the chain keeps the
+  identity true anyway).
+
+- **FIXED: `_slug_id` had no length cap, and a path-traversal assertion that could not fail.** Two
+  studio findings from the same review.
+
+  **The cap.** `ctx_distillery_studio.app._slug_id`'s docstring said "Copied verbatim from
+  `diff_sentry_studio.app._slug_id`" — TRUE, and that was the bug: diff-sentry has no cap either, so
+  we inherited the gap by copying the older sibling. `toolscout_studio.app._slug_id` has
+  `_RUN_ID_MAX`, plus a re-strip so a truncation landing on a `-`/`.` leaves no trailing separator.
+  Adopted, with the provenance line corrected to say so. A slug becomes ONE filename component (255
+  bytes on most filesystems); reproduced before fixing, `GET /v1/runs/<5000 x's>` raised a raw
+  `OSError: [Errno 63] File name too long` out of `_load_trace`'s `path.exists()` (`Path.exists()`
+  does NOT swallow ENAMETOOLONG) — a 500 where a 404 belongs, and the last hole in this module's
+  "never raise on a bad run_id" contract. `eval/cli.py::_slug` had the identical gap on the WRITE
+  side (a task id becomes a trace FILENAME there, handed to `TraceRecorder`) and gets the same cap,
+  `_TASK_ID_MAX`. Tests pin the cap, both truncation-on-a-separator edges (`-` and `.`), and
+  idempotence — every read path re-slugs.
+
+  **The assertion.** `studio/tests/test_app.py`'s traversal test ended with
+  `assert client.get("/v1/runs/..%2F..%2Fetc%2Fpasswd").status_code == 404`. Instrumented: that
+  request **never reaches `_slug_id`** — Starlette normalises the path before routing, so the 404
+  comes from the ROUTER and would still be a 404 with `_slug_id` deleted entirely. Same for
+  `..%252f..%252fetc`; `%2e%2e`, `a%00b` and a 250-char id DO reach it. The three direct
+  `_slug_id(...)` assertions above it were the real coverage and are kept; the decorative request is
+  replaced by ones that survive routing, spied to PROVE they arrive, and a comment records why so
+  nobody "restores" the traversal-looking one thinking it is stronger.
+
 - **FIXED: the invariant-1/8 tripwire was structurally blind over most of two modules.** An
   adversarial review of this batch found `tests/test_no_write_capability.py::_code_lines` entered
   docstring-skip mode only when a stripped line STARTED with `"""`. Two modules assign a

@@ -190,6 +190,31 @@ def test_run_labels_separates_unbacked_from_draft_not_ok():
     assert labels["n_unbacked"] == 1
 
 
+@pytest.mark.parametrize(
+    "payload_extra",
+    [
+        {},                                            # the validator declined the text
+        {"endpoint_error": "Connection refused"},       # the endpoint died after its retries
+        {"circuit_broken": True},                       # the breaker never called the model
+    ],
+)
+def test_n_draft_not_ok_is_a_deliberate_aggregate_over_all_three_causes(payload_extra):
+    """It counts "the drafter yielded no usable bytes", NOT "the validator declined".
+
+    The distinction matters because this label reads `AssembledCandidate.draft_ok`, which is
+    per-candidate and cause-blind by design — so all three of `make_model_tool`'s `ok=False` causes
+    land here identically, and the DOCSTRING must say that rather than name the validator. A reader
+    who wants the cause split reads `run_metrics`, which sees the drafting payloads directly.
+    """
+    events = [
+        _run_start(),
+        _tool_call("draft_memory_file", step_id=1, artifact_id="artifact-1", ok=False,
+                   **payload_extra),
+        _result(_plan(PROMOTION)),
+    ]
+    assert rl_export.run_labels(events)["n_draft_not_ok"] == 1
+
+
 def test_run_labels_carries_no_correctness_field():
     """The oracle boundary, stated as a test: nothing here claims the plan was RIGHT.
 
@@ -213,22 +238,88 @@ def test_run_metrics_counts_every_seat_separately():
     assert metrics["read_transcript_chunk_calls"] == 1
     assert metrics["draft_memory_file_calls"] == 1
     assert metrics["draft_skill_file_calls"] == 1
-    assert metrics["draft_rejects"] == 0
+    assert metrics["draft_not_ok"] == 0
+    assert metrics["draft_validator_rejects"] == 0
+    assert metrics["draft_endpoint_errors"] == 0
     assert metrics["draft_circuit_breaks"] == 0
     assert metrics["sub_calls"] == 1
     assert metrics["elapsed_s"] == 3.0
     assert metrics["hit_iteration_cap"] is False
 
 
-def test_run_metrics_counts_rejects_and_breaks_separately():
+def test_run_metrics_tells_the_three_ok_false_causes_apart():
+    """`make_model_tool` reports `ok=False` for three different things, and only one is the
+    validator. Folding them into one "rejects" count taught a trainer to read a 502 as model
+    dishonesty — see `trace_io.draft_cause` and `schema._not_ok_problem`."""
+    events = [
+        _run_start(),
+        _tool_call("draft_memory_file", step_id=1, artifact_id="a", ok=False),
+        _tool_call("draft_memory_file", step_id=2, artifact_id="b", ok=False,
+                   endpoint_error="Connection refused"),
+        _tool_call("draft_skill_file", step_id=3, artifact_id="c", ok=False, circuit_broken=True),
+        _tool_call("draft_skill_file", step_id=4, artifact_id="d", ok=True),
+    ]
+    metrics = rl_export.run_metrics(events)
+    assert metrics["draft_validator_rejects"] == 1
+    assert metrics["draft_endpoint_errors"] == 1
+    assert metrics["draft_circuit_breaks"] == 1
+    assert metrics["draft_not_ok"] == 3  # the successful call is not in any bucket
+
+
+def test_run_metrics_causes_partition_the_aggregate():
+    """The containment relation, pinned — because the comment that USED to sit on these counters
+    claimed the breaks were "a subset of the first's *cause*, not of its count", and the test right
+    beside it disproved that in the same file (a plain `ok=False` plus an `ok=False` +
+    `circuit_broken` gave `draft_rejects == 2`, `draft_circuit_breaks == 1` — the break WAS inside
+    the total). The three causes are now DISJOINT and sum EXACTLY to `draft_not_ok`, which is a
+    claim a reader can act on: slice, or total, never both.
+
+    The last event sets `circuit_broken` AND `endpoint_error` together — something
+    `make_model_tool` never does — precisely because `trace_io.draft_cause` classifies in a chain
+    rather than as three independent predicates, so the identity holds even for a hand-written trace.
+    (These payloads carry no `cause` key, so this is also the FALLBACK path under test: an old trace
+    partitions exactly as a fresh one does.)
+    """
     events = [
         _run_start(),
         _tool_call("draft_memory_file", step_id=1, artifact_id="a", ok=False),
         _tool_call("draft_memory_file", step_id=2, artifact_id="b", ok=False, circuit_broken=True),
+        _tool_call("draft_skill_file", step_id=3, artifact_id="c", ok=False,
+                   endpoint_error="502 Bad Gateway"),
+        _tool_call("draft_skill_file", step_id=4, artifact_id="d", ok=False,
+                   circuit_broken=True, endpoint_error="502 Bad Gateway"),
+        _tool_call("draft_memory_file", step_id=5, artifact_id="e", ok=True),
+    ]
+    m = rl_export.run_metrics(events)
+    parts = ("draft_validator_rejects", "draft_endpoint_errors", "draft_circuit_breaks")
+    assert sum(m[part] for part in parts) == m["draft_not_ok"] == 4
+    assert m["draft_circuit_breaks"] == 2  # the both-flags call counts ONCE, as the stronger claim
+    assert m["draft_not_ok"] <= m["draft_memory_file_calls"] + m["draft_skill_file_calls"]
+
+
+def test_an_endpoint_error_that_STRINGIFIED_TO_NOTHING_is_not_counted_as_a_validator_reject():
+    """`endpoint_error` is `Optional[str]` and rlm-kit sets `str(exc)`, which is `''` for
+    `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`, `OSError` and
+    `RemoteDisconnected`. Under a truthiness test every one of those was counted in
+    `draft_validator_rejects` — TRAINING SIGNAL teaching a trainer to read a dropped connection as
+    model dishonesty, which is exactly the harm invariant 12 names.
+    """
+    events = [
+        _run_start(),
+        _tool_call("draft_memory_file", step_id=1, artifact_id="a", ok=False, endpoint_error=""),
     ]
     metrics = rl_export.run_metrics(events)
-    assert metrics["draft_rejects"] == 2
-    assert metrics["draft_circuit_breaks"] == 1
+    assert metrics["draft_endpoint_errors"] == 1
+    assert metrics["draft_validator_rejects"] == 0
+    assert metrics["draft_not_ok"] == 1
+
+
+def test_run_metrics_names_no_counter_after_the_validator_that_it_does_not_mean():
+    """The old key was `draft_rejects` — a "reject" of three causes only one of which is a
+    rejection. Only the genuinely validator-scoped counter may carry validator vocabulary."""
+    metrics = rl_export.run_metrics(_full_run())
+    assert "draft_rejects" not in metrics
+    assert [k for k in metrics if "reject" in k] == ["draft_validator_rejects"]
 
 
 def test_run_metrics_hits_the_cap_from_the_runs_own_meta():
