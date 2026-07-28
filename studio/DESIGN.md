@@ -161,7 +161,9 @@ mono `.fr-badge` pill carrying the event name, then a body — `.fr-line` (prima
 `--border`; `--ok` / `--bad` on a `distill.draft.created` row per its `ok`.
 
 The seven mapped families (`mapper.to_event` is the source of truth):
-- `distill.run.created` — `transcripts` · `memory_artifacts` · `rubric_criteria`
+- `distill.run.created` — `transcripts` · `memory_artifacts` · `rubric_criteria`. When the run
+  recorded a transcript index, `transcripts` carries its composition too — `12 (sessions=3
+  subagents=9)` — so a reviewer can see at a glance whether subagent transcripts were in scope.
 - `distill.plan.step` — **the planner's own reasoning turn**: `turn N (wrote code)` + the reasoning
   text. For a judgement-only task with five tools this is plausibly the richest content in the trace.
 - `distill.sub_lm.call` — a recursive sub-LM escalation, `in:` / `out:`

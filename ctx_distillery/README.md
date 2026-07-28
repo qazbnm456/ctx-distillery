@@ -143,6 +143,7 @@ drifted, the reader and the writer would disagree about a location):
 | `project_storage_dir(p, home=)` | `<claude_home>/projects/<sanitized>` |
 | `memory_dir_for_project(p, home=)` | `<that>/memory` |
 | `transcript_files(p, home=)` | every contained `<session-id>.jsonl`, sorted + resolved |
+| `subagent_files(p, home=)` | every `<session-id>/subagents/**/agent-*.jsonl`, as `SubagentTranscript`s |
 | `global_skills_root(home=)` | `<claude_home>/skills` |
 | `project_skills_root(p)` | `<p>/.claude/skills` |
 
@@ -161,9 +162,29 @@ expects. Deliberately lossy, and the rules are pinned by tests rather than left 
 `user`/`assistant` FIRST (no other event type carries `message` at all); `message.content` may be a
 plain string OR a list of blocks; `text`/`thinking` verbatim; `tool_use` → `[used tool: X]`;
 `tool_result` → `N chars` or `N blocks` depending on ITS OWN content's shape; anything unrecognized →
-`[unrecognized content block: X]`, never dropped. `isSidechain` is filtered as a defensive no-op —
-subagent messages are in separate `subagents/agent-<id>.jsonl` files, not inlined, so it filters
-nothing today. `home=` exists so no test ever reads the real `~/.claude`.
+`[unrecognized content block: X]`, never dropped. `home=` exists so no test ever reads the real
+`~/.claude`.
+
+`isSidechain` is the field that separates the two transcript STORES — this paragraph used to call it
+"a defensive no-op … it filters nothing today", which is true only of the main thread. Measured: it
+is `False` on 0 of 57,928 user/assistant events across 883 session files, and `True` on 72,126 of
+72,126 across 874 subagent files. So reading a subagent transcript needs `include_sidechain=True`
+explicitly, and the default stays `False` so a future Claude Code that inlines sidechain events into
+the main file cannot silently double-count them.
+
+**Subagent transcripts** live at `<project storage>/<session-id>/subagents/**/agent-<agent-id>.jsonl`
+— **recursively**: flat under `subagents/`, and nested under `subagents/workflows/<run-id>/`
+(claude-agent-sdk 0.2.116, `_internal/session_import.py:89-94` and `_internal/sessions.py:1210-1238`,
+first-party). Each has a sibling `<stem>.meta.json` whose only REQUIRED keys are `agentType` and
+`spawnDepth`; `description`, `toolUseId`, `parentAgentId`, `model` and `stoppedByUser` are optional
+and really are absent (every nested file — 299 of 874 measured — carries only the two required
+keys), so every field degrades on its own. `journal.jsonl` also lives under `subagents/` and is NOT
+a transcript; the `agent-` filename filter is what excludes it. `for_project(...,
+include_subagents=True)` ingests them as separate `transcripts[]` entries, each with a 3-line header
+(index line / full identity / `task:`), ordered session-then-its-own-subagents.
+`RawSession.transcript_ids` names every entry, and the driver stamps that list into the trace as
+`run_meta["transcript_index"]`, so a positional transcript index is answerable afterwards. Default
+OFF — it renumbers every entry and ships substantially more text to a remote model.
 
 Skill enumeration is opt-in on the explicit constructor (`global_skills_dir=` / `project_skills_dir=`)
 so `apply.py`'s bare `ClaudeCodeAdapter(memory_dir)` re-scan stays machine-independent.

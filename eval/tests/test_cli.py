@@ -174,6 +174,28 @@ def test_render_scorecard_footer_states_the_denominator_and_the_provenance():
     assert f"prompt={PROMPT_VERSION}" in footer
 
 
+def test_render_scorecard_footer_states_the_prompts_LENGTH_CAPS():
+    """A cap is prompt-affecting provenance: a plan or a transcript that was elided was not fully
+    read, and two scorecards are only comparable if the budgets were the same. They ride with
+    `prompt=`, so the stub — which never rendered a prompt — claims neither."""
+    from ctx_distillery_eval.judge import (
+        JUDGE_MAX_PLAN_CHARS,
+        JUDGE_MAX_TOTAL_CHARS,
+        JUDGE_MAX_TRANSCRIPT_CHARS,
+    )
+
+    footer = render_scorecard(
+        EvalReport(n=1, judge_model="judge-x", prompt_version=PROMPT_VERSION)
+    ).splitlines()[-1]
+    assert (
+        f"caps=plan:{JUDGE_MAX_PLAN_CHARS}/transcript:{JUDGE_MAX_TRANSCRIPT_CHARS}"
+        f"/total:{JUDGE_MAX_TOTAL_CHARS}"
+    ) in footer
+
+    stub_footer = render_scorecard(EvalReport(n=1, judge_model="stub")).splitlines()[-1]
+    assert "caps=" not in stub_footer
+
+
 def test_score_command_exits_non_zero_when_the_judge_scored_nothing(tmp_path, transcript_file,
                                                                    monkeypatch, capsys):
     """The CI gate: an all-unscored scorecard is not a green run. Without this, a batch scored by a

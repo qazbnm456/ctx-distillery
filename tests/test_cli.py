@@ -448,3 +448,74 @@ def test_distill_exit_code_reports_a_run_level_problem(seeded_project, claude_ho
     rc = cli.main(["distill", str(seeded_project), "--claude-home", str(claude_home),
                    "--trace-dir", str(tmp_path / "traces"), "--run-id", "demo"])
     assert rc == 1
+
+
+# -- distill --include-subagents ---------------------------------------------------------------
+
+
+@pytest.fixture
+def seeded_with_subagents(seeded_project, claude_home):
+    """The seeded project, plus two subagents beside its one session — one of them NESTED."""
+    from tests.test_adapters_claude_code import FLAT_META, NESTED_META, WORKFLOW_RUN, write_subagent
+
+    storage = project_storage_dir(seeded_project, home=claude_home)
+    sub = {"type": "user", "message": {"role": "user", "content": "sub"}, "isSidechain": True}
+    write_subagent(storage / "session-1" / "subagents", "flat1", FLAT_META, [sub])
+    write_subagent(
+        storage / "session-1" / "subagents" / "workflows" / WORKFLOW_RUN,
+        "nested1", NESTED_META, [sub],
+    )
+    return seeded_project
+
+
+def test_distill_ignores_subagents_unless_the_flag_is_passed(seeded_with_subagents, claude_home,
+                                                             tmp_path, monkeypatch, capsys):
+    captured: dict = {}
+    monkeypatch.setattr(cli, "run_distillation", _fake_run(captured))
+    cli.main(["distill", str(seeded_with_subagents), "--claude-home", str(claude_home),
+              "--trace-dir", str(tmp_path / "traces"), "--run-id", "demo"])
+    assert captured["adapter"].ingest().transcripts == ["user: hello"]
+    assert "1 transcript(s)" in capsys.readouterr().out
+
+
+def test_distill_with_the_flag_counts_and_ingests_both_kinds(seeded_with_subagents, claude_home,
+                                                             tmp_path, monkeypatch, capsys):
+    """The count must include subagents too — a project with 19 sessions and 351 subagents reporting
+    "distilling 19 transcript(s)" would be describing a different run than the one it is starting."""
+    captured: dict = {}
+    monkeypatch.setattr(cli, "run_distillation", _fake_run(captured))
+    cli.main(["distill", str(seeded_with_subagents), "--claude-home", str(claude_home),
+              "--trace-dir", str(tmp_path / "traces"), "--run-id", "demo", "--include-subagents"])
+
+    transcripts = captured["adapter"].ingest().transcripts
+    assert len(transcripts) == 3
+    # Line 0 shows an 8-character SHORT id (a disambiguator); line 1 carries the full one.
+    assert transcripts[0].split("\n")[:2] == ["[0] session session-", "session=session-1"]
+    assert "3 transcript(s)" in capsys.readouterr().out
+
+
+def test_distill_warns_when_the_entry_count_passes_the_index_scan_ceiling(
+    seeded_with_subagents, claude_home, tmp_path, monkeypatch, capsys
+):
+    """The ceiling is stated at the point of use rather than discovered inside a truncated scan.
+
+    Both numbers come from one constant (`INDEX_LINE_MAX`), so the warning cannot claim a ceiling
+    the header format does not actually imply. Squeezed here by shrinking the BUDGET rather than by
+    seeding 460 subagents.
+    """
+    monkeypatch.setattr(cli, "run_distillation", _fake_run({}))
+    monkeypatch.setenv("CD_MAX_OUTPUT_CHARS", "174")            # exactly 2 entries' worth
+    cli.main(["distill", str(seeded_with_subagents), "--claude-home", str(claude_home),
+              "--trace-dir", str(tmp_path / "traces"), "--run-id", "demo", "--include-subagents"])
+
+    err = capsys.readouterr().err
+    assert "3 transcript entries exceeds the ~2" in err
+    assert "CD_MAX_OUTPUT_CHARS=174" in err
+
+
+def test_distill_does_not_warn_below_the_ceiling(seeded_with_subagents, claude_home, tmp_path,
+                                                 monkeypatch, capsys):
+    monkeypatch.setattr(cli, "run_distillation", _fake_run({}))
+    cli.main(["distill", str(seeded_with_subagents), "--claude-home", str(claude_home),
+              "--trace-dir", str(tmp_path / "traces"), "--run-id", "demo", "--include-subagents"])
+    assert "exceeds" not in capsys.readouterr().err

@@ -21,6 +21,9 @@ from pathlib import Path
 
 import ctx_distillery_eval.judge as judge_mod
 from ctx_distillery_eval.judge import (
+    JUDGE_MAX_PLAN_CHARS,
+    JUDGE_MAX_TOTAL_CHARS,
+    JUDGE_MAX_TRANSCRIPT_CHARS,
     PROMPT_VERSION,
     EvalJudgeConfig,
     JudgeVerdict,
@@ -114,6 +117,68 @@ def test_build_prompt_states_the_absence_when_no_transcripts_are_supplied():
     """Defensive only — `cli._read_transcripts` refuses an empty transcript before this is reached —
     but an empty section must read as "none", never as a section that merely looks truncated."""
     assert "(none supplied)" in build_prompt(PLAN_TEXT, [])
+
+
+# -- the length caps (v3) --------------------------------------------------------------------------
+
+
+def test_an_input_under_every_cap_renders_exactly_as_it_did_before_the_caps():
+    """The caps are provenance, not a rewrite: nothing under budget may move by a byte, which is
+    what keeps every existing prompt assertion in this file meaningful."""
+    prompt = build_prompt(PLAN_TEXT, TRANSCRIPTS)
+    assert f"--- transcript 0 ---\n{TRANSCRIPTS[0]}" in prompt
+    assert "characters omitted" not in prompt
+    assert PLAN_TEXT in prompt
+
+
+def test_an_over_long_transcript_is_elided_head_and_tail_with_a_VISIBLE_marker():
+    """dspy's own `REPLEntry.format_output` convention, deliberately — a judge should see the same
+    elision marker the planner does, and a silent truncation reads as the end of the input."""
+    huge = "A" * (JUDGE_MAX_TRANSCRIPT_CHARS + 5_000) + "TAIL"
+    prompt = build_prompt(PLAN_TEXT, [huge])
+
+    assert "... (5004 characters omitted) ..." in prompt
+    assert "TAIL" in prompt                                  # the TAIL really survived, not just the head
+    assert len(prompt) < len(huge)
+    # The exact accounting, on the helper (the prompt's own fixed text contains "A"s, so counting
+    # characters across the whole prompt would be measuring the wrong thing): head + tail total
+    # exactly the cap, and the marker is the only thing added.
+    elided = judge_mod._elide(huge, JUDGE_MAX_TRANSCRIPT_CHARS)
+    assert elided in prompt
+    assert len(elided) == JUDGE_MAX_TRANSCRIPT_CHARS + len("\n... (5004 characters omitted) ...\n")
+
+
+def test_an_over_long_PLAN_is_capped_too_because_it_is_model_controlled():
+    """`build_prompt`'s FIRST argument is `render_plan` output over a plan whose candidate count and
+    drafted-body sizes are BOTH model-controlled. Capping only the transcripts closes the instance
+    and leaves the surface open."""
+    huge_plan = "P" * (JUDGE_MAX_PLAN_CHARS + 1_000)
+    prompt = build_prompt(huge_plan, TRANSCRIPTS)
+    assert "... (1000 characters omitted) ..." in prompt
+    assert judge_mod._elide(huge_plan, JUDGE_MAX_PLAN_CHARS) in prompt
+    assert huge_plan not in prompt
+
+
+def test_entries_past_the_TOTAL_budget_become_index_preserving_stubs():
+    """**The stub is mandatory, not an optimisation.** `--- transcript {i} ---` labels are how the
+    judge refers to an entry and how a reader pairs a verdict back to one, so an entry past the
+    budget must still APPEAR. Dropping entries instead would renumber every entry after it.
+    """
+    big = "B" * JUDGE_MAX_TRANSCRIPT_CHARS
+    entries = [big] * (JUDGE_MAX_TOTAL_CHARS // JUDGE_MAX_TRANSCRIPT_CHARS + 2)
+    prompt = build_prompt(PLAN_TEXT, entries)
+
+    for index in range(len(entries)):
+        assert f"--- transcript {index} " in prompt or f"--- transcript {index} ---" in prompt
+    assert f"--- transcript {len(entries) - 1} (elided: {len(big)} chars) ---" in prompt
+    assert len(prompt) < JUDGE_MAX_TOTAL_CHARS + JUDGE_MAX_PLAN_CHARS + 10_000
+
+
+def test_a_short_entry_after_the_budget_is_exhausted_is_still_rendered_in_full():
+    """The budget bounds BULK, not entry count: an entry that fits in what is left is rendered."""
+    entries = ["B" * JUDGE_MAX_TRANSCRIPT_CHARS] * 3 + ["a short but important one"]
+    prompt = build_prompt(PLAN_TEXT, entries)
+    assert "--- transcript 3 ---\na short but important one" in prompt
 
 
 # -- the judge-only reference slot (the taskset pass) ----------------------------------------------
@@ -341,8 +406,17 @@ def test_prompt_version_is_pinned():
     the next test can: with NO reference the rendered v2 prompt is byte-identical to v1's. The
     version still moves, because provenance is per-REPORT — a scorecard cannot say "v1 for some rows,
     v2 for others".
+
+    **v2 -> v3, updated on the same deliberate footing.** `build_prompt` gained the length caps
+    (`JUDGE_MAX_PLAN_CHARS` / `JUDGE_MAX_TRANSCRIPT_CHARS` / `JUDGE_MAX_TOTAL_CHARS`), which is an
+    ASSEMBLY change and squarely inside this constant's contract. The same subtlety applies again:
+    an input under every cap renders byte-identically to v2 (the test below pins that), and the
+    version moves anyway. What did NOT move it is worth recording here too, because it is the more
+    likely future mistake: feeding the judge a different SET of transcripts — subagent transcripts
+    included, say — changes no line of the prompt's text and must never bump this constant. That
+    comparability is per-row and lives in the trace's own `transcript_index`.
     """
-    assert PROMPT_VERSION == "atlas-ctxd-eval-v2"
+    assert PROMPT_VERSION == "atlas-ctxd-eval-v3"
 
 
 def test_openai_is_imported_lazily_inside_the_chat_closure_never_at_module_level():

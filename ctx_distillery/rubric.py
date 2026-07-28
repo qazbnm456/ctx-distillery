@@ -165,12 +165,32 @@ def plan_from_events(events: list[dict]):
     return None
 
 
+def _run_start_transcripts(events: list[dict]) -> int | None:
+    """How many transcripts this run was GIVEN, from its own `run_start` meta — None if unrecorded.
+
+    Read defensively (a non-dict `meta`, a non-int count, an old trace with neither) because
+    `trace_facts` must never raise on a malformed trace: `studio/` serves it over HTTP and `eval/`
+    scores a whole glob with it.
+    """
+    for event in events:
+        if event.get("type") != "run_start":
+            continue
+        meta = (event.get("payload") or {}).get("meta")
+        if not isinstance(meta, dict):
+            return None
+        value = meta.get("transcripts")
+        return None if isinstance(value, bool) or not isinstance(value, int) else value
+    return None
+
+
 def trace_facts(events: list[dict]) -> dict:
     """The deterministic per-run facts every ATLAS criterion's `observed` slices from.
 
-    Sources candidate-level facts from `schema.assemble()`'s output (never re-derived from raw
-    events, so they can't drift from what `assemble` already established); sources ordering/breaker
-    facts directly from the trace's own `tool_call` events, since `assemble` doesn't surface those.
+    THREE sources, stated exactly rather than rounded down to one: candidate-level facts come from
+    `schema.assemble()`'s output (never re-derived from raw events, so they can't drift from what
+    `assemble` already established); ordering/breaker/coverage facts come directly from the trace's
+    own `tool_call` events, since `assemble` doesn't surface those; and `n_transcripts` comes from
+    the run's own `run_start` meta, which is the only place the SIZE of the input is recorded.
 
     Filters non-dict trace lines ONCE up front (`trace_io.dict_events`) so the `e.get("type")`
     comprehensions below are safe; `assemble` re-filters, which is idempotent and O(n), because it
@@ -179,6 +199,12 @@ def trace_facts(events: list[dict]) -> dict:
     events = dict_events(events)
     plan = plan_from_events(events)
     a = assemble(events, plan)
+    transcript_reads = [
+        (e.get("payload") or {}).get("args") or {}
+        for e in events
+        if e.get("type") == EVENT_TOOL_CALL
+        and (e.get("payload") or {}).get("tool") == "read_transcript_chunk"
+    ]
     read_steps = [
         e.get("step_id")
         for e in events
@@ -201,6 +227,24 @@ def trace_facts(events: list[dict]) -> dict:
     return {
         "n_candidates": len(a.candidates),
         "n_non_keep": sum(1 for c in a.candidates if c.action != "keep"),
+        # COVERAGE, and the one blind spot this module genuinely had: a run that read 2 of 414
+        # transcripts and a run that read 2 of 2 produced IDENTICAL facts, which subagent ingestion
+        # makes materially worse (up to 18.5x the entries). Both are deterministic counts derived
+        # from the trace, neither decides met/unmet, and neither functions as a score.
+        #
+        # This is also where the module's sourcing claim widens, and the docs say so rather than
+        # letting it drift: `trace_facts` sources from `assemble()`'s output, from the trace's own
+        # `tool_call` events (the ordering/breaker facts above), and now from `run_start.meta` —
+        # THREE sources, not one.
+        "n_transcripts": _run_start_transcripts(events),
+        "n_transcripts_read": len(
+            {
+                args["transcript_index"]
+                for args in transcript_reads
+                if isinstance(args.get("transcript_index"), int)
+                and not isinstance(args["transcript_index"], bool)
+            }
+        ),
         "plan_problems": list(a.problems),
         "min_read_step": min(read_steps) if read_steps else None,
         "min_draft_step": min(draft_steps) if draft_steps else None,
@@ -243,6 +287,14 @@ def trace_facts(events: list[dict]) -> dict:
 # ("never decides met/unmet") — the ordering COMPARISON is left to whatever reads `observed` later
 # (the eval judge, a future trainer). `any_circuit_broken` stays a bool because it IS already a raw,
 # undebatable observation (the breaker either tripped or it didn't) rather than a derived comparison.
+#
+# `n_transcripts` / `n_transcripts_read` are deliberately NOT in the lens below. They are coverage
+# facts about the run's INPUT, not evidence for or against any of the four criteria as those
+# criteria are worded today — TA asks whether evidence-gathering preceded drafting, not how much of
+# the corpus was covered — and quietly folding a new fact into an existing criterion would change
+# what that criterion's `observed` claims without changing its description. They are surfaced by
+# `trace_facts` itself (which is what `studio/`'s `rubric_facts` renders); wiring them to a
+# criterion means writing that criterion, deliberately.
 _CATEGORY_LENS = {
     "TF": ("n_candidates", "n_non_keep", "plan_problems"),
     "TA": ("min_read_step", "min_draft_step", "any_circuit_broken"),

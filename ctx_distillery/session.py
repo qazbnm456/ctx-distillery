@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from rlm_kit.trace import TraceRecorder
@@ -35,7 +35,7 @@ from .adapters.base import ArtifactRef, HarnessAdapter
 from .redact import redact_transcript
 from .rubric import default_rubric, rubric_to_meta
 from .schema import PROMOTION_ACTIONS, AssembledCandidate, AssembledPlan, assemble
-from .task import DistillSession
+from .task import PLANNER_PROMPT_VERSION, DistillSession
 from .trace_io import load_trace
 
 #: Re-exported for back-compat — the assemble-on-read shapes are DEFINED in `schema.py` (dspy-free)
@@ -141,7 +141,20 @@ async def run_distillation_artifacts(
     )
     rid = run_id or uuid.uuid4().hex[:12]
     run_meta = {"transcripts": len(redacted_transcripts), "memory_artifacts": len(memory_index)}
+    if raw.transcript_ids:
+        # CONDITIONAL, and that is the whole point: an unconditional stamp makes `[]` mean two
+        # different things — "this adapter reported no identities" and "this run had no
+        # transcripts". Every non-`ClaudeCodeAdapter` run (this repo's tests, `eval/`'s fakes, any
+        # future harness) would write `[]` beside a `meta["transcripts"]` of 3, and a consumer told
+        # to render "None when absent" would faithfully render `sessions=0 subagents=0`.
+        # Present-and-empty is not absent.
+        run_meta["transcript_index"] = [asdict(t) for t in raw.transcript_ids]
     run_meta["rubric"] = rubric_to_meta(default_rubric())
+    # Stamped by the DRIVER, not by `cli._cmd_distill`: this is the one place every caller passes
+    # through (`cli`, `eval/cli._run_one`, any script), and each of those builds its own `meta`
+    # dict. Without it two traces either side of an instruction change are indistinguishable on the
+    # axis that dominates plan quality — the same contract `eval/`'s `PROMPT_VERSION` has.
+    run_meta["planner_prompt_version"] = PLANNER_PROMPT_VERSION
     run_meta.update(meta or {})
     with TraceRecorder(trace_path, run_id=rid, meta=run_meta):
         plan = await task.arun(

@@ -77,6 +77,37 @@ class ArtifactRef:
 
 
 @dataclass(frozen=True)
+class TranscriptId:
+    """WHAT one `RawSession.transcripts` entry IS — identifiers only, never any of its text.
+
+    `transcripts` is positional: everything downstream (`read_transcript_chunk`'s recorded
+    `transcript_index`, `studio/`'s trajectory row, `eval/`'s `--- transcript {i} ---` label) keys on
+    an integer, and until this shape existed NOTHING anywhere mapped that integer back to a file.
+    A reviewer holding a finished trace could not answer "what was transcript 7?" at all.
+
+    **Four `str` fields, every one derived from a filename or a directory name.** No `description`,
+    no `agentType`, no body — nothing model-authored, so there is nothing here for redaction to do
+    and no field a future edit could widen into text without that being obvious at the type. That is
+    what makes this a DIFFERENT thing from the rejected "put the rendered subagent text on
+    `RawSession`" shape, which would have carried real transcript bytes down a path
+    `session.run_distillation_artifacts`' single `redact()` call does not cover. Widening it (e.g.
+    to carry the free-form, operator-authored `agentType`) is a deliberate decision with its own
+    argument, never a convenience.
+
+    * `kind`    — `"session"` or `"subagent"`.
+    * `id`      — the session id, or the agent id.
+    * `session` — the OWNING session's id (equal to `id` for a session entry).
+    * `parent`  — `"session:<id>"` / `"agent:<id>"` / `"workflow:<run-id>"`. A session entry is its
+      own root, so it reports `"session:<its own id>"`.
+    """
+
+    kind: str
+    id: str
+    session: str
+    parent: str
+
+
+@dataclass(frozen=True)
 class RawSession:
     """The one normalized shape a harness's transcripts + memory store are ingested into.
 
@@ -84,10 +115,19 @@ class RawSession:
     concatenated, so the planner can reason about cross-conversation overlap/conflict).
     `memory_index` is the structured `[{name, description, type, path}, ...]` index the
     read-only adapter seam yields (CLAUDE.md invariant 4) — i.e. a list of `ArtifactRef`.
+
+    `transcript_ids` is the ORDERED identity list for `transcripts`, one entry per entry (see
+    `TranscriptId`). It defaults to `()` so no existing adapter, caller or test has to change, and
+    the rule for an adapter is all-or-nothing: **populate it for every entry you return, or leave it
+    empty.** A partial list would renumber nothing while looking authoritative. The driver's stamp
+    into `run_meta` is CONDITIONAL on it being non-empty for the same reason — a present-but-empty
+    list beside `meta["transcripts"] == 3` would read as "this run had no transcripts" rather than
+    "this adapter reported no identities".
     """
 
     transcripts: list[str] = field(default_factory=list)
     memory_index: list[ArtifactRef] = field(default_factory=list)
+    transcript_ids: tuple[TranscriptId, ...] = ()
 
 
 class HarnessAdapter(ABC):

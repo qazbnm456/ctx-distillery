@@ -97,7 +97,11 @@ function feedRow(eventName, data) {
       el(
         "div",
         "fr-line",
-        `transcripts=${data.transcripts} memory_artifacts=${data.memory_artifacts} ` +
+        // The COMPOSITION, not just the count: a run that jumped from 1 transcript to 43 because
+        // subagent transcripts were included is otherwise silent semantic drift. `sessions` /
+        // `subagents` are null on an old or malformed trace, in which case the count stands alone.
+        `transcripts=${data.transcripts}${composition(data)} ` +
+          `memory_artifacts=${data.memory_artifacts} ` +
           `rubric_criteria=${(data.rubric || {}).criteria || 0}`
       )
     );
@@ -106,6 +110,15 @@ function feedRow(eventName, data) {
   }
   row.appendChild(body);
   return row;
+}
+
+// ` (sessions=1 subagents=42)`, or "" when the trace does not say. Never renders zeros for an
+// absent value — `sessions=0 subagents=0` would be a positive claim about an old trace that
+// carries no identity list at all.
+function composition(data) {
+  if (data.sessions === null || data.sessions === undefined) return "";
+  if (data.subagents === null || data.subagents === undefined) return "";
+  return ` (sessions=${data.sessions} subagents=${data.subagents})`;
 }
 
 function omit(obj, keys) {

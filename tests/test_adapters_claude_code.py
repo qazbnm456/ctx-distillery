@@ -14,15 +14,20 @@ from pathlib import Path
 import pytest
 
 from ctx_distillery.adapters.claude_code import (
+    INDEX_LINE_MAX,
     MEMORY_TYPES,
     ClaudeCodeAdapter,
+    SubagentTranscript,
     global_skills_root,
     memory_dir_for_project,
+    parent_ref,
     project_skills_root,
     project_storage_dir,
     render_transcript_events,
     render_transcript_file,
     sanitize_project_dir,
+    subagent_files,
+    subagent_header,
     transcript_files,
 )
 
@@ -298,13 +303,67 @@ def test_only_user_and_assistant_events_are_rendered_at_all():
 
 
 def test_a_sidechain_event_is_skipped():
-    """A defensive no-op, stated honestly: `isSidechain` was `false` on all 1216 real events checked
-    — subagent messages live in separate files and are never inlined. The filter guards a future
-    version that inlines them; it is not currently removing anything."""
+    """`isSidechain` is what separates the two transcript STORES — and on a MAIN-THREAD file it
+    really does filter nothing (measured: `False` on 0 of 57,928 user/assistant events across 883
+    session files), which is why these assertions are unchanged and pin the DEFAULT.
+
+    The docstring is what changed, and it was wrong in an interesting way: it called the filter a
+    no-op that "is not currently removing anything", generalising from the one population where
+    that is true. On a SUBAGENT file the same filter removes EVERYTHING (72,126 of 72,126, across
+    874 files), which is why reading one requires `include_sidechain=True` rather than deleting the
+    filter — see the sibling test below.
+    """
     rendered = render_transcript_events(
         [_event("user", "main thread"), _event("assistant", "subagent chatter", isSidechain=True)]
     )
     assert rendered == "user: main thread"
+
+
+def test_include_sidechain_true_is_what_makes_a_subagent_file_render_at_all():
+    """The sibling to the default test above, and the whole reason the parameter exists.
+
+    A real subagent transcript is 100% sidechain events, so the shipped renderer returns exactly 0
+    characters on one — measured across all 874 real files. The parameter is explicit rather than
+    path-sniffed or auto-detected: this function takes an ITERABLE and knows nothing about the
+    filesystem, and an input-dependent filter ("if everything is sidechain, keep it") would behave
+    unpredictably on a partially-sidechain file.
+    """
+    events = [_event("user", "sub task"), _event("assistant", "sub finding", isSidechain=True)]
+    events[0]["isSidechain"] = True
+
+    assert render_transcript_events(events) == ""
+    assert render_transcript_events(events, include_sidechain=True) == (
+        "user: sub task\nassistant: sub finding"
+    )
+
+
+def test_render_transcript_file_defaults_to_dropping_sidechain_too(tmp_path):
+    """The FILE-level default, pinned separately from the events-level one — they are two defaults.
+
+    Found by mutation testing during review: flipping `render_transcript_file`'s default to True, and
+    hard-coding it to True, BOTH left the whole suite green, while the same mutation one layer down
+    (`render_transcript_events`) was caught immediately. The events-level test above renders an
+    in-memory list; the only file-level coverage passed `include_sidechain=True` explicitly, so
+    nothing exercised the wrapper's own default at all.
+
+    This is the layer where the property has to hold: `for_project(include_subagents=False)` and the
+    SESSION entries of `_render_with_subagents` both route through this wrapper, so a True default
+    here would silently start folding subagent chatter into main-thread text — the byte-identity
+    claim §4.2 makes corpus-wide, undefended.
+    """
+    path = tmp_path / "session.jsonl"
+    path.write_text(
+        json.dumps(_event("user", "main thread"))
+        + "\n"
+        + json.dumps(_event("assistant", "subagent chatter", isSidechain=True))
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert render_transcript_file(path) == "user: main thread"
+    assert render_transcript_file(path, include_sidechain=True) == (
+        "user: main thread\nassistant: subagent chatter"
+    )
 
 
 def test_an_event_with_nothing_renderable_adds_no_bare_role_line():
@@ -413,6 +472,46 @@ def test_the_derivation_helpers_agree_with_for_project(tmp_path, claude_home):
     assert adapter.project_skills_dir == project_skills_root(project_dir)
 
 
+def test_a_symlinked_dotclaude_still_finds_transcripts(tmp_path, monkeypatch):
+    """A regression test for silent data loss, reproduced before it was fixed.
+
+    `claude_home` used to be `Path.home().resolve() / CLAUDE_DIRNAME` — the home component resolved,
+    `.claude` itself NOT. Anyone who symlinks `~/.claude` into a dotfiles repo or an external volume
+    (a common arrangement) then got ZERO transcripts with no error at all: `transcript_files` compares
+    a RESOLVED session path's parent against the storage directory, the parents never match, every
+    file is filtered out, and `storage.is_dir()` stays True so no "no storage here" branch fires.
+
+    The control is what makes this a test rather than an assertion about one arrangement: identical
+    content behind a real directory and behind a symlink must yield the SAME transcripts. Measured on
+    the pre-fix code, they yielded 1 and 0.
+
+    This must patch `Path.home` rather than pass `home=`, because the `home=` override was always
+    fully resolved — the bug lived only on the branch no other test can reach. Invariant 6 still
+    holds: `Path.home` is redirected into `tmp_path`, so nothing reads this machine's real `~/.claude`.
+    """
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    session = json.dumps(_event("user", "hello")) + "\n"
+
+    real_home = tmp_path / "real-home"
+    seed_project(real_home / ".claude", project_dir, {"sess": [_event("user", "hello")]})
+
+    linked_home = tmp_path / "linked-home"
+    linked_home.mkdir()
+    store = tmp_path / "dotfiles-claude"
+    storage = project_storage_dir(project_dir, home=store)
+    storage.mkdir(parents=True)
+    (storage / "sess.jsonl").write_text(session, encoding="utf-8")
+    os.symlink(store, linked_home / ".claude")
+
+    def transcripts_for(home: Path) -> list[str]:
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+        return ClaudeCodeAdapter.for_project(project_dir).ingest().transcripts
+
+    assert transcripts_for(real_home) == ["user: hello"]
+    assert transcripts_for(linked_home) == ["user: hello"]
+
+
 def test_transcript_discovery_ignores_non_jsonl_files_and_escaping_symlinks(tmp_path, claude_home):
     project_dir = tmp_path / "proj"
     storage = seed_project(claude_home, project_dir, {"real-session": [_event("user", "kept")]})
@@ -434,3 +533,508 @@ def test_for_project_never_reads_this_machines_real_claude_home(tmp_path, claude
     real_home = Path.home().resolve()
     for path in (adapter.memory_dir, adapter.global_skills_dir):
         assert not Path(path).is_relative_to(real_home / ".claude")
+
+
+# -- subagent transcripts: discovery, containment, headers ----------------------------------------
+#
+# The fixture below is MANDATORY-SHAPED, not illustrative, and that is the single most important
+# thing in this section. A flat-only fixture passes against a non-recursive implementation and
+# would pin the wrong shape permanently — which is exactly how a design that missed 34% of a real
+# corpus survived being "measured". So the seeder always builds the nested run directory, always
+# gives its agent a KEYS-ONLY sidecar, and always plants the `journal.jsonl` that must not be
+# ingested. Delete any of the three and this file certifies the bug.
+
+
+def _sub_event(role, content, **kw):
+    """A SUBAGENT event: the same wire shape as `_event`, but `isSidechain: True` — which is what
+    all 72,126 user/assistant events across 874 real subagent files carried, without exception."""
+    return _event(role, content, isSidechain=True, **kw)
+
+
+#: FULL sidecar — every key the flat population really carries.
+FLAT_META = {
+    "agentType": "general-purpose",
+    "description": "hunt the flaky test",
+    "spawnDepth": 1,
+    "toolUseId": "toolu_01flat",
+}
+#: A depth-2 agent: the only population that carries `parentAgentId` (44 of 874 files).
+DEEP_META = {
+    "agentType": "Explore",
+    "description": "read the adapter",
+    "spawnDepth": 2,
+    "toolUseId": "toolu_02deep",
+    "parentAgentId": "flat1",
+}
+#: KEYS-ONLY — `agentType` + `spawnDepth` and NOTHING else. This is the live degradation path, not
+#: a hypothetical: 299 of 874 real files (every nested one) carry exactly these two keys.
+NESTED_META = {"agentType": "workflow-subagent", "spawnDepth": 1}
+
+WORKFLOW_RUN = "wf_test0000001"
+
+
+def write_subagent(directory, agent_id, meta, events):
+    """`<directory>/agent-<id>.jsonl` + its `agent-<id>.meta.json` sidecar."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"agent-{agent_id}.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
+    )
+    if meta is not None:
+        (directory / f"agent-{agent_id}.meta.json").write_text(
+            json.dumps(meta), encoding="utf-8"
+        )
+
+
+def seed_subagents(storage, session_id):
+    """The real layout, ALL of it: flat agents, a nested workflow run, and the two non-transcripts.
+
+        <storage>/<session-id>/
+        ├── subagents/
+        │   ├── agent-flat1.jsonl     + .meta.json   (FULL sidecar)
+        │   ├── agent-flat2.jsonl     + .meta.json   (spawnDepth 2 + parentAgentId)
+        │   └── workflows/wf_test0000001/
+        │       ├── agent-nested1.jsonl + .meta.json (KEYS-ONLY sidecar)
+        │       └── journal.jsonl                    (must NOT be ingested)
+        └── tool-results/x.txt                       (must NOT be ingested)
+    """
+    subagents = storage / session_id / "subagents"
+    write_subagent(subagents, "flat1", FLAT_META, [_sub_event("user", "flat one speaking")])
+    write_subagent(subagents, "flat2", DEEP_META, [_sub_event("assistant", "flat two speaking")])
+    write_subagent(
+        subagents / "workflows" / WORKFLOW_RUN,
+        "nested1",
+        NESTED_META,
+        [_sub_event("user", "nested one speaking")],
+    )
+    # NOT a transcript: one per workflow run directory, and the `agent-` filename filter is the
+    # only thing that excludes it. Copying the SDK's store-mirroring helper would ingest all nine.
+    (subagents / "workflows" / WORKFLOW_RUN / "journal.jsonl").write_text(
+        json.dumps({"type": "user", "message": {"role": "user", "content": "JOURNAL LINE"}}) + "\n",
+        encoding="utf-8",
+    )
+    # NOT a transcript either: offloaded tool-result bodies, out of the render path entirely.
+    (storage / session_id / "tool-results").mkdir(parents=True)
+    (storage / session_id / "tool-results" / "x.txt").write_text("OFFLOADED", encoding="utf-8")
+    return subagents
+
+
+@pytest.fixture
+def subagent_project(tmp_path, claude_home):
+    """A project with one session that really has all three subagent shapes beside it."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    storage = seed_project(
+        claude_home, project_dir, {"sess-1": [_event("user", "the main thread")]}
+    )
+    seed_subagents(storage, "sess-1")
+    return project_dir, storage
+
+
+def test_subagent_discovery_is_recursive_and_excludes_the_journal(subagent_project, claude_home):
+    """The two halves of the discovery rule, each pinned by a case that would otherwise pass.
+
+    The NESTED file fails against a flat glob — the shape that missed 34% of a real corpus. The
+    JOURNAL fails against `rglob("*.jsonl")`, i.e. against copying the SDK's store-MIRRORING helper
+    instead of its transcript-reading one.
+    """
+    project_dir, _storage = subagent_project
+    found = subagent_files(project_dir, home=claude_home)
+
+    assert [t.agent_id for t in found] == ["flat1", "flat2", "nested1"]
+    assert all(t.session_id == "sess-1" for t in found)
+    assert not any("journal" in t.path.name for t in found)
+    assert not any("tool-results" in str(t.path) for t in found)
+    # Every returned path is resolved — which is what closes the swap-after-check race on the file.
+    assert all(t.path == t.path.resolve() and t.path.is_file() for t in found)
+
+
+def test_the_subpath_is_the_sdk_shaped_relative_locator(subagent_project, claude_home):
+    """Same string, same construction as the SDK's own `SessionKey["subpath"]` — extension dropped,
+    POSIX separators, relative to the session directory, so it identifies nothing about the machine."""
+    project_dir, _storage = subagent_project
+    by_id = {t.agent_id: t for t in subagent_files(project_dir, home=claude_home)}
+
+    assert by_id["flat1"].subpath == "subagents/agent-flat1"
+    assert by_id["nested1"].subpath == f"subagents/workflows/{WORKFLOW_RUN}/agent-nested1"
+    assert by_id["nested1"].workflow_run == WORKFLOW_RUN
+    assert by_id["flat1"].workflow_run is None
+
+
+def test_the_parent_link_has_three_cases_and_the_nested_one_is_the_workflow_run(
+    subagent_project, claude_home
+):
+    """The correction that matters. A rule reading "depth 1 means the session owns it" is
+    confidently WRONG on every nested file: all 299 real ones are `spawnDepth: 1` with NO
+    `parentAgentId`, and their parent is a workflow RUN. So the path is tested FIRST."""
+    project_dir, _storage = subagent_project
+    by_id = {t.agent_id: t for t in subagent_files(project_dir, home=claude_home)}
+
+    assert parent_ref(by_id["flat1"]) == "session:sess-1"
+    assert parent_ref(by_id["flat2"]) == "agent:flat1"
+    assert parent_ref(by_id["nested1"]) == f"workflow:{WORKFLOW_RUN}"
+
+
+def test_a_keys_only_sidecar_degrades_PER_FIELD_never_per_file(subagent_project, claude_home):
+    """The live path, 299 of 874 files: a sidecar that is PRESENT and simply lacks keys.
+
+    `agentType` and `spawnDepth` survive; `description` and `parentAgentId` come back None; nothing
+    raises and no other field is affected. An implementation treating `description` as required
+    fails here, and one degrading per-FILE loses the two keys that are always there.
+    """
+    project_dir, _storage = subagent_project
+    nested = {t.agent_id: t for t in subagent_files(project_dir, home=claude_home)}["nested1"]
+
+    assert nested.agent_type == "workflow-subagent" and nested.spawn_depth == 1
+    assert nested.description is None and nested.parent_agent_id is None
+    # `toolUseId` is absent here and deliberately never reaches a header even when present — it is
+    # an opaque id a model cannot act on. It stays reachable on `meta` for a human or an audit.
+    assert nested.meta == NESTED_META
+    assert "toolUseId" not in nested.meta
+
+
+@pytest.mark.parametrize("sidecar", [None, "{not json at all", '["a", "list"]'])
+def test_a_missing_or_malformed_sidecar_still_renders_the_transcript(
+    tmp_path, claude_home, sidecar
+):
+    """Defensive, and labelled as such: 0 of 874 real files were missing or malformed. The rule is
+    still that a sidecar problem costs the METADATA, never the transcript."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    storage = seed_project(claude_home, project_dir, {"sess-1": [_event("user", "main")]})
+    write_subagent(storage / "sess-1" / "subagents", "bare", None, [_sub_event("user", "body")])
+    if sidecar is not None:
+        (storage / "sess-1" / "subagents" / "agent-bare.meta.json").write_text(
+            sidecar, encoding="utf-8"
+        )
+
+    found = subagent_files(project_dir, home=claude_home)
+
+    assert [t.agent_id for t in found] == ["bare"]
+    assert found[0].agent_type is None and found[0].spawn_depth is None and found[0].meta == {}
+    assert render_transcript_file(found[0].path, include_sidechain=True) == "user: body"
+
+
+# -- containment: the arrangements that actually escape -------------------------------------------
+
+
+def _session_with_storage(tmp_path, claude_home, session_id="sess-1"):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir(exist_ok=True)
+    storage = seed_project(claude_home, project_dir, {session_id: [_event("user", "main")]})
+    return project_dir, storage
+
+
+def test_a_symlinked_subagents_directory_pointing_outside_yields_nothing(tmp_path, claude_home):
+    """Escape 1 of 3, reproduced against a real implementation before this guard existed.
+
+    Anchoring on a RESOLVED root and prefix-testing against it looks airtight ("both operands are
+    resolved, so nothing can fool it") and is not: resolving the root makes it MOVE WITH the
+    symlink, after which everything under the symlink's target is trivially `is_relative_to` it.
+    """
+    project_dir, storage = _session_with_storage(tmp_path, claude_home)
+    outside = tmp_path / "outside-subagents"
+    write_subagent(outside, "secret", FLAT_META, [_sub_event("user", "SECRET OUTSIDE")])
+    (storage / "sess-1").mkdir()
+    os.symlink(outside, storage / "sess-1" / "subagents")
+
+    assert subagent_files(project_dir, home=claude_home) == []
+
+
+def test_a_symlinked_session_directory_pointing_outside_yields_nothing(tmp_path, claude_home):
+    """Escape 2 of 3, and the one a check placed ONE LEVEL LOWER never sees: the escape happens
+    above `subagents/`, so pinning only `subagents/` looks below where it occurs."""
+    project_dir, storage = _session_with_storage(tmp_path, claude_home)
+    outside = tmp_path / "outside-session"
+    write_subagent(
+        outside / "subagents", "elsewhere", FLAT_META, [_sub_event("user", "SECRET OUTSIDE")]
+    )
+    os.symlink(outside, storage / "sess-1")
+
+    assert subagent_files(project_dir, home=claude_home) == []
+
+
+def test_subagents_symlinked_to_the_memory_store_yields_nothing(tmp_path, claude_home):
+    """Escape 3 of 3, and the nastiest: the target is INSIDE storage, so every check phrased as
+    "did we stay under the project's own directory" passes — while the MEMORY STORE gets read as if
+    it were a transcript. Keep this case explicitly; it is the one that defeats the plausible fix.
+    """
+    project_dir, storage = _session_with_storage(tmp_path, claude_home)
+    write_subagent(storage / "memory", "mem", FLAT_META, [_sub_event("user", "MEMORY CONTENT")])
+    (storage / "sess-1").mkdir()
+    os.symlink(storage / "memory", storage / "sess-1" / "subagents")
+
+    assert subagent_files(project_dir, home=claude_home) == []
+
+
+def test_a_symlinked_file_inside_a_legitimate_subagents_directory_is_skipped(tmp_path, claude_home):
+    """The leaf case: the directory hops are fine, one FILE in it resolves out of the tree."""
+    project_dir, storage = _session_with_storage(tmp_path, claude_home)
+    subagents = storage / "sess-1" / "subagents"
+    write_subagent(subagents, "real", FLAT_META, [_sub_event("user", "kept")])
+    outside = tmp_path / "outside-agent.jsonl"
+    outside.write_text(json.dumps(_sub_event("user", "SECRET OUTSIDE")) + "\n", encoding="utf-8")
+    os.symlink(outside, subagents / "agent-sneaky.jsonl")
+
+    assert [t.agent_id for t in subagent_files(project_dir, home=claude_home)] == ["real"]
+
+
+def test_a_symlinked_SUBDIRECTORY_is_not_descended_into(tmp_path, claude_home):
+    """**This pins `pathlib`'s own refusal to descend directory symlinks, NOT a guard in this
+    module.** `rglob` on 3.11+ already declines, so this case passes with or WITHOUT any check of
+    ours — which is precisely why it is labelled. The escapes that needed real work are the three
+    root-symlink tests above; treating this one as evidence of containment is how false confidence
+    gets inherited.
+    """
+    project_dir, storage = _session_with_storage(tmp_path, claude_home)
+    subagents = storage / "sess-1" / "subagents"
+    write_subagent(subagents, "ok", FLAT_META, [_sub_event("user", "kept")])
+    outside = tmp_path / "outside-dir"
+    write_subagent(outside, "deep", FLAT_META, [_sub_event("user", "SECRET OUTSIDE")])
+    os.symlink(outside, subagents / "linked-sub")
+
+    assert [t.agent_id for t in subagent_files(project_dir, home=claude_home)] == ["ok"]
+
+
+def test_discovery_still_returns_files_when_an_ANCESTOR_is_a_symlink(tmp_path):
+    """The macOS regression guard: `/var` -> `/private/var` is the real shape of this, and the
+    failure it guards is SILENT — an unresolved ancestor mismatches every resolved child, so a
+    "simplified" containment check returns ZERO files and looks like a project with no subagents.
+
+    Stated exactly, because overclaiming a guard is the failure this section exists to avoid: what
+    keeps this green is that BOTH sides of each `==` are resolved, `claude_home()` included. The
+    test reproduces the platform arrangement and asserts the feature still works through it; it is
+    not by itself proof that an unresolved variant would go red on this machine.
+    """
+    real_root = tmp_path / "real"
+    (real_root / "fake-home" / ".claude").mkdir(parents=True)
+    linked_root = tmp_path / "linked"
+    os.symlink(real_root, linked_root)
+    home = linked_root / "fake-home" / ".claude"
+
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    storage = seed_project(home, project_dir, {"sess-1": [_event("user", "main")]})
+    seed_subagents(storage, "sess-1")
+
+    found = subagent_files(project_dir, home=home)
+
+    assert [t.agent_id for t in found] == ["flat1", "flat2", "nested1"]
+    assert all(t.path.is_relative_to(real_root.resolve()) for t in found)
+
+
+def test_a_project_with_no_subagents_at_all_is_empty_not_an_error(tmp_path, claude_home):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    seed_project(claude_home, project_dir, {"sess-1": [_event("user", "main")]})
+    assert subagent_files(project_dir, home=claude_home) == []
+    assert subagent_files(tmp_path / "never-used", home=claude_home) == []
+
+
+# -- for_project(include_subagents=True): entries, headers, identities -----------------------------
+
+
+def test_the_default_path_ignores_subagents_entirely_and_renders_no_header(
+    subagent_project, claude_home
+):
+    """Opt-in, default OFF — and the default rendering is BYTE-IDENTICAL to what it always was.
+
+    Two independent reasons, both decisive: `transcripts` is positional, so flipping the default
+    silently renumbers every entry and `read_transcript_chunk(3, ...)` would name a different
+    conversation before and after; and shipping ~1.5x more text (up to 18.5x more ENTRIES) to a
+    remote model is an operator's call, because redaction admits false negatives by construction.
+    """
+    project_dir, _storage = subagent_project
+    raw = ClaudeCodeAdapter.for_project(project_dir, home=claude_home).ingest()
+
+    assert raw.transcripts == ["user: the main thread"]
+    assert [t.kind for t in raw.transcript_ids] == ["session"]
+
+
+def test_include_subagents_adds_one_labelled_entry_per_subagent_in_a_stable_order(
+    subagent_project, claude_home
+):
+    """Separate entries, session-then-its-own-subagents, each with its own synthesized header.
+
+    Separate entries are what make redaction, auditability and judgeability STRUCTURAL: the text
+    lands in `RawSession.transcripts`, which is the ONE list `run_distillation_artifacts` redacts,
+    the list `read_transcript_chunk` closes over, and the list `eval/`'s judge reads.
+    """
+    project_dir, _storage = subagent_project
+    raw = ClaudeCodeAdapter.for_project(
+        project_dir, home=claude_home, include_subagents=True
+    ).ingest()
+
+    assert len(raw.transcripts) == 4
+    first_lines = [entry.split("\n")[0] for entry in raw.transcripts]
+    assert first_lines[0] == "[0] session sess-1"
+    assert first_lines[1].startswith("[1] subagent flat1 parent=session:sess-1 ")
+    assert first_lines[2].startswith("[2] subagent flat2 parent=agent:flat1 ")
+    # A workflow run's agents sort AFTER the flat ones and stay contiguous.
+    assert first_lines[3] == (
+        f"[3] subagent nested1 parent=workflow:{WORKFLOW_RUN} type=workflow-subagent depth=1"
+    )
+    # The body really is there — which only happens because the renderer was asked to keep
+    # sidechain events for these files.
+    assert raw.transcripts[3].endswith("user: nested one speaking")
+    assert "JOURNAL LINE" not in "\n".join(raw.transcripts)
+
+
+def test_the_nested_entrys_header_says_task_not_recorded_and_does_not_raise(
+    subagent_project, claude_home
+):
+    """`description` is absent on 299 of 874 real files, so this line is the live degradation — and
+    the header must still render all three lines rather than raising or silently dropping one."""
+    project_dir, _storage = subagent_project
+    raw = ClaudeCodeAdapter.for_project(
+        project_dir, home=claude_home, include_subagents=True
+    ).ingest()
+
+    lines = raw.transcripts[3].split("\n")
+    assert lines[1] == (
+        f"session=sess-1 agent=nested1 subpath=subagents/workflows/{WORKFLOW_RUN}/agent-nested1"
+    )
+    assert lines[2] == "task: (not recorded)"
+    # …and a sidecar that HAS one renders it verbatim (it is model-authored text, which is exactly
+    # why it lives inside the redacted string rather than beside it as trusted metadata).
+    assert raw.transcripts[1].split("\n")[2] == "task: hunt the flaky test"
+
+
+def test_every_index_line_fits_the_budget_and_the_ceiling_it_implies(subagent_project, claude_home):
+    """The bound AND the ceiling it implies, asserted in one place from ONE named constant.
+
+    They must not be able to drift: a bound of 90 would imply a ceiling of 439, so quoting "under
+    90 characters" beside a stated ceiling of 459 is two numbers in one document that cannot both
+    be true. `INDEX_LINE_MAX` is the only place either is written down.
+
+    The fixture's ids are short, so the second half constructs the WORST case measured over the real
+    corpus — a workflow-nested entry with the longest observed `agentType` — and pins it at exactly
+    the bound. Without that, a fixture-only assertion is vacuous.
+    """
+    project_dir, _storage = subagent_project
+    raw = ClaudeCodeAdapter.for_project(
+        project_dir, home=claude_home, include_subagents=True
+    ).ingest()
+    for entry in raw.transcripts:
+        assert len(entry.split("\n")[0]) <= INDEX_LINE_MAX
+
+    worst = SubagentTranscript(
+        path=Path("/x/agent-a.jsonl"),
+        session_id="s" * 36,                       # a real session id is 36 characters
+        agent_id="a" * 17,                         # a real agent id is 17
+        subpath=f"subagents/workflows/{'w' * 15}/agent-{'a' * 17}",
+        workflow_run="w" * 15,                     # `wf_` + 12, and NEVER shortened
+        agent_type="workflow-subagent",            # the longest observed value
+        spawn_depth=1,
+    )
+    assert len(subagent_header(999, worst).split("\n")[0]) == INDEX_LINE_MAX
+    # ...and the entry ceiling that bound implies at the default CD_MAX_OUTPUT_CHARS.
+    assert 40_000 // (INDEX_LINE_MAX + 1) == 459
+
+
+def test_transcript_ids_name_every_entry_with_identifiers_only(subagent_project, claude_home):
+    """The ordered identity list: it is what lets a reviewer holding a trace answer "what was
+    transcript 7?", which nothing anywhere could do before. Four `str` fields, every one derived
+    from a filename or a directory name — no description, no agentType, no body, nothing for
+    redaction to do."""
+    project_dir, _storage = subagent_project
+    raw = ClaudeCodeAdapter.for_project(
+        project_dir, home=claude_home, include_subagents=True
+    ).ingest()
+
+    assert len(raw.transcript_ids) == len(raw.transcripts)
+    assert [(t.kind, t.id, t.session, t.parent) for t in raw.transcript_ids] == [
+        ("session", "sess-1", "sess-1", "session:sess-1"),
+        ("subagent", "flat1", "sess-1", "session:sess-1"),
+        ("subagent", "flat2", "sess-1", "agent:flat1"),
+        ("subagent", "nested1", "sess-1", f"workflow:{WORKFLOW_RUN}"),
+    ]
+    # The mode is INFERABLE from the list itself — no separate boolean asserting it.
+    kinds = [t.kind for t in raw.transcript_ids]
+    assert kinds.count("session") == 1 and kinds.count("subagent") == 3
+
+
+def test_ordering_is_session_then_that_sessions_own_subagents_then_the_next(tmp_path, claude_home):
+    """Both halves of the ordering contract, on a TWO-session fixture — which is the whole point.
+
+    Review's mutation pass found both halves undefended, because every other fixture here has ONE
+    session and agent ids that already sort the way the real key does. Two mutations survived the
+    entire suite: sorting subagents by `agent_id` alone (dropping workflow grouping AND depth), and
+    appending all subagents after all sessions. So this fixture is built to make the correct order
+    DIFFER from both:
+
+    * ids are chosen so alphabetical order is wrong three ways — `zzz-late` (flat, depth 1) must
+      precede `aaa-deep` (flat, depth 2) must precede `mmm-nested` (in a workflow run);
+    * two sessions interleave, so "all sessions, then all subagents" is a different sequence.
+
+    Contract: a session, then that session's OWN subagents, then the next session — related material
+    adjacent, a workflow run's agents contiguous, and deterministic across runs.
+    """
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    storage = seed_project(
+        claude_home,
+        project_dir,
+        {"aaa-sess": [_event("user", "first")], "bbb-sess": [_event("user", "second")]},
+    )
+    subagents = storage / "aaa-sess" / "subagents"
+    write_subagent(
+        subagents, "zzz-late", {"agentType": "t", "spawnDepth": 1}, [_sub_event("user", "z")]
+    )
+    write_subagent(
+        subagents,
+        "aaa-deep",
+        {"agentType": "t", "spawnDepth": 2, "parentAgentId": "zzz-late"},
+        [_sub_event("user", "a")],
+    )
+    write_subagent(
+        subagents / "workflows" / WORKFLOW_RUN,
+        "mmm-nested",
+        NESTED_META,
+        [_sub_event("user", "m")],
+    )
+    write_subagent(
+        storage / "bbb-sess" / "subagents",
+        "bbb-solo",
+        {"agentType": "t", "spawnDepth": 1},
+        [_sub_event("user", "b")],
+    )
+
+    raw = ClaudeCodeAdapter.for_project(
+        project_dir, home=claude_home, include_subagents=True
+    ).ingest()
+
+    assert [(t.kind, t.id) for t in raw.transcript_ids] == [
+        ("session", "aaa-sess"),
+        ("subagent", "zzz-late"),
+        ("subagent", "aaa-deep"),
+        ("subagent", "mmm-nested"),
+        ("session", "bbb-sess"),
+        ("subagent", "bbb-solo"),
+    ]
+
+
+def test_the_bare_constructor_reports_no_identities_rather_than_a_partial_list(memory_dir):
+    """All-or-nothing: an adapter handed plain strings knows nothing about where they came from, and
+    a partial list would renumber nothing while looking authoritative. `()` is what makes the
+    driver's stamp CONDITIONAL and keeps present-and-empty from meaning absent."""
+    assert ClaudeCodeAdapter(memory_dir, transcripts=["a", "b"]).ingest().transcript_ids == ()
+
+
+def test_a_subagent_whose_render_is_empty_is_dropped_not_emitted_as_a_bare_header(
+    tmp_path, claude_home
+):
+    """A header with no body is worse than nothing: it claims a transcript exists and gives the
+    planner an index that reads back empty. Dropping it is also why the index is assigned in a
+    second pass — the surviving set has to be known first."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    storage = seed_project(claude_home, project_dir, {"sess-1": [_event("user", "main")]})
+    write_subagent(storage / "sess-1" / "subagents", "empty", FLAT_META, [{"type": "mode"}])
+    write_subagent(storage / "sess-1" / "subagents", "real", FLAT_META, [_sub_event("user", "hi")])
+
+    raw = ClaudeCodeAdapter.for_project(
+        project_dir, home=claude_home, include_subagents=True
+    ).ingest()
+
+    assert [t.id for t in raw.transcript_ids] == ["sess-1", "real"]
+    assert [entry.split("\n")[0].split()[0] for entry in raw.transcripts] == ["[0]", "[1]"]

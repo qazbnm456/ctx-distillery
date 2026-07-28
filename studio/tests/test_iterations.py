@@ -210,6 +210,11 @@ def test_initial_surfaces_counts_roles_the_pinned_interpreter_budgets_and_the_ru
     assert initial == {
         "project": "secret-client-project",          # BASENAME — never the absolute path
         "transcripts": 1,
+        # This live trace predates `transcript_index`, so the COMPOSITION is unknown rather than
+        # zero — an old trace carries no identity list at all, and `sessions=0 subagents=0` would
+        # be a positive claim it never made.
+        "sessions": None,
+        "subagents": None,
         "memory_artifacts": 0,
         "models": {"planner": "gpt_oss_120B", "drafter": "gpt_oss_120B"},
         "interpreter": "pyodide",                    # invariant 1's pin, visible per run
@@ -217,6 +222,34 @@ def test_initial_surfaces_counts_roles_the_pinned_interpreter_budgets_and_the_ru
         "max_iterations": 8,
         "max_llm_calls": 6,
     }
+
+
+def test_initial_surfaces_the_transcript_composition_when_the_trace_carries_one():
+    """`transcripts: 43` alone cannot distinguish one session from one session plus 42 subagents.
+    Read through `mapper.transcript_composition` — the ONE implementation, imported rather than
+    copied, because two copies of a shape guard is how one of them drifts."""
+    meta = {
+        "transcripts": 3,
+        "transcript_index": [
+            {"kind": "session", "id": "s1", "session": "s1", "parent": "session:s1"},
+            {"kind": "subagent", "id": "a1", "session": "s1", "parent": "session:s1"},
+            {"kind": "subagent", "id": "a2", "session": "s1", "parent": "workflow:wf_1"},
+        ],
+    }
+    initial = build_iterations([_e(0, "run_start", T0, {"meta": meta})])["initial"]
+    assert initial["transcripts"] == 3
+    assert initial["sessions"] == 1 and initial["subagents"] == 2
+
+
+@pytest.mark.parametrize("index", ["nope", 42, {"kind": "session"}, [42, None]])
+def test_initial_degrades_the_composition_to_None_on_a_malformed_identity_list(index):
+    """Invariant 10's "never 500 on a malformed trace", applied to the new key. `[42, None]` is the
+    per-ELEMENT half — every element filtered leaves 0/0, which is a real (empty) list rather than
+    a malformed one, so it reports zeros; the non-list shapes report None."""
+    meta = {"transcripts": 1, "transcript_index": index}
+    initial = build_iterations([_e(0, "run_start", T0, {"meta": meta})])["initial"]
+    expected = (0, 0) if isinstance(index, list) else (None, None)
+    assert (initial["sessions"], initial["subagents"]) == expected
 
 
 def test_initial_has_no_dead_diff_sentry_fields():

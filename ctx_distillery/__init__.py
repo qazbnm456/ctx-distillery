@@ -14,6 +14,7 @@ Public surface::
     from ctx_distillery import DistillPlan, DistillCandidate, DistillAction     # the SUBMIT shape
     from ctx_distillery import AssembledPlan, AssembledCandidate, assemble      # the read side
     from ctx_distillery import HarnessAdapter, ArtifactRef, ClaudeCodeAdapter   # the harness seam
+    from ctx_distillery import subagent_files, SubagentTranscript, TranscriptId # ... + subagents
     from ctx_distillery import render_plan, plan_as_dict, load_trace, plan_from_events
     from ctx_distillery import load_runs, export_dataset                  # reward-free RL export
 
@@ -40,14 +41,23 @@ package surface names nothing.
 
 from __future__ import annotations
 
-from .adapters.base import ARTIFACT_SCOPES, ArtifactRef, ArtifactScope, HarnessAdapter, RawSession
+from .adapters.base import (
+    ARTIFACT_SCOPES,
+    ArtifactRef,
+    ArtifactScope,
+    HarnessAdapter,
+    RawSession,
+    TranscriptId,
+)
 from .adapters.claude_code import (
     ClaudeCodeAdapter,
+    SubagentTranscript,
     global_skills_root,
     memory_dir_for_project,
     project_skills_root,
     project_storage_dir,
     render_transcript_file,
+    subagent_files,
     transcript_files,
 )
 from .config import PINNED_INTERPRETER, SUBSCRIPTION_PREFIX, DistillConfig, make_chat_fn, setup
@@ -119,12 +129,15 @@ __all__ = [  # noqa: RUF022
     "ArtifactScope",
     "ARTIFACT_SCOPES",
     "RawSession",
+    "TranscriptId",
     "ClaudeCodeAdapter",
+    "SubagentTranscript",
     "memory_dir_for_project",
     "project_storage_dir",
     "global_skills_root",
     "project_skills_root",
     "transcript_files",
+    "subagent_files",
     "render_transcript_file",
     # the READ-ONLY tool set (closed — CLAUDE.md invariant 1)
     "FormatCheck",

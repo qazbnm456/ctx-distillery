@@ -334,10 +334,16 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    The transcript RENDERING is deliberately LOSSY and its rules are pinned by tests: filter to
    `user`/`assistant` FIRST (no other event type carries `message` at all), handle `message.content`
    as either a plain string or a list of blocks, size a `tool_result` in chars OR blocks depending on
-   ITS OWN content's shape, and name an unrecognized block rather than dropping it. `isSidechain` is
-   filtered as a DEFENSIVE NO-OP — it was `false` on all 1216 real events checked, because subagent
-   messages live in separate files and are not inlined; do not re-describe it as "removing subagent
-   noise". Every discovery helper takes a `home=` override, and no test may read this machine's real
+   ITS OWN content's shape, and name an unrecognized block rather than dropping it. **`isSidechain`
+   is the field that separates the two transcript STORES, and the old instruction here — "a DEFENSIVE
+   NO-OP … do not re-describe it as removing subagent noise" — described it by the ONE population
+   where it does nothing.** On a main-thread file it really does filter nothing (measured: `False` on
+   0 of 57,928 user/assistant events across 883 session files, which is why
+   `render_transcript_events`'s default is byte-identical either way). On a SUBAGENT file it filters
+   **everything** (72,126 of 72,126, across 874 files) — so reading one means passing
+   `include_sidechain=True` EXPLICITLY, never deleting the filter. The default stays `False` so a
+   future Claude Code that inlines sidechain events into the main file cannot silently double-count
+   them. Every discovery helper takes a `home=` override, and no test may read this machine's real
    `~/.claude` (non-hermetic, and it would pull real user content into a fixture).
 7. **A skill's REQUIRED frontmatter is `name` + `description`, full stop — in all three places.**
    `when_to_use` and `dispatch_intent` are OPTIONAL extras: accepted and passed through verbatim when
@@ -596,11 +602,29 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   demand"; every in-scope harness is a local filesystem, so a plain read of the enumerated,
   already-resolved path is honest. Whether a future non-filesystem harness needs a different read
   seam is deferred to when that harness is actually designed.
-- **Transcript discovery reads the MAIN THREAD only.** `for_project` renders every
-  `<session-id>.jsonl` in the project's storage directory. A SUBAGENT's messages are not in those
-  files at all — they live in `subagents/agent-<id>.jsonl` (with a paired `.meta.json` carrying
-  `agentType`/`description`/`spawnDepth`). Distilling those is a real deferred extension: the same
-  file shape, a different glob. Not built.
+- **Subagent-transcript distillation is BUILT, and OPT-IN.** This bullet used to say "transcript
+  discovery reads the MAIN THREAD only … a real deferred extension: the same file shape, a different
+  glob. Not built." Four things in it were wrong and the corrections are the useful part. Subagent
+  transcripts live at
+  `~/.claude/projects/<sanitized>/<session-id>/subagents/**/agent-<agent-id>.jsonl` —
+  **recursively**: directly under `subagents/`, and nested under `subagents/workflows/<run-id>/`
+  (claude-agent-sdk 0.2.116, `_internal/session_import.py:89-94` and `_internal/sessions.py:1210-1238`
+  — FIRST-PARTY, not inferred from this machine). So the OLD PATH omitted the `<session-id>/` level
+  AND the nested case; "a different GLOB" is false twice over (it is a recursive WALK, and the
+  shipped renderer returned **0 characters** on all 874 real subagent files, because `isSidechain`
+  filters every event); and each file carries a sibling `<stem>.meta.json` whose only REQUIRED keys
+  are **`agentType` and `spawnDepth`** — `description`, `toolUseId`, `parentAgentId`, `model` and
+  `stoppedByUser` are OPTIONAL and really are absent (every nested file, 299 of 874, carries the two
+  required keys and nothing else), so degradation is per-FIELD, never per-file. `journal.jsonl` also
+  lives under `subagents/` and is NOT a transcript; the `agent-` filename filter is what excludes it
+  (copying the SDK's store-MIRRORING helper instead of its transcript-reading one would ingest all
+  nine). `subagent_files()` discovers them; `for_project(..., include_subagents=True)` and
+  `ctx-distillery distill --include-subagents` ingest them, each as its OWN `transcripts[]` entry
+  with a 3-line header whose line 0 is a short index line. Default OFF, deliberately: `transcripts`
+  is positional, so flipping it renumbers every entry and `read_transcript_chunk(3, …)` names a
+  different conversation before and after; and shipping ~1.5x more text (up to 18.5x more ENTRIES)
+  to a remote model is an operator's act. **Still not built: a SUBAGENT'S OWN nested storage** —
+  none was observed, and every nested file on the measured corpus is depth 1 with no `parentAgentId`.
 - **The project-scoped skills location is CONFIRMED** (empirically, via a real control experiment),
   with real precedence/timing caveats to respect: a GLOBAL skill of the same name SHADOWS a project
   one (`make_skill_validator` and `apply_plan`'s `_promote_skill` both refuse a project-scope name a

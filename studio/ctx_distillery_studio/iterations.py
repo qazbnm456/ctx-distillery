@@ -57,6 +57,12 @@ from __future__ import annotations
 from pathlib import PurePath
 from typing import Any
 
+# The ONE composition reader, imported rather than copied (`CLAUDE.md` invariant 11). `mapper` is
+# the same kind of module this one is — pure, web-dep-free, no `ctx_distillery` import — so this
+# adds no weight and no dependency direction that did not already exist between the two views of
+# one trace.
+from .mapper import transcript_composition
+
 #: Per-field char cap for the bulky free-text fields (a turn's reasoning/code/output, a sub-LM
 #: exchange). Generous — rarely hit; it exists to bound a pathological blob, not to redact.
 _CAP = 16000
@@ -267,6 +273,10 @@ def _initial(meta: object) -> dict:
     return {
         "project": _project_label(meta.get("project_dir")),
         "transcripts": _as_int(meta.get("transcripts")),
+        # WHAT those transcripts were, when the trace says (`mapper.transcript_composition` —
+        # absent or malformed degrades to None, never to zero). `transcripts` alone cannot
+        # distinguish one session from one session plus 42 subagents.
+        **transcript_composition(meta),
         "memory_artifacts": _as_int(meta.get("memory_artifacts")),
         "models": {"planner": _label(meta.get("planner")), "drafter": _label(meta.get("drafter"))},
         "interpreter": _label(meta.get("interpreter")),

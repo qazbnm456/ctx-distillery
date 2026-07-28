@@ -33,6 +33,7 @@ from rlm_kit.trace import (
 from ctx_distillery.task import (
     _INSTRUCTIONS,
     PINNED_INTERPRETER,
+    PLANNER_PROMPT_VERSION,
     DistillCandidate,
     DistillPlan,
     DistillSession,
@@ -125,6 +126,51 @@ def test_the_prompt_teaches_the_promote_to_skill_scope_convention():
     assert '"global"' in _INSTRUCTIONS and '"project"' in _INSTRUCTIONS
     description = DistillCandidate.model_fields["key_fields"].description or ""
     assert "scope" in description and "promote_to_skill" in description
+
+
+def test_the_prompt_distinguishes_a_subagents_FINDINGS_from_its_AGREEMENT():
+    """The instruction change subagent ingestion makes mandatory, and both halves of it.
+
+    Left alone, "when multiple transcripts independently confirm the same thing, say so" becomes
+    ACTIVELY HARMFUL: a subagent's content derives from its parent's request, so parent-and-subagent
+    agreement is an echo, and the old wording makes the planner MORE confident on the strength of
+    it. But saying only "subagents are not independent" invites the opposite failure — discounting
+    subagent content wholesale, which is worse, because subagent text is the MAJORITY of the
+    material in 6 of 11 real projects. So the prompt has to say both.
+    """
+    assert "subagent" in _INSTRUCTIONS.lower()
+    assert "FINDINGS are ordinary evidence" in _INSTRUCTIONS
+    assert "echo, not corroboration" in _INSTRUCTIONS
+    assert "siblings, not independent witnesses" in _INSTRUCTIONS
+    # A contradiction is a SIGNAL, not noise — the same asymmetry, read the other way.
+    assert "CONTRADICTING its parent" in _INSTRUCTIONS
+    # …and the planner is told how to tell the two kinds of entry apart, which is the header's job.
+    assert "`[i] subagent" in _INSTRUCTIONS and "`[i] session" in _INSTRUCTIONS
+
+
+def test_the_prompt_teaches_the_index_line_scan_and_that_it_needs_its_own_cell():
+    """Orientation is a REPL scan, and its budget is one cell's `CD_MAX_OUTPUT_CHARS`.
+
+    The prompt itself cannot carry the index: a signature input gets the same fixed 1000-character
+    preview `transcripts` does, and appending it to the instructions would pay the full cost on
+    EVERY turn and route per-run, partly model-authored text into a slot the driver's single
+    `redact()` call does not cover. What is left is a cheap, pageable, truncation-VISIBLE scan —
+    which only works if the planner is told to run it, alone, and to page when it is truncated.
+    """
+    assert 't.split("\\n")[0]' in _INSTRUCTIONS
+    assert "OWN REPL cell" in _INSTRUCTIONS
+    assert "page it" in _INSTRUCTIONS
+
+
+def test_planner_prompt_version_is_pinned():
+    """Mirrors the eval judge's own `PROMPT_VERSION` pin, on the side that had no counterpart.
+
+    The constant is only worth anything if it MOVES when `_INSTRUCTIONS` moves, and a constant
+    nothing asserts drifts silently from the text it names. v1 -> v2 was the subagent paragraphs
+    plus the index-line scan; `session.run_distillation_artifacts` stamps whatever this says into
+    every run's `run_meta`.
+    """
+    assert PLANNER_PROMPT_VERSION == "ctxd-planner-v2"
 
 
 def test_each_instance_gets_its_own_tools(snapshot):
