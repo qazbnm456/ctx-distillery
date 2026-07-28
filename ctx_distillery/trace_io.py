@@ -41,6 +41,7 @@ from collections.abc import Iterable
 
 from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
 from rlm_kit.trace import load_events
+from rlm_kit.trace import payload_cause as _kit_payload_cause
 
 #: rlm-kit's own CLOSED cause vocabulary, re-exported so a reader of a RECORDED payload and a reader
 #: of a LIVE `ModelToolResult` name the four outcomes with the same four strings. Imported rather
@@ -74,20 +75,26 @@ def draft_cause(payload: dict) -> str:
     verdict) so an old trace classifies identically to a new one. A recorded value outside the closed
     vocabulary is ignored rather than trusted; deriving is always available.
 
-    **The endpoint string is read under BOTH `endpoint_error` and `error`**, because the consumer
-    convention has used each. That half is taken from rlm-kit's own `trace.payload_cause` (added in
-    `f217cfad`), which is the read-side mirror of this function; without it a payload that recorded
-    the string under `error` classifies as a validator rejection.
+    **The derivation is rlm-kit's `trace.payload_cause`, called — not reimplemented.** This function
+    is now exactly "prefer a recorded `cause`, else ask the kit", which is one definition of the
+    classification in the workspace instead of two.
 
-    **The other half of `payload_cause` is deliberately NOT taken, and this must not be "collapsed
-    into the kit" without fixing that first.** Upstream tests the string for TRUTHINESS
-    (`payload.get("endpoint_error") or payload.get("error")`); this function tests `is not None`, and
-    the difference is not stylistic. rlm-kit fills the field with `str(exc)`, which is the EMPTY
-    STRING for `httpx.ConnectTimeout` / `ReadTimeout` / `ConnectError`, `TimeoutError`, `OSError` and
-    `http.client.RemoteDisconnected` — measured, all six. Under truthiness every one of those falls
-    through to the validator branch, which is exactly the misclassification `payload_cause`'s own
-    docstring says it exists to prevent. Aliasing this to the kit today would REGRESS the common
-    transport failures while fixing the rarer key-name one. Take the key set, keep the test.
+    That delegation was REFUSED once, on a real defect, and the sequence is worth keeping because it
+    is the argument for when to collapse into a dependency and when not to. `payload_cause` landed
+    upstream reading `payload.get("endpoint_error") or payload.get("error")` — TRUTHINESS — while its
+    own docstring called it the read-side mirror of `ModelToolResult.cause`, which has always read
+    `is not None`. The two disagree on the EMPTY STRING, and that is the common case, not a corner
+    one: the field is `str(exc)`, which is `''` for `httpx.ConnectTimeout` / `ReadTimeout` /
+    `ConnectError`, `TimeoutError`, `OSError` and `RemoteDisconnected` — measured, all six. So this
+    module took the kit's KEY SET (reading the string under both conventional names, which it had
+    been missing) and kept its own test, with a test pinning the divergence rather than adopting it.
+    The defect was then fixed upstream (`6d010447`), and a differential over all 81 cause-less
+    payload shapes now shows ZERO disagreement — so the reason to keep a second copy is gone, and
+    keeping one anyway would be the duplication invariant 11 exists to stop.
+
+    The guard did not go away with the copy: `tests/test_draft_cause.py` still asserts the six
+    empty-string transport failures classify as `endpoint`. It now points at the BEHAVIOUR through
+    this delegation, i.e. at an upstream regression, rather than at a local implementation.
     Under a truthiness test every one of those fell through to the validator branch — a bare dropped
     connection reported to a human as "failed its format check", and to a trainer as model
     dishonesty, which is the exact harm `CLAUDE.md` invariant 12 exists to prevent.
@@ -100,11 +107,7 @@ def draft_cause(payload: dict) -> str:
     recorded = payload.get("cause")
     if recorded in DRAFT_CAUSES:
         return recorded
-    if payload.get("circuit_broken"):
-        return CAUSE_CIRCUIT_BROKEN
-    if payload.get("endpoint_error") is not None or payload.get("error") is not None:
-        return CAUSE_ENDPOINT
-    return CAUSE_OK if payload.get("ok") else CAUSE_INVALID
+    return _kit_payload_cause(payload)
 
 
 def dict_events(events: Iterable[object]) -> list[dict]:

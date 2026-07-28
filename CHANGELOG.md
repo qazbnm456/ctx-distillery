@@ -12,6 +12,33 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **Reported and fixed a `payload_cause` defect UPSTREAM, then collapsed this project's copy into
+  it.** rlm-kit's `trace.payload_cause` documents itself as the read-side mirror of
+  `ModelToolResult.cause`, and the two disagreed on the case that matters most: the write side has
+  always read `endpoint_error is not None`, the read side shipped as `endpoint_error or error`. They
+  differ on the EMPTY STRING, which is the common case rather than a corner one — the field is
+  `str(exc)`, and that is `''` for `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`,
+  `TimeoutError`, `OSError` and `RemoteDisconnected`. Under truthiness every one of those read as a
+  validator rejection: a dropped connection labelled a content decline. `dataset.export_actions`
+  carried the same trap one field over (`a or b` skips a present-but-empty `endpoint_error`), so a
+  record could reach a trainer saying `cause: endpoint` beside `error: null`. Fixed in rlm-kit
+  `6d010447` with a test asserting the two agree over every shape — not merely that each behaves.
+  `trace_io.draft_cause` had taken the kit's KEY SET while pinning the divergence rather than
+  adopting it; a differential over all 81 cause-less payload shapes now shows ZERO disagreement, so
+  it delegates and the local derivation is gone. The GUARD stayed: the six empty-string transport
+  failures are still asserted, now pointing through the delegation at an upstream regression.
+- **The TA criterion's description claims only what it counts, and it is training input.** It ended
+  "the planner read before it wrote", which is stronger than the fact supports: `transcripts` and
+  `memory_index` are REPL variables on the task's signature, so a planner can read every transcript
+  in full without one read tool — and a measured run did (all three to the sub-LM at turns 0-2,
+  drafting at turn 3, the first read TOOL at step 9). `rl_export.rubric_signal` carries this string
+  into the SFT bundle at `sft_turns[*].input.initial.rubric[*].description`, so the wording is read
+  by a model being trained. It now names the unit and the blind spot in the same breath, pinned by a
+  test. (It never reached the eval judge — `judge.py` is rubric-free by design.)
+- **rlm-kit pin `4fcd50b2` → `6d010447`.** Brings the fix above plus `export_actions`' `outcome.cause`
+  / `outcome.error`, which is ADDITIVE — `rl_export` reads neither, and its own per-cause metrics
+  keep coming from `draft_cause`.
+
 - **The studio's plan review is now a rail LIST + a middle STAGE, the sibling studios' shape.** The
   middle column used to render all ten candidates with every drafted body expanded: measured on a
   real run, **32,091 characters of draft across 10 rows**, each `<pre>` capped at 260px with its own

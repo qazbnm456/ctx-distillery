@@ -76,6 +76,27 @@ def test_default_rubric_covers_all_four_categories_with_observable_descriptions(
     assert validate_rubric(rubric) == []
 
 
+def test_the_TA_description_claims_only_what_it_counts():
+    """It counts TOOL CALLS, and it must say so — it is training input, not decoration.
+
+    The description used to end "the planner read before it wrote", which is a stronger claim than
+    the fact supports. `transcripts` and `memory_index` are INPUTS on `DistillSession`'s signature,
+    bound as REPL variables, and `task._INSTRUCTIONS` tells the planner to print and slice them, so a
+    planner can read every transcript in full without calling one read tool. A measured run did
+    exactly that: all three transcripts sent to the sub-LM at turns 0-2, drafting at turn 3, the
+    first read TOOL at step 9 — which this criterion would have described as not reading first.
+
+    Why a test rather than a comment: `rl_export.rubric_signal` carries this string into the SFT
+    bundle at `sft_turns[*].input.initial.rubric[*].description`, so the wording is read by a model
+    being trained, and the studio renders it verbatim as the module note read by a human.
+    """
+    ta = next(c for c in default_rubric().criteria if c.category == "TA")
+
+    assert "TOOL CALLS" in ta.description, "the unit being counted must be explicit"
+    assert "REPL variable" in ta.description, "and the blind spot named in the same breath"
+    assert "read before it wrote" not in ta.description, "the retired over-claim must not return"
+
+
 def test_validate_rubric_flags_a_missing_category():
     rubric = RubricCriteria(
         criteria=[Criterion(name="x", category="TF", description="a plan candidate exists")]

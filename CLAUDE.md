@@ -556,13 +556,30 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
       and `_errors_with_infra` branches on `result.cause` rather than re-deriving. A payload that
       SAYS what happened beats every downstream reader reconstructing it.
     * **Read it, with a fallback for old traces.** `trace_io.draft_cause(payload)` PREFERS a recorded
-      `cause` (ignoring any value outside the closed vocabulary) and otherwise derives it —
-      `circuit_broken` → `endpoint_error is not None` → `ok` — reproducing `ModelToolResult.cause`'s
-      own chain exactly, so a pre-`4fcd50b2` trace classifies identically to a fresh one. That
-      matters because `rl_export`, `schema` and `studio/` all read historical traces. `endpoint_error`
-      is tested with `is not None`, NOT truthiness: rlm-kit fills it with `str(exc)`, which is `''`
-      for `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`, `OSError` and
-      `RemoteDisconnected`.
+      `cause` (ignoring any value outside the closed vocabulary) and otherwise **CALLS
+      `rlm_kit.trace.payload_cause`** — it does not reimplement the chain. That matters because
+      `rl_export`, `schema` and `studio/` all read historical traces, and a pre-`4fcd50b2` trace has
+      no `cause` key at all.
+
+      **The delegation was refused once, on a real defect, and the sequence is the reusable part.**
+      `payload_cause` landed upstream reading `endpoint_error or error` — TRUTHINESS — while its own
+      docstring called it the read-side mirror of `ModelToolResult.cause`, which has always read
+      `is not None`. They disagree on the EMPTY STRING, and that is the common case: the field is
+      `str(exc)`, which is `''` for `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`,
+      `TimeoutError`, `OSError` and `RemoteDisconnected` — measured, all six. So this project took
+      the kit's KEY SET (the endpoint string under BOTH names, which it had been missing), kept its
+      own `is not None`, and pinned the divergence with a test instead of adopting it. The defect
+      was then fixed upstream (`6d010447`); a differential over all 81 cause-less payload shapes now
+      shows ZERO disagreement, so the second copy was collapsed into a call.
+      **Collapse into a dependency when the difference is gone and provably so — not when it is
+      merely inconvenient.**
+
+      The guard outlived the copy: `tests/test_draft_cause.py` still asserts the six empty-string
+      transport failures classify as `endpoint`, now pointing THROUGH the delegation, so it is a
+      tripwire on an upstream regression rather than on a local edit. A second test asserts
+      `draft_cause` and `payload_cause` agree over every cause-less shape — behaviourally, because
+      an identity check on the function object would pass for a wrapper that reimplemented the body
+      underneath.
 
     `draft_cause` is the ONE implementation (invariant 11): `schema._not_ok_problem` (the
     human/judge-visible problem line) and `rl_export.run_metrics` (`draft_validator_rejects` /
