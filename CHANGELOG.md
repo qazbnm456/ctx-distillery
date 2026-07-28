@@ -12,6 +12,21 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **Corrected a stale "UNCONFIRMED" claim that outlived the experiment which closed it.** The
+  project-repo-relative `<project>/.claude/skills/<name>/SKILL.md` location was an unverified
+  hypothesis for exactly one pass; a dedicated control experiment then confirmed it (a scratch
+  directory seeded with a probe skill WAS read by a genuinely fresh `claude -p` process launched
+  inside it — listed and invokable — while a sibling control directory without `.claude/skills/`
+  was not, isolating the effect to the project-relative directory rather than a global leak), and
+  the two caveats it surfaced — a global skill of the same name SHADOWS a project one, and a
+  project's very FIRST skills directory needs a restart to be discovered — were BUILT ON by
+  `make_skill_validator` and `apply_plan._promote_skill`. But that pass never updated the prose:
+  `CLAUDE.md` invariant 6 still said "Nobody has verified it", contradicting its own
+  "Known simplifications" section three screens below, and `ctx_distillery/README.md` and
+  `adapters/claude_code.py` (module docstring and `project_skills_root`) repeated the stale version
+  to users. All four now agree, and the experiment's evidence is recorded in `CLAUDE.md` itself
+  rather than only in the design document that carried it. The historical entry below is left as
+  written — it was accurate when made.
 - **Closed the non-dict trace-line gap the Studio pass explicitly deferred — the shared library
   functions are now hardened, with ONE implementation instead of three.** `rlm_kit.trace.load_events`
   does no shape validation, so a JSONL line that is valid JSON but not an object (`42`, `null`,

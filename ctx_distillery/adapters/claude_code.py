@@ -9,8 +9,8 @@ Read-only, per `CLAUDE.md` invariant (4): this module opens files for reading on
 write/emit path of any kind.
 
 **Auto-discovery (`for_project`)** now locates the real storage instead of making the caller
-assemble it (`CLAUDE.md` invariant (6), the CONFIRMED-vs-INHERITED-vs-UNCONFIRMED split). What each
-part of that rests on is stated honestly, because the parts do NOT have equal evidence behind them:
+assemble it (`CLAUDE.md` invariant (6), the CONFIRMED-vs-INHERITED split). What each part of that
+rests on is stated honestly, because the parts do NOT have equal evidence behind them:
 
 * `sanitize(project_dir)` — every `/` of the project's absolute path replaced by `-`, giving
   `~/.claude/projects/<sanitized>/` — is CONFIRMED against real project directories. No other
@@ -23,11 +23,14 @@ part of that rests on is stated honestly, because the parts do NOT have equal ev
   `memory/`. `render_transcript_events` turns those raw events into the `list[str]` this project
   already expects — a deliberately LOSSY rendering (see its docstring), not a full replay.
 * GLOBAL skills are CONFIRMED at `~/.claude/skills/<name>/SKILL.md` (a DIRECTORY per skill, not a
-  flat file). PROJECT-scoped skills at `<project_dir>/.claude/skills/<name>/SKILL.md` are NOT
-  confirmed to be a mechanism Claude Code actually reads — a motivated hypothesis (this project's
-  own `.claude/rules/` IS read project-relative) that nobody has verified by starting a fresh
-  session against a seeded test skill. This adapter targets it as the best available option and
-  claims nothing more; see `CLAUDE.md`, "Known simplifications".
+  flat file). PROJECT-scoped skills at `<project_dir>/.claude/skills/<name>/SKILL.md` are CONFIRMED
+  TOO, by a dedicated control experiment: a scratch directory seeded with a probe skill was read by
+  a genuinely fresh `claude -p` process launched from inside it (the skill was listed AND
+  invokable), while a sibling control directory without `.claude/skills/` was not — isolating the
+  effect to the project-relative directory rather than a global leak. Two caveats from that
+  experiment are load-bearing for the WRITE side: a global skill of the same name SHADOWS a project
+  one, and a project's very first skills directory needs a Claude Code restart to be discovered.
+  See `CLAUDE.md` invariant (6) and "Known simplifications".
 
 The explicit `ClaudeCodeAdapter(memory_dir, transcripts)` constructor is UNCHANGED and still the
 right entry point for a test or an advanced caller. Skill enumeration is OPT-IN on it (pass
@@ -109,7 +112,10 @@ def global_skills_root(*, home: str | Path | None = None) -> Path:
 
 
 def project_skills_root(project_dir: str | Path) -> Path:
-    """`<project_dir>/.claude/skills` — the UNCONFIRMED project-scoped location (module docstring)."""
+    """`<project_dir>/.claude/skills` — the project-scoped skill store (module docstring).
+
+    CONFIRMED by a control experiment, with the shadowing/restart caveats stated there.
+    """
     return Path(project_dir).expanduser().resolve() / CLAUDE_DIRNAME / SKILLS_DIRNAME
 
 

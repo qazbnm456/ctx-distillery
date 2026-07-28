@@ -52,12 +52,13 @@ drifted, the reader and the writer would disagree about a location):
 
 **The evidence is not uniform, and the code says so.** CONFIRMED by direct inspection: the
 sanitization rule, one-JSONL-per-conversation, and the global skill layout (a DIRECTORY per skill).
-INHERITED but not re-verified: the `memory/` sub-path — that convention predates this research and no
-`memory/` directory existed on the machine it ran on. UNCONFIRMED: that Claude Code reads a
-project-repo-relative `<project>/.claude/skills/` at all. That last one is a motivated hypothesis
-(this repo's `.claude/rules/` IS read project-relative), targeted as the best available option for
-project-scoped promotions — it is NOT evidence that a skill written there gets picked up, and the
-empirical check (seed a test skill, start a fresh session, see if it's offered) has not been done.
+CONFIRMED by a dedicated control experiment: that Claude Code reads a project-repo-relative
+`<project>/.claude/skills/` at all — a scratch directory seeded with a probe skill was read by a
+fresh session launched inside it (listed, and invokable), while a sibling control directory without
+one was not. Two caveats came with it: a global skill of the same name SHADOWS a project one, and a
+project's very first skills directory needs a restart to be discovered. INHERITED but not
+re-verified: the `memory/` sub-path — that convention predates this research and no `memory/`
+directory existed on the machine it ran on.
 
 `render_transcript_events` / `render_transcript_file` turn raw JSONL into the `list[str]` the pipeline
 expects. Deliberately lossy, and the rules are pinned by tests rather than left implicit: filter to

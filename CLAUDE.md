@@ -93,7 +93,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    PARENT is still `memory_dir` itself. Exact-match-on-request and containment-at-enumeration are
    two separate checks; neither substitutes for the other. `apply.py` mirrors the second one on the
    WRITE side with the identical test (`resolved.parent == memory_dir`), before any write.
-6. **Storage discovery is CONFIRMED for some paths and INHERITED/UNCONFIRMED for others — keep the
+6. **Storage discovery is CONFIRMED for most paths and INHERITED for one — keep the
    distinction visible.** `ClaudeCodeAdapter.for_project(project_dir)` locates the real storage, and
    the evidence behind each part is NOT equal. Say so wherever it is described, and never upgrade one
    to sound like another:
@@ -105,13 +105,20 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
      `memory/` directory existed on the machine the research ran on; the convention is this project's
      pre-existing assumption, carried forward honestly. Auto-discovery only needs the sanitization
      rule to be right.
-   - **UNCONFIRMED, a hypothesis**: that Claude Code reads a project-repo-relative
-     `<project>/.claude/skills/<name>/SKILL.md` at all. Nobody has verified it (that needs a fresh
-     session in a directory seeded with a test skill, checking whether it is offered). It is motivated
-     by real precedent — this repo's own `.claude/rules/` IS read project-relative — and this project
-     TARGETS it for project-scoped promotions as the best available option. Do NOT write anything
-     anywhere that implies this pass proved it works, and do the empirical check before relying on the
-     project-skill path in anger.
+   - **CONFIRMED by a dedicated control experiment** (it was an UNCONFIRMED hypothesis for one pass;
+     this bullet used to still say so long after the experiment closed it — if you find another place
+     that still calls it unverified, that place is the stale one): Claude Code DOES read a
+     project-repo-relative `<project>/.claude/skills/<name>/SKILL.md`. A throwaway probe — a scratch
+     directory, never a real project on this machine, seeded with
+     `.claude/skills/probe-test-skill-xyz123/SKILL.md` — was inspected by a genuinely FRESH `claude -p`
+     process launched from inside it, and showed all three of: the project-local skill was listed among
+     that process's available skills; a sibling CONTROL directory with no `.claude/skills/` did NOT see
+     it (isolating the effect to the project-relative directory rather than a global leak); and the
+     skill was actually INVOKABLE, loading its real body. Anthropic's own documented scope table agrees
+     (Personal `~/.claude/skills/<name>/SKILL.md` for all projects vs. Project `.claude/skills/<name>/`
+     for one). Two caveats from that same experiment are load-bearing and live in "Known
+     simplifications" below — a GLOBAL skill of the same name SHADOWS a project one, and a project's
+     very FIRST skills directory needs a Claude Code restart before it is discovered.
    The transcript RENDERING is deliberately LOSSY and its rules are pinned by tests: filter to
    `user`/`assistant` FIRST (no other event type carries `message` at all), handle `message.content`
    as either a plain string or a list of blocks, size a `tool_result` in chars OR blocks depending on
