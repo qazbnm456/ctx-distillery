@@ -6,19 +6,54 @@ propose a distillation plan: what's safe to prune, what should be cross-referenc
 across sessions, and what durable knowledge is worth promoting into a standing memory file or a
 reusable Skill. It is a judgement engine, nothing more.
 
-**Status: the planner is wired and offline-tested; the apply step exists; storage is auto-discovered.**
-The five read-only planning tools, the Claude Code adapter, the assemble-on-read convention, the
-human-gated `apply_plan`, and auto-discovery of Claude Code's real on-disk storage (transcripts +
-both skill scopes) are implemented. Two sibling `uv` workspace members round it out: **`eval/`**
+**Status: the planner is wired and offline-tested; the apply step exists; storage is auto-discovered;
+both are driveable from the command line.** The five read-only planning tools, the Claude Code
+adapter, the assemble-on-read convention, the human-gated `apply_plan`, auto-discovery of Claude
+Code's real on-disk storage (transcripts + both skill scopes), and the two console scripts are
+implemented. Two sibling `uv` workspace members round it out: **`eval/`**
 (`ctx-distillery-eval`) — an offline, reward-free LLM-as-judge scoring the assembled plan against
 its transcript(s) — and **`studio/`** (`ctx-distillery-studio`) — a replay-only FastAPI +
 zero-build-vanilla-JS console previewing each candidate's drafted text next to its plan entry,
 purely from a finished run's trace file. Both reward-free/read-only by construction; see their own
-`eval/README.md`/`studio/README.md`. Still missing: a CLI, subagent-transcript distillation, and
-any harness other than Claude Code. See `CLAUDE.md` for the hard invariants this project is built
-against.
+`eval/README.md`/`studio/README.md`. Still missing: subagent-transcript distillation, a reward-free
+dataset export, and any harness other than Claude Code. See `CLAUDE.md` for the hard invariants this
+project is built against.
+
+## Install and run
+
+```bash
+git clone https://github.com/qazbnm456/ctx-distillery && cd ctx-distillery
+uv sync --extra cli          # the `cli` extra pulls the model client `distill` needs
+cp .env.example .env         # then fill in CD_ROOT_LM / CD_API_KEY
+set -a; . ./.env; set +a     # nothing auto-loads .env
+brew install deno            # the sandbox a live run executes in
+```
+
+```bash
+# 1. propose a plan for a project you have used Claude Code in (this writes only a trace file)
+uv run ctx-distillery distill /path/to/your/project
+
+# 2. read it again whenever you like — offline, no model, no credentials
+uv run ctx-distillery show traces/<run-id>.jsonl
+
+# 3. apply ONLY the candidates you name, by the index `show` printed. Without --confirm this is a
+#    dry run that writes nothing; there is no flag that approves the whole plan.
+uv run ctx-distillery-apply traces/<run-id>.jsonl --project /path/to/your/project --approve 0,3
+uv run ctx-distillery-apply traces/<run-id>.jsonl --project /path/to/your/project --approve 0,3 --confirm
+```
+
+Applying is a **separate binary** on purpose, not a third subcommand: nothing on the planner's side
+of the codebase is allowed to import the one module that writes, and a test enforces it. Installing a
+skill into `~/.claude/skills` (rather than into the project you named) needs one more explicit flag,
+`--allow-skill-scope global`, because a global skill reaches every project you will ever open — and
+shadows a project skill of the same name.
+
+Offline commands need none of the setup above: `show`, `ctx-distillery-apply`, the eval scorer, and
+the studio all work on a finished trace file alone.
 
 ## Point it at a project
+
+The CLI does this for you; in Python it is one line:
 
 ```python
 from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
@@ -65,6 +100,9 @@ wrong:
    human calls by hand, and nothing the planner can reach imports it.
 
 ## Applying a plan (the human-gated step)
+
+From the shell this is `ctx-distillery-apply` (above). The Python API it wraps is the same shape,
+and remains the way to point at a layout the CLI's `--project` derivation doesn't cover:
 
 ```python
 from ctx_distillery.adapters.claude_code import global_skills_root, project_skills_root

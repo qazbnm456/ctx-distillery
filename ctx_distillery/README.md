@@ -30,6 +30,11 @@ adapter.ingest()  ->  redact  ->  DistillSession (RLM)  ->  assemble()  ->  [a h
   re-sources each promotion's verbatim drafted bytes from its `tool_call` event by `artifact_id`,
   reporting an unbacked candidate as a problem rather than trusting the plan's own claim.
 - **`apply.py`** — the human-gated writer. Everything above is inert; this is where disk changes.
+- **`cli.py` / `config.py` / `render.py`** — the shell in front of all of it. `cli.py` is
+  `ctx-distillery` (`distill` runs the pipeline above; `show` re-reads a finished trace);
+  `config.py` resolves the `CD_*` environment into an `RLMConfig` and the `chat_fn` the two drafting
+  tools call; `render.py` owns the one plan rendering that `show`, the dry run, and the eval judge
+  all read. The writer's own CLI lives in `apply.py` — see below for why.
 
 ## Storage auto-discovery (`ClaudeCodeAdapter.for_project`)
 
@@ -158,23 +163,45 @@ neither). Three encodings must move together or they drift: `make_skill_validato
 `tests/test_no_write_capability.py` scans every module here for mutation calls and `apply.py` is its
 one exemption. What makes that safe is not the absence of a write call but its unreachability: no
 module on the RLM path imports `apply`, and a test asserts it. Never import it from `task.py`,
-`session.py`, a tool, or `__init__.py`.
+`session.py`, a tool, `cli.py`, or `__init__.py`.
+
+That test is also why the CLI is **two console scripts** rather than one binary with three
+subcommands. Its regex matches a function-local import as readily as a top-level one, so a shared
+CLI module importing both `run_distillation` and `apply_plan` would turn it red — and `apply.py` is
+not a precedent for a second exemption. So `apply.py` hosts its own `main()`:
+
+```
+ctx-distillery        = ctx_distillery.cli:main     # distill / show — never imports apply
+ctx-distillery-apply  = ctx_distillery.apply:main   # the writer, with its own entry point
+```
+
+Two visible consequences of the same rule, both deliberate: `ctx-distillery show` has no `--out`
+(`cli.py` may not open a file for writing — redirect with `>`), and `distill` REFUSES a run id whose
+trace file already exists rather than deleting it, because `TraceRecorder` appends and `os.remove`
+is forbidden here. There is no `--force`.
 
 ## Layout
 
 ```
 ctx_distillery/
   README.md            # this file — module map, internals, testing
+  cli.py               # `ctx-distillery` — distill / show. Never imports apply.
+  __main__.py          # `python -m ctx_distillery ...` -> cli:main
+  config.py            # DistillConfig.from_env — the CD_* surface; setup() + make_chat_fn()
   task.py              # DistillSession(RLMTask) — signature, output_model, instructions
   session.py           # run_distillation (ingest once, redact once, run once) + assemble()
-  apply.py             # apply_plan — the human-gated writer, outside the RLM entirely
+  apply.py             # apply_plan — the human-gated writer, outside the RLM entirely,
+                       #   plus `ctx-distillery-apply`'s own main() (see above)
+  render.py            # render_plan / plan_as_dict — the ONE plan rendering (eval/ imports it)
   redact.py            # host-side redaction, applied before any text reaches the model
   frontmatter.py       # nested-YAML frontmatter parsing (memory + skill shapes)
   rubric.py            # ATLAS TF/TA/TG/PA facts (reward-free), sourced from session.assemble()
+  trace_io.py          # load_trace / dict_events — the ONE place JSONL bytes become events
   tools/               # the five READ-ONLY planner tools
   adapters/
     base.py            # the read-only harness-adapter seam
     claude_code.py     # the one in-scope adapter
 eval/                  # ctx-distillery-eval — a separate uv workspace member, judges the ARTIFACT
+studio/                # ctx-distillery-studio — replay-only console over a finished trace
 tests/                 # fully offline: no live model, no Deno, no network
 ```

@@ -12,6 +12,67 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The CLI, as TWO console scripts — because one binary is provably impossible here.**
+  `ctx-distillery distill [project]` discovers a project's Claude Code storage, wires the `chat_fn`
+  from `CD_*`, runs the distillation, and prints the assembled plan; `ctx-distillery show <trace>
+  [--json]` re-reads a finished run offline. `ctx-distillery-apply <trace> --project <dir> --approve
+  0,3 [--confirm]` is the writer. The split is not stylistic:
+  `tests/test_no_write_capability.py::test_apply_is_unreachable_from_the_planner_path` scans every
+  `.py` under `ctx_distillery/` except `apply.py` and matches a **function-local** import as readily
+  as a top-level one, so a shared CLI module importing both `run_distillation` and `apply_plan`
+  turns it red — and `apply.py` is explicitly "not a precedent for a second exemption". Verified
+  against the real regex before choosing: `apply.py` is excluded from `SOURCES` entirely, so hosting
+  `main()` *in the writer* keeps both properties, adds no exemption, and makes applying a visibly
+  different command at the shell — the same thing the API says by refusing to offer an apply-all
+  call. The three alternatives were rejected on the record: relaxing the regex weakens the guard
+  that makes the exemption safe; a second exempt module is what invariant 8 forbids by name; and a
+  fourth workspace member would move the importer *outside* `PACKAGE.rglob`'s field of view, where
+  the tripwire cannot see it at all. `importlib`-ing the writer is evading a tripwire by spelling.
+  **Approval UX**: `--approve` takes indices (repeatable and/or comma-separated, matching
+  `apply_plan`'s `approved_ids`, which are indices because `keep`/`prune` candidates carry no
+  `artifact_id`), the default is a DRY RUN that prints the whole plan and writes nothing, `--confirm`
+  is a second deliberate act, and there is no `--all` — pinned by
+  `test_no_flag_ever_approves_the_whole_plan`, which checks the parser's real option strings rather
+  than a `--help` substring (a substring check flagged `--allow-skill-scope` for containing
+  "--all"). `--allow-skill-scope` defaults to **project only**: `~/.claude/skills` reaches every
+  project the operator will ever open and a global skill *shadows* a project one of the same name,
+  so it earns its own opt-in even behind `--confirm`. A mistyped index is refused (exit 2) before
+  anything is written, in the dry run as well as under `--confirm`.
+  **Two behaviours fall out of invariant 1** rather than being chosen: `cli.py` is inside the
+  mutation scan, so `show` has no `--out` (redirect with `>`) and `distill` cannot `os.remove` a
+  stale trace the way the sibling projects' `run()` does — `TraceRecorder` appends, so the default
+  `--run-id` is `<project>-<UTC timestamp>` and a run whose trace file already exists is REFUSED
+  rather than interleaved. There is deliberately no `--force` that deletes one. The new
+  `cli.py`/`config.py`/`render.py`/`__main__.py` are named explicitly in
+  `test_the_scan_actually_sees_the_package`, so "the planner-side CLI cannot write" is pinned, not
+  incidental.
+  **`.env.example` is finally true.** It declared four `CD_*` variables that no code read — the
+  library entry point takes a caller-supplied adapter and `chat_fn` and never touches the
+  environment. New `ctx_distillery/config.py` (`DistillConfig.from_env` / `setup` / `make_chat_fn`)
+  reads them, adds `CD_SUB_LM` / `CD_DRAFT_*` / the budget knobs, documents `CTXD_TRACES_DIR` (the
+  variable the studio already read, now shared so a finished run appears in its Load picker with no
+  second directory to keep in sync), and refuses loudly on the two conditions worth refusing on: no
+  `CD_ROOT_LM`, and a `CD_INTERPRETER` that is not `pyodide` — the latter changes no security
+  property (`task._forced_config` would coerce it anyway) and exists so a misconfiguration is SEEN.
+  `distill` also says *"no transcripts found under `<storage dir>`"* instead of proposing an empty
+  plan and looking broken. Answering `CLAUDE.md` invariant 10's open question explicitly: a CLI CAN
+  own `run_distillation`'s preconditions end to end where a web request cannot — an operator's shell
+  already holds the credentials and a foreground process is where a multi-minute sandboxed episode
+  belongs — so the studio's abstention from a live-drive endpoint stands unchanged, for its own
+  reasons. New `tests/test_cli.py` (31) and `tests/test_apply_cli.py` (29).
+- **`render_plan` promoted to `ctx_distillery/render.py` — the third function under invariant 11,
+  and the promotion immediately caught a real bug.** It was defined in `eval/`'s `score.py` (written
+  for the judge prompt); `ctx-distillery show` needs the identical text, because a reviewer deciding
+  what to approve should read exactly what the judge reads. Rather than copy it a second time — the
+  mistake invariant 11 exists to prevent, already made twice for `plan_from_events` and
+  `load_trace` — it moved, and `eval/score.py` imports it while keeping it in `__all__` (so
+  `from ctx_distillery_eval.score import render_plan` still works), with the identity pinned by a
+  test rather than the behaviour alone. The bug: the no-candidates branch `return`ed early and
+  DROPPED the run-level problems line, so the single case that matters most — `assemble(events,
+  None)`, "no plan was produced by this run", a run that died before SUBMIT — rendered to both a
+  reviewer and the judge as a bare, actively misleading "proposed no candidates" with no reason
+  attached. Fixed once, in the one place; the two sections are now independent, which changes
+  nothing for a plan that has candidates or a plan that has neither.
 - **Corrected a stale "UNCONFIRMED" claim that outlived the experiment which closed it.** The
   project-repo-relative `<project>/.claude/skills/<name>/SKILL.md` location was an unverified
   hypothesis for exactly one pass; a dedicated control experiment then confirmed it (a scratch

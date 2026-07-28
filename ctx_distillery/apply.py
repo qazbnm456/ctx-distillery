@@ -61,26 +61,51 @@ archive for real) is future work.
 Every candidate gets an outcome, including the ones the caller did not approve — this project's
 stated value is auditability, so the step that finally mutates disk should not be the one place that
 leaves no record of what happened.
+
+**This module also hosts its own CLI (`ctx-distillery-apply`, `main()` at the bottom), and that
+placement is forced rather than chosen.** `tests/test_no_write_capability.py::test_apply_is_unreachable_from_the_planner_path`
+asserts that no module under `ctx_distillery/` imports this one — it is the guard that makes this
+module's exemption from the mutation scan safe (`CLAUDE.md` invariant 8), and it matches a
+function-local import as readily as a top-level one. So a single CLI module offering both `distill`
+and `apply` cannot exist without turning that test red, and `apply.py` is explicitly "not a
+precedent for a second exemption". Putting the writer's entry point in the writer keeps both
+properties: `ctx_distillery/cli.py` never imports this module, and applying a plan is a visibly
+different command at the shell — which is the same thing the API says by refusing to offer an
+"apply everything" call.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
+import sys
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import frontmatter
+from . import __version__, frontmatter
 from .adapters.base import ARTIFACT_SCOPES, ArtifactRef
-from .adapters.claude_code import INDEX_FILENAME, SKILL_FILENAME, ClaudeCodeAdapter
-from .session import PROMOTION_ACTIONS, AssembledCandidate, AssembledPlan
+from .adapters.claude_code import (
+    INDEX_FILENAME,
+    SKILL_FILENAME,
+    ClaudeCodeAdapter,
+    global_skills_root,
+    memory_dir_for_project,
+    project_skills_root,
+)
+from .render import render_plan
+from .rubric import plan_from_events
+from .session import PROMOTION_ACTIONS, AssembledCandidate, AssembledPlan, assemble
+from .trace_io import load_trace
 
 __all__ = [
     "ARCHIVE_DIRNAME",
     "ApplyOutcome",
     "apply_plan",
+    "build_parser",
+    "main",
     "slugify",
 ]
 
@@ -714,3 +739,236 @@ def _outcome(
         path=path,
         source_path=source_path,
     )
+
+
+# -- the CLI: `ctx-distillery-apply` --------------------------------------------------------------
+#
+# See the module docstring for WHY the entry point lives here rather than in `cli.py`. What follows
+# is the shell-level expression of the same stance `apply_plan` takes in Python: approval is
+# explicit and per-candidate, there is no "apply everything", and the default does nothing.
+
+_CLI_DESCRIPTION = """\
+Apply the candidates YOU approve from a finished distillation plan. The only thing that writes.
+
+    ctx-distillery show traces/<run-id>.jsonl                       # read the plan first
+    ctx-distillery-apply traces/<run-id>.jsonl --project . --approve 0,3
+    ctx-distillery-apply traces/<run-id>.jsonl --project . --approve 0,3 --confirm
+
+WITHOUT --confirm nothing is written: the default is a dry run that shows the plan, names what you
+approved, and stops. Approval is per candidate, by the list index `ctx-distillery show` prints in
+front of each one; there is deliberately no flag that approves everything. A prune is ARCHIVED to a
+sibling `_ctx_distillery_archive/` directory, never deleted.
+"""
+
+#: Which skills root a `promote_to_skill` may install into unless `--allow-skill-scope` says more.
+#: `apply_plan` refuses a scope whose root the caller did not pass, and the CLI is that caller — so
+#: this is a real decision, not a default that costs nothing. `project` is allowed because its blast
+#: radius is the repository the operator just named; `~/.claude/skills` reaches every project they
+#: will ever open (and a global skill SHADOWS a project one of the same name), so it earns its own
+#: opt-in even though `--confirm` is already a second deliberate act.
+DEFAULT_SKILL_SCOPES: tuple[str, ...] = ("project",)
+
+#: One glyph per outcome status, matching the sibling projects' run reporting.
+_STATUS_GLYPH = {
+    STATUS_APPLIED: "✔",
+    STATUS_REFUSED: "✗",
+    STATUS_SKIPPED: "·",
+    STATUS_NOOP: "-",
+}
+
+
+def _parse_indices(values: Iterable[str] | None, flag: str) -> set[int]:
+    """Flatten repeated and/or comma-separated index arguments (`--approve 0,3 --approve 7`).
+
+    Only the SHAPE is checked here (is it an integer?); whether the index addresses a real candidate
+    is `_indices`' job, against the plan that was actually loaded.
+    """
+    found: set[int] = set()
+    for chunk in values or ():
+        for token in str(chunk).replace(",", " ").split():
+            try:
+                found.add(int(token))
+            except ValueError:
+                raise SystemExit(f"{flag}: {token!r} is not a candidate index") from None
+    return found
+
+
+def _format_outcome(outcome: ApplyOutcome) -> str:
+    glyph = _STATUS_GLYPH.get(outcome.status, "?")
+    lines = [f"{glyph} [{outcome.index}] {outcome.action:<18} {outcome.status:<8} {outcome.reason}"]
+    if outcome.source_path:
+        lines.append(f"      from {outcome.source_path}")
+    if outcome.path:
+        lines.append(f"      -> {outcome.path}")
+    return "\n".join(lines)
+
+
+def _roots_for(project: Path, scopes: Collection[str], home: str | None) -> dict[str, Path | None]:
+    """The per-kind roots `apply_plan` takes, derived by the SAME functions `for_project` uses.
+
+    A scope the operator did not allow is passed as None on purpose rather than omitted from the
+    report: `apply_plan` then refuses that candidate with a message naming the missing root, which
+    is a better outcome than a skill quietly landing somewhere they did not ask for.
+    """
+    return {
+        "memory": memory_dir_for_project(project, home=home),
+        "global": global_skills_root(home=home) if "global" in scopes else None,
+        "project": project_skills_root(project) if "project" in scopes else None,
+    }
+
+
+def _dry_run_report(
+    plan: AssembledPlan, approved: set[int], overwrite: set[int], roots: dict[str, Path | None]
+) -> str:
+    """What `--confirm` WOULD do, without doing any of it.
+
+    Deliberately prints the WHOLE plan (via the shared `render_plan`, the same rendering
+    `ctx-distillery show` and the eval judge read) rather than only the approved slice: a reviewer
+    about to write to their own memory store should see what they are NOT approving too, in the same
+    breath. The exact target path is not predicted here — deriving a filename a second time, outside
+    `_promote`/`_skill_target`, is precisely the kind of duplicate that drifts.
+    """
+    lines = [
+        render_plan(plan),
+        "",
+        "DRY RUN - nothing has been written.",
+        f"  approved:  {sorted(approved) or 'nothing'}",
+    ]
+    if overwrite:
+        lines.append(f"  overwrite: {sorted(overwrite)}  (these may replace an existing file)")
+    lines.append(f"  memory store:      {roots['memory']}")
+    for scope in ARTIFACT_SCOPES:
+        root = roots.get(scope)
+        lines.append(
+            f"  {scope + ' skills:':<18} {root}"
+            if root is not None
+            else f"  {scope + ' skills:':<18} not allowed (pass --allow-skill-scope {scope})"
+        )
+    lines.append("")
+    lines.append("Re-run the same command with --confirm to apply the approved candidates.")
+    return "\n".join(lines)
+
+
+def _cmd_apply(args: argparse.Namespace) -> int:
+    project = Path(args.project_dir).expanduser().resolve()
+    if not project.is_dir():
+        print(f"no such project directory: {project}", file=sys.stderr)
+        return 1
+    try:
+        events = load_trace(args.trace, run_id=args.run_id)
+    except (OSError, ValueError) as exc:
+        print(f"cannot read {args.trace}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    plan = assemble(events, plan_from_events(events))
+    if plan.problems:
+        print("this trace carries no usable plan: " + "; ".join(plan.problems), file=sys.stderr)
+        return 1
+    if not plan.candidates:
+        print("this run's plan proposed no candidates - there is nothing to apply.", file=sys.stderr)
+        return 1
+
+    approved = _parse_indices(args.approve, "--approve")
+    overwrite = _parse_indices(args.overwrite, "--overwrite")
+    if not approved:
+        print("--approve named no candidates; nothing to do.", file=sys.stderr)
+        return 2
+    try:
+        # Validate BOTH here, so a typo is caught in the dry run rather than only once --confirm is
+        # added. `apply_plan` re-validates regardless — it never trusts a caller to have filtered.
+        _indices(approved, len(plan.candidates), "--approve")
+        _indices(overwrite, len(plan.candidates), "--overwrite")
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    unapproved = sorted(overwrite - approved)
+    if unapproved:
+        print(
+            f"--overwrite {unapproved} are not in --approve; an overwrite is an escape hatch on an "
+            f"approved candidate, never a way to approve one",
+            file=sys.stderr,
+        )
+        return 2
+
+    roots = _roots_for(project, set(args.allow_skill_scope or DEFAULT_SKILL_SCOPES), args.claude_home)
+    if not args.confirm:
+        print(_dry_run_report(plan, approved, overwrite, roots))
+        return 0
+
+    outcomes = apply_plan(
+        roots["memory"],
+        plan,
+        approved,
+        overwrite_ids=overwrite,
+        global_skills_dir=roots["global"],
+        project_skills_dir=roots["project"],
+    )
+    for outcome in outcomes:
+        print(_format_outcome(outcome))
+    applied = [o for o in outcomes if o.status == STATUS_APPLIED]
+    refused = [o for o in outcomes if o.index in approved and o.status == STATUS_REFUSED]
+    print(f"\n{len(applied)} applied, {len(refused)} refused, of {len(approved)} approved.")
+    if any(o.action == "prune" for o in applied):
+        print("pruned files were ARCHIVED, not deleted - they are still recoverable.")
+    return 1 if refused else 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="ctx-distillery-apply",
+        description=_CLI_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    p.add_argument("trace", help="path to the trace JSONL file of the run whose plan you reviewed")
+    p.add_argument("--run-id", default=None, help="only read events for this run id")
+    p.add_argument(
+        "--project",
+        dest="project_dir",
+        required=True,
+        help="the project whose store is written; derives the memory store and the skills roots",
+    )
+    p.add_argument(
+        "--approve",
+        action="append",
+        required=True,
+        metavar="IDX[,IDX...]",
+        help="candidate INDICES you approve, as printed by `ctx-distillery show`. Repeatable. "
+             "There is deliberately no flag that approves the whole plan.",
+    )
+    p.add_argument(
+        "--confirm",
+        action="store_true",
+        help="actually write. Without it this is a dry run and nothing is written.",
+    )
+    p.add_argument(
+        "--overwrite",
+        action="append",
+        default=None,
+        metavar="IDX[,IDX...]",
+        help="per-candidate escape hatch for a name collision; every index must also be approved",
+    )
+    p.add_argument(
+        "--allow-skill-scope",
+        action="append",
+        choices=ARTIFACT_SCOPES,
+        default=None,
+        help="which skills root a promote_to_skill may install into (repeatable). Default: "
+             "project only - a project skill's blast radius is the repository you just named, "
+             "while ~/.claude/skills reaches every project you ever open (and a global skill of "
+             "the same name shadows a project one), so global earns its own opt-in.",
+    )
+    p.add_argument(
+        "--claude-home",
+        default=None,
+        help="override ~/.claude (a non-default install; also what keeps the tests hermetic)",
+    )
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    return _cmd_apply(build_parser().parse_args(argv))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

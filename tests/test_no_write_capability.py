@@ -89,6 +89,11 @@ def test_the_scan_actually_sees_the_package():
     assert {p.name for p in SOURCES} >= {
         "task.py", "session.py", "redact.py", "frontmatter.py", "drafting.py",
         "memory_reader.py", "transcript_reader.py", "claude_code.py",
+        # The CLI's own modules are named explicitly: `ctx-distillery distill`/`show` runs as a
+        # host-side process with no sandbox around it, so "the planner-side CLI cannot write" is a
+        # property worth pinning rather than one that merely happens to hold. It is also why `show`
+        # has no `--out` and why `distill` refuses (rather than deletes) an existing trace file.
+        "cli.py", "config.py", "render.py", "__main__.py",
     }
     assert (PACKAGE / WRITER).is_file(), "the exempt writer must exist, or the exemption is stale"
     assert WRITER not in {p.name for p in SOURCES}

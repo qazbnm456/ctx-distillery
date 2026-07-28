@@ -337,6 +337,11 @@ dependencies = [
     { name = "rlm-kit" },
 ]
 
+[package.optional-dependencies]
+cli = [
+    { name = "openai" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -344,10 +349,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "openai", marker = "extra == 'cli'", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rlm-kit", git = "https://github.com/qazbnm456/rlm-kit.git?branch=main" },
 ]
+provides-extras = ["cli"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]

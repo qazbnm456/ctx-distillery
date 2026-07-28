@@ -17,7 +17,8 @@ uv pip install -e ../rlm-kit
 
 Run BOTH before pushing — the suite is fully offline (no live model, no Deno, no network):
 
-- `ruff check .` — lint (line-length 110, matching rlm-kit's config).
+- `uvx ruff check .` — lint (line-length 110, matching rlm-kit's config). A bare `ruff` is not
+  installed in this workspace; `uvx` is how CI runs it too.
 - `pytest -q` — the whole suite. The dspy-bearing tests (`test_task.py`, `test_session.py`)
   drive a REAL `dspy.RLM.aforward` through `rlm_kit.testing.ScriptedInterpreter` +
   `scripted_lm`, so the planner → tools → SUBMIT chain executes (each tool's own tracing runs)
@@ -44,6 +45,25 @@ Run BOTH before pushing — the suite is fully offline (no live model, no Deno, 
   regardless of which member a given `uv run --package` is scoped to. In a plain-pip environment
   (no `uv`), install each member editable instead: `pip install -e . -e ./eval -e ./studio` from
   the repo root, then run `pytest` from inside each member's own directory.
+
+## Running — always through the CLI
+
+- **Drive runs via `cli` (`distill` / `show`), never an ad-hoc script.** `ctx-distillery distill
+  [project]` is THE entry point: it discovers the project's Claude Code storage
+  (`ClaudeCodeAdapter.for_project`), wires the `chat_fn` from `CD_*` (`config.DistillConfig.from_env`
+  → `config.setup` → `config.make_chat_fn`), runs `session.run_distillation`, and prints the
+  assembled plan. It records `<trace-dir>/<run-id>.jsonl` and writes NOTHING else — there is no
+  `responses/` artifact in this project. Don't drive `run_distillation` / `assemble` from a private
+  script; extend `cli.py`. Offline re-read: `ctx-distillery show <trace> [--run-id ID] [--json]`.
+- **`show` has no `--out`, and `distill` never deletes a stale trace.** Both fall out of invariant 1:
+  `cli.py` is inside `tests/test_no_write_capability.py`'s mutation scan, so it may not open a file
+  for writing (redirect with `>`) and may not `os.remove` a trace the way the sibling projects' `run()`
+  does. `TraceRecorder` appends, so the default `--run-id` is `<project>-<UTC timestamp>` and a run
+  whose trace file already exists is REFUSED. Never add a `--force` that deletes one.
+- **Applying is a SECOND binary: `ctx-distillery-apply` (`apply.py:main`).** See invariant 8 — this
+  is structural, not stylistic. `ctx-distillery-apply <trace> --project <dir> --approve 0,3` is a DRY
+  RUN; `--confirm` is what writes. `--allow-skill-scope` defaults to `project` only; installing into
+  `~/.claude/skills` needs `--allow-skill-scope global`.
 
 ## Invariants — do not break
 
@@ -150,6 +170,20 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    the exemption is guarded by `test_apply_is_unreachable_from_the_planner_path`, which asserts no
    module on the RLM path imports it. Never import `apply` from `task.py`, `session.py`, a tool, or
    `__init__.py`; never give the planner a way to reach it.
+   **This is why the CLI is TWO console scripts, not one binary with three subcommands.** That
+   reachability test scans EVERY `.py` under `ctx_distillery/` except `apply.py` itself, and its
+   regex matches a function-local import as readily as a top-level one — so a shared `cli.py`
+   offering both `distill` and `apply` cannot exist without turning it red, and `apply.py` is
+   explicitly not a precedent for a second exemption. The resolution keeps both properties:
+   `ctx-distillery = ctx_distillery.cli:main` (planner: `distill` / `show`, never imports `apply`)
+   and `ctx-distillery-apply = ctx_distillery.apply:main` (the writer hosts its own entry point).
+   Do NOT "fix" this by relaxing the regex, by adding a second exempt module, or by reaching the
+   writer through `importlib` — the last is evading a tripwire by spelling. Do not add a
+   `python -m ctx_distillery apply` shim either: `__main__.py` would then be the importer.
+   The CLI expresses the same "explicit per-candidate approval" the API does: `--approve` takes
+   indices, `--confirm` is a second deliberate act (the default is a dry run that writes nothing),
+   and `tests/test_apply_cli.py::test_no_flag_ever_approves_the_whole_plan` is the tripwire against
+   an `--all` creeping back in.
 9. **`apply_plan`'s roots are PER KIND, and a skill's containment check is its OWN check.** A skill is
    NOT a flat `<slug>.md` in the memory store: it is `<skills_root>/<slug>/SKILL.md` — one directory
    deeper, under a root that is never `memory_dir` (`~/.claude/skills` for global,
@@ -193,8 +227,9 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     (statically, via `ast`, so the `__init__` docstring that NAMES `apply_plan` while promising
     never to call it isn't itself flagged).
 11. **Trace-reading logic has ONE implementation per job, shared across all three members — never a
-    per-member copy. Two functions are covered: `rubric.plan_from_events` (plan-from-trace
-    reconstruction) and `trace_io.load_trace`/`dict_events` (the non-dict shape guard).** Same
+    per-member copy. THREE functions are covered: `rubric.plan_from_events` (plan-from-trace
+    reconstruction), `trace_io.load_trace`/`dict_events` (the non-dict shape guard), and
+    `render.render_plan` (the human/judge-legible plan rendering).** Same
     failure mode, found twice; the second one is `ctx_distillery/trace_io.py`, the ONE place JSONL
     bytes become events. `rlm_kit.trace.load_events` does no shape validation, so a JSON-valid
     non-dict line reaches every `.get(...)` consumer as-is; `studio/` fixed that member-locally
@@ -218,6 +253,15 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     import it instead of duplicating it again. Don't reintroduce a second copy anywhere — the
     `ValidationError`-degrade fix below has already needed applying to two copies once; a third copy
     means a third place a future fix can drift out of sync.
+
+    The third: **`render.render_plan` is the ONE plan rendering**, promoted from `eval/`'s `score.py`
+    (where it was written for the judge prompt) when `ctx-distillery show` needed the identical text —
+    a reviewer deciding what to approve should read exactly what the judge reads. `eval/score.py`
+    imports it and re-exports it in `__all__`, so `from ctx_distillery_eval.score import render_plan`
+    still works; `eval/tests/test_score.py` pins the IDENTITY, not just the behaviour. The promotion
+    immediately paid for itself: the no-candidates branch used to `return` early and DROP the
+    run-level problems line, so a run that died before SUBMIT rendered — to a reviewer and to the
+    judge — as a bare "proposed no candidates" that never said why. Fixed once, in the one place.
 
 ## Known simplifications (stated, not hidden)
 
@@ -245,9 +289,16 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   `apply.py`'s re-scan builds) enumerates no skills at all; pass `global_skills_dir=` /
   `project_skills_dir=`, or use `for_project`, which resolves the real roots. Deliberate: a bare
   adapter silently reaching into a real `~/.claude/skills` would make the re-scan machine-dependent.
-- **No CLI entry point**, and no adapter for any harness other than Claude Code. `apply_plan` is
-  called from Python (or a REPL) by a human who has read the plan; a thin CLI wrapper over it is
-  future work.
+- **The CLI is deliberately small: `distill`, `show`, and `apply` (in its own binary).** No
+  `export`/`rl_export.py` reward-free dataset command (the sibling projects have one; this project
+  has no exporter module at all yet), no `--interactive` per-candidate approval walk (the
+  `show` → `--approve` → `--confirm` loop is complete and scriptable without a TTY surface), no
+  `purge` (see the archive bullet below), and no `subscription` extra for running the planner on a
+  Claude Pro/Max account. Each is real additional scope, not a missing polish pass.
+- **`apply_plan` is still callable directly from Python**, and `ctx-distillery-apply` is a thin
+  layer over it — the CLI only knows how to derive Claude Code's roots from a `--project` path. Point
+  at an unusual layout by calling `apply_plan(memory_dir, plan, approved_ids, ...)` yourself.
+- **No adapter for any harness other than Claude Code.**
 - **`apply.py` archives, and nothing purges.** A pruned file is moved to
   `_ctx_distillery_archive/`, never deleted; deleting the archive for real is a separate, explicit
   `purge` operation that does not exist yet. That is deliberate — "still recoverable" beats

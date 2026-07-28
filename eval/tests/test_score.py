@@ -106,6 +106,29 @@ def test_render_plan_says_so_when_there_are_no_candidates():
     assert "no candidates" in render_plan(AssembledPlan())
 
 
+def test_render_plan_is_the_shared_implementation_not_a_local_copy():
+    """`render_plan` was DEFINED here until the CLI needed the identical rendering — a reviewer
+    running `ctx-distillery show` should read exactly what the judge reads. It now lives in
+    `ctx_distillery.render` and this module re-exports it, the same de-duplication `CLAUDE.md`
+    invariant 11 already required of `plan_from_events` and `load_trace`. Pinned by identity so a
+    future local copy is a failure here, not a silent divergence in what the judge is shown."""
+    from ctx_distillery import render as shared
+
+    assert render_plan is shared.render_plan
+
+
+def test_render_plan_still_reports_a_run_level_problem_with_no_candidates():
+    """FIXED while promoting this function: the no-candidates branch used to `return` early and drop
+    the run-level problems line, so a run that died before SUBMIT was judged against a bare
+    "proposed no candidates" that never said why. The judge (and the reviewer) now see the reason."""
+    from ctx_distillery.session import assemble
+
+    assembled = assemble([], None)
+    text = render_plan(assembled)
+    assert "no candidates" in text
+    assert "no plan was produced by this run" in text
+
+
 def test_aggregate_computes_means_reward_free():
     rows = [
         score_run("r1", "a.jsonl", [_result(_plan_dict())], ["t"], judge=StubJudge(tf=8, ta=6, tg=7, pa=9)),

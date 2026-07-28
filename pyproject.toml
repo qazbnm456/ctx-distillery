@@ -33,6 +33,20 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+# Only `ctx-distillery distill` needs a model client — it builds the `chat_fn` the two drafting
+# tools call (`config.make_chat_fn`, which imports `openai` inside the closure). `show` and the
+# whole `ctx-distillery-apply` path are fully offline, so a library-only install stays lean.
+cli = ["openai>=1.0"]
+
+[project.scripts]
+ctx-distillery = "ctx_distillery.cli:main"
+# The human-gated writer gets its OWN entry point, hosted in `apply.py` itself. A shared CLI module
+# importing both `run_distillation` and `apply_plan` would turn
+# `tests/test_no_write_capability.py::test_apply_is_unreachable_from_the_planner_path` red, and that
+# test is the guard that makes `apply.py`'s mutation-scan exemption safe (CLAUDE.md invariant 8).
+ctx-distillery-apply = "ctx_distillery.apply:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

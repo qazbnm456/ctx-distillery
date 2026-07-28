@@ -14,38 +14,22 @@ Studio pass, step 0: `plan_from_events` used to be a private, per-package-duplic
 already imported-from for `rubric_to_meta` elsewhere in this initiative) — so this module imports
 and calls it instead of keeping a second copy of the same reconstruction + `ValidationError`-degrade
 logic. See `CLAUDE.md` invariant 11 for the full boundary-ambiguity resolution.
+
+CLI pass: `render_plan` itself made the same journey, for the same reason. It was defined HERE (it
+was written to feed the judge prompt), then `ctx-distillery show` needed the identical rendering — a
+reviewer should read exactly what the judge reads — so it moved to `ctx_distillery.render` and this
+module imports it rather than keeping the second copy that would have drifted. It stays in this
+module's `__all__`, so `from ctx_distillery_eval.score import render_plan` keeps working.
 """
 
 from __future__ import annotations
 
+from ctx_distillery.render import render_plan
 from ctx_distillery.rubric import plan_from_events
-from ctx_distillery.session import AssembledPlan, assemble
+from ctx_distillery.session import assemble
 
 from .judge import Judge, StubJudge
 from .schema import EvalReport, EvalRow, compute_means
-
-
-def render_plan(plan: AssembledPlan) -> str:
-    """A human/judge-legible rendering of an assembled plan — one line per candidate.
-
-    Deliberately plain text, not JSON: the judge prompt reads more naturally this way, and nothing
-    downstream parses this rendering back (the structured facts live in `ctx_distillery.rubric`, a
-    completely separate, deterministic path this package never touches).
-    """
-    if not plan.candidates:
-        return "(this run's plan proposed no candidates)"
-    lines = []
-    for i, candidate in enumerate(plan.candidates):
-        lines.append(f"[{i}] action={candidate.action} artifact_id={candidate.artifact_id!r}")
-        if candidate.key_fields:
-            lines.append(f"    key_fields={candidate.key_fields!r}")
-        if candidate.draft:
-            lines.append(f"    draft (ok={candidate.draft_ok}):\n{candidate.draft}")
-        if candidate.problems:
-            lines.append(f"    problems: {candidate.problems!r}")
-    if plan.problems:
-        lines.append(f"(run-level problems: {plan.problems!r})")
-    return "\n".join(lines)
 
 
 def score_run(
