@@ -9,16 +9,18 @@ Read-only, per `CLAUDE.md` invariant (4): this module opens files for reading on
 write/emit path of any kind.
 
 **Auto-discovery (`for_project`)** now locates the real storage instead of making the caller
-assemble it (`CLAUDE.md` invariant (6), the CONFIRMED-vs-INHERITED split). What each part of that
-rests on is stated honestly, because the parts do NOT have equal evidence behind them:
+assemble it (`CLAUDE.md` invariant (6)). Every part below is confirmed, but the EVIDENCE differs —
+a first-party SDK source, a dedicated control experiment, and plain observation of a real corpus are
+not the same strength of claim, so each says which one it rests on rather than just "CONFIRMED":
 
 * `sanitize(project_dir)` — every `/` of the project's absolute path replaced by `-`, giving
   `~/.claude/projects/<sanitized>/` — is CONFIRMED against real project directories. No other
   transformation is applied, because none was observed.
-* the `memory/` SUB-PATH inside it is this project's PRE-EXISTING assumption, carried forward and
-  not independently re-verified on disk (no `memory/` directory existed on the machine the research
-  ran on). Auto-discovery only needs the sanitization rule to be right; the sub-path convention is
-  inherited, not freshly confirmed.
+* the `memory/` SUB-PATH inside it began as this project's PRE-EXISTING assumption, carried forward
+  without independent verification because no `memory/` directory existed on the machine the original
+  research ran on. It is CONFIRMED now: 12 of 24 project storage directories carry one, every one a
+  DIRECT child of the project storage directory, holding 51 `.md` files and 9 `MEMORY.md` indexes —
+  the assumed layout exactly. Auto-discovery only ever needed the sanitization rule to be right.
 * TRANSCRIPTS are CONFIRMED: one JSONL file per past conversation, `<session-id>.jsonl`, sibling to
   `memory/`. `render_transcript_events` turns those raw events into the `list[str]` this project
   already expects — a deliberately LOSSY rendering (see its docstring), not a full replay.
@@ -70,7 +72,7 @@ INDEX_FILENAME = "MEMORY.md"
 CLAUDE_DIRNAME = ".claude"
 #: `~/.claude/projects/<sanitize(project_dir)>/` — one directory per project.
 PROJECTS_DIRNAME = "projects"
-#: The per-project memory store, inside that directory (the INHERITED sub-path — see the module docstring).
+#: The per-project memory store, inside that directory (see the module docstring for its evidence).
 MEMORY_DIRNAME = "memory"
 #: `~/.claude/skills/` (global) and `<project_dir>/.claude/skills/` (project) both use this name.
 SKILLS_DIRNAME = "skills"
@@ -158,7 +160,7 @@ def project_storage_dir(project_dir: str | Path, *, home: str | Path | None = No
 
 
 def memory_dir_for_project(project_dir: str | Path, *, home: str | Path | None = None) -> Path:
-    """`<project storage>/memory` — the INHERITED sub-path, not an independently re-verified one."""
+    """`<project storage>/memory` — assumed at first, CONFIRMED later (see the module docstring)."""
     return project_storage_dir(project_dir, home=home) / MEMORY_DIRNAME
 
 

@@ -103,6 +103,17 @@ never applies anything itself.
   rows come from a glob of traces each with its own composition. The load-bearing half did land:
   `judge.py` states that comparability is per-row and the trace is the authority.
 
+- **Refreshed a stale evidence label: the `memory/` sub-path is CONFIRMED.** `CLAUDE.md` invariant 6,
+  `adapters/claude_code.py`'s module docstring and `ctx_distillery/README.md` all still said the
+  `memory/` directory inside a project's storage was "INHERITED, not re-verified — no `memory/`
+  directory existed on the machine the research ran on". It exists now: **12 of 24 project storage
+  directories carry one, every one a DIRECT child of the project storage directory (exactly where the
+  code looks), holding 51 `.md` files and 9 `MEMORY.md` indexes** — the assumed layout, unchanged.
+  The three sites now cite that observation instead of repeating the adjective. Invariant 6 exists to
+  stop a stale CONFIRMED/UNCONFIRMED label from outliving the evidence that set it, and this is the
+  SECOND time it has caught itself: the project-skills location sat labelled UNCONFIRMED for a long
+  while after a control experiment closed it. The invariant now says so about itself.
+
 - **FIXED — a symlinked `~/.claude` silently yielded ZERO transcripts** (`claude_home`). The helper
   was `Path.home().resolve() / CLAUDE_DIRNAME`, which resolves the home component and leaves
   `.claude` itself unresolved; `transcript_files` then compares a RESOLVED session path's parent
@@ -1237,7 +1248,10 @@ never applies anything itself.
   and the project-repo-relative `<project>/.claude/skills/` location is an UNCONFIRMED hypothesis
   (motivated by `.claude/rules/` genuinely being read project-relative) that nobody has verified by
   seeding a test skill and checking whether Claude Code offers it. This pass targets it as the best
-  available option for project-scoped promotions and claims nothing more.
+  available option for project-scoped promotions and claims nothing more. **(Both caveats in this
+  paragraph were later closed and are kept here as the record of what THIS pass claimed — see
+  "Corrected a stale UNCONFIRMED claim" above for the skills control experiment, and the `memory/`
+  sub-path is confirmed too. Do not read this paragraph as current.)**
 - **A JSONL → text renderer** (`render_transcript_events` / `render_transcript_file`) turning raw
   events into the `list[str]` the pipeline already expects — deliberately LOSSY, and specified rather
   than improvised, covering the shapes really observed on disk: only `user`/`assistant` events are
