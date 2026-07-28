@@ -6,9 +6,9 @@ A trace event is `{schema, run_id, step_id, ts, type, payload}` (rlm-kit's froze
 surface only the events a UI needs and rename them to a stable `distill.<noun>.<verb>` vocabulary.
 Unknown/internal events return None (skipped) — never guessed at.
 
-Per `docs/DESIGN.md`'s Studio table: `main_step`/`sub_call` are mapped, not dropped. ADDED per
-implementation-plan audit — an earlier draft of this module silently fell through to `return None`
-for both, which is a real gap against this initiative's own motivating goal (seeing every step's
+`main_step`/`sub_call` are mapped, not dropped. ADDED per an implementation-plan audit — an earlier
+draft of this module silently fell through to `return None` for both, which is a real gap against
+this initiative's own motivating goal (seeing every step's
 context and results): `rlm_kit.task.record_main_trajectory` emits `main_step` UNCONDITIONALLY for
 every `RLMTask` run (not opt-in, and `DistillSession` does not disable it), and
 `rlm_kit.sub_lm.bind_recorder_to_sub_lm` emits `sub_call` for any recursive sub-LM escalation the

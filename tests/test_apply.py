@@ -121,7 +121,7 @@ def test_a_clean_promotion_writes_the_assembled_draft_verbatim(memory_dir):
 
 def test_a_skill_promotion_takes_a_DIFFERENT_write_path_than_a_memory_one(memory_dir, tmp_path):
     """Replaces the old `test_a_skill_promotion_takes_the_same_write_path`, which pinned behaviour
-    that primary-source research showed to be wrong (`docs/DESIGN.md`, gap #6).
+    that primary-source research showed to be wrong (the SIXTH gap `apply.py`'s docstring records).
 
     A skill is NOT a flat `<slug>.md` in the memory store. It is `<skills_root>/<slug>/SKILL.md` —
     one directory deeper, under a root that is never `memory_dir`. The old flat containment check

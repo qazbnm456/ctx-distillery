@@ -4,12 +4,12 @@ ctx-distillery is designed to be agent-harness-agnostic: the RLM planning core (
 `DistillSession` task, its tools, the judgement-only SUBMIT + assemble-on-read convention)
 never talks to a harness's on-disk format directly. Instead each harness (Claude Code today;
 Codex / Hermes / OpenClaw / OpenCode as *named future targets*, not yet designed — see
-docs/DESIGN.md, "Multi-harness seam") gets a thin adapter that implements this interface.
+CLAUDE.md's "Harness scope") gets a thin adapter that implements this interface.
 
 This module defines ONLY the seam. There is no concrete adapter here yet — that is
-deliberate. See docs/DESIGN.md for why: a Claude Code adapter is buildable now because its
-real persistence format has been directly inspected; the others have not, so pre-guessing
-their schemas would be speculation dressed as design.
+deliberate: a Claude Code adapter is buildable now because its real persistence format has
+been directly inspected; the others have not, so pre-guessing their schemas would be
+speculation dressed as design.
 
 Hard constraint (mirrors CLAUDE.md's invariants): every method here is READ-ONLY. There is
 no write/emit method on this interface, and none may ever be added — the actual "apply a
@@ -24,10 +24,10 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 # "index" is the harness's own memory INDEX file (Claude Code's `MEMORY.md`) — a third kind, not a
-# memory file. It exists because docs/DESIGN.md's success criterion (b) ("flags candidate MEMORY.md
-# index lines") requires the planner to be able to READ the index; a kind excluded from
-# `list_targets` is unreachable through `read_memory_file`'s snapshot allowlist, so the criterion
-# would be unmeetable. Adding a supporting VALUE here does not change the ABC's three abstract
+# memory file. It exists because the plan must be able to FLAG candidate `MEMORY.md` index lines,
+# which requires the planner to be able to READ the index; a kind excluded from `list_targets` is
+# unreachable through `read_memory_file`'s snapshot allowlist, so that requirement would be
+# unmeetable. Adding a supporting VALUE here does not change the ABC's three abstract
 # methods, and the "no write path" constraint in the module docstring is untouched.
 ArtifactKind = Literal["memory", "skill", "index"]
 
@@ -63,7 +63,7 @@ class ArtifactRef:
         """Resolve `scope=None` to the default this ref's KIND implies, and reject a bogus value.
 
         The default is deliberately kind-aware rather than one blanket constant
-        (`docs/DESIGN.md`, "Architectural additions this research requires"): a SKILL's default is
+        (`CLAUDE.md` invariant 9, where a skill's write root is chosen BY this field): a SKILL's default is
         `"global"` (the store Claude Code definitely reads), while a memory or index ref is
         inherently `"project"` — this project's memory store has no global counterpart, so there is
         no other honest value for it. An unrecognized scope raises rather than being silently kept:
@@ -81,10 +81,9 @@ class RawSession:
     """The one normalized shape a harness's transcripts + memory store are ingested into.
 
     `transcripts` holds one entry of raw text per conversation (kept separate, not
-    concatenated, so the planner can reason about cross-conversation overlap/conflict
-    per docs/DESIGN.md's "Cross-conversation intersection" section). `memory_index` is the
-    structured `[{name, description, type, path}, ...]` index described in docs/DESIGN.md's
-    "Multi-harness seam" section — i.e. a list of `ArtifactRef`.
+    concatenated, so the planner can reason about cross-conversation overlap/conflict).
+    `memory_index` is the structured `[{name, description, type, path}, ...]` index the
+    read-only adapter seam yields (CLAUDE.md invariant 4) — i.e. a list of `ArtifactRef`.
     """
 
     transcripts: list[str] = field(default_factory=list)
@@ -94,7 +93,7 @@ class RawSession:
 class HarnessAdapter(ABC):
     """Read-only bridge from one agent harness's real on-disk format to `RawSession`.
 
-    This is the seam described in docs/DESIGN.md, "Multi-harness seam." A concrete
+    This is the read-only seam CLAUDE.md invariant 4 pins down. A concrete
     subclass (e.g. a future `ClaudeCodeAdapter`) implements all three methods against
     one harness's actual, verified persistence format. Nothing in this base class may
     ever gain a write or delete path — see the module docstring.
@@ -114,8 +113,8 @@ class HarnessAdapter(ABC):
         """Return the JSON Schema a valid `kind` file must satisfy in this harness.
 
         Field names for a "memory" vs. "skill" artifact may differ across harnesses; this
-        feeds the deterministic format-validation gate described in docs/DESIGN.md — it
-        checks *shape*, never the semantic quality of a proposed artifact.
+        feeds the deterministic format-validation gate — it checks *shape*, never the
+        semantic quality of a proposed artifact.
         """
         raise NotImplementedError
 

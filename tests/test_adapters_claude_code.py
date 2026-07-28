@@ -1,6 +1,6 @@
 """`ClaudeCodeAdapter` against REAL files — including the `MEMORY.md` reachability fix.
 
-`docs/DESIGN.md`'s success criterion (b) needs the planner able to READ the index, and a kind the
+Flagging candidate `MEMORY.md` index lines needs the planner able to READ the index, and a kind the
 adapter never enumerates is unreachable through `read_memory_file`'s snapshot allowlist. So the
 `kind="index"` entry is asserted here, not assumed.
 """

@@ -1,7 +1,7 @@
 # ctx_distillery (package guide)
 
-The full design lives in `docs/DESIGN.md` and the hard invariants in `CLAUDE.md`; this file is the
-map of what is actually in the package and how the pieces fit.
+The hard invariants live in `CLAUDE.md`; this file is the map of what is actually in the package
+and how the pieces fit.
 
 ## The shape of one run
 
@@ -175,7 +175,5 @@ ctx_distillery/
     base.py            # the read-only harness-adapter seam
     claude_code.py     # the one in-scope adapter
 eval/                  # ctx-distillery-eval — a separate uv workspace member, judges the ARTIFACT
-docs/
-  DESIGN.md            # the full design doc this project is built against
 tests/                 # fully offline: no live model, no Deno, no network
 ```

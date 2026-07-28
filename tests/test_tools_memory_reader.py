@@ -67,7 +67,7 @@ def test_read_memory_file_reads_an_enumerated_path_and_records_size_not_body(sna
 
 
 def test_the_memory_index_file_itself_is_readable(snapshot):
-    """docs/DESIGN.md success criterion (b): the planner must be able to read MEMORY.md."""
+    """Flagging candidate index lines only works if the planner can read `MEMORY.md` itself."""
     tool = make_read_memory_file_tool(snapshot)
     index = next(ref for ref in snapshot if ref.kind == "index")
     assert "- project-conventions" in tool(index.path)

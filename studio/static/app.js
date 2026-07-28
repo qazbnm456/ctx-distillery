@@ -164,7 +164,7 @@ function startReplay(runId) {
 // -- the PLAN panel: the money shot — each candidate's draft next to its plan entry ------------
 
 // Mirrors `ctx_distillery.rubric._CATEGORY_LENS` — a client-side DISPLAY grouping only (the
-// endpoint returns a flat `rubric_facts` dict per docs/IMPL_PLAN.md's contract; grouping it for
+// endpoint returns a flat `rubric_facts` dict per its own settled contract; grouping it for
 // readability here adds no new server dependency).
 const CATEGORY_LENS = {
   TF: ["n_candidates", "n_non_keep", "plan_problems"],

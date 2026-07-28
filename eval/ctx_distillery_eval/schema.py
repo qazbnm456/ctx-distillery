@@ -19,7 +19,7 @@ EVAL_CATEGORIES = ("TF", "TA", "TG", "PA")
 
 
 class EvalScore(BaseModel):
-    """One judge's 0-10 scores, artifact-framed per `docs/DESIGN.md`'s eval-member table.
+    """One judge's 0-10 scores, artifact-framed per `judge.JUDGE_QUESTIONS`.
 
     Reward-free: this is a LABEL for a human/downstream trainer to read, never a value this package
     computes a composite from or feeds back into a training loop.
@@ -54,9 +54,10 @@ class EvalReport(BaseModel):
 def compute_means(rows: list[EvalRow]) -> dict[str, float]:
     """The per-category arithmetic mean across `rows` — the ONLY aggregate this package computes.
 
-    No composite/weighted score: `docs/DESIGN.md`'s eval-member boundary is explicit ("reward-free
-    (per-category means only, no composite)"), so combining TF/TA/TG/PA into one number is left to
-    whatever downstream trainer eventually scores these labels, never done here.
+    No composite/weighted score: the eval-member boundary is explicit — reward-free, per-category
+    means only, no composite (`CLAUDE.md`'s known-simplification bullet on `ctx_distillery/rubric.py`
+    and this package: "no field anywhere functions as a score") — so combining TF/TA/TG/PA into one
+    number is left to whatever downstream trainer eventually scores these labels, never done here.
     """
     if not rows:
         return {}

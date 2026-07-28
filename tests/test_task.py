@@ -1,10 +1,10 @@
 """`DistillSession` wiring, driven through a REAL offline forward pass.
 
-Per `docs/DESIGN.md`'s last known-risk bullet ("exercise the tool wiring offline via
-`rlm_kit.testing.ScriptedInterpreter`"): this drives `dspy.RLM.aforward` with a scripted `DummyLM` +
-`ScriptedInterpreter`, so the planner -> list_memory_files -> read_memory_file ->
-read_transcript_chunk -> draft_memory_file -> SUBMIT chain executes for real (each tool's own tracing
-runs) with no live model, no Deno, and no network.
+The last known risk this project named for itself was untested tool wiring, and the stated answer was
+to exercise it OFFLINE via `rlm_kit.testing.ScriptedInterpreter`. So this drives `dspy.RLM.aforward`
+with a scripted `DummyLM` + `ScriptedInterpreter`, so the planner -> list_memory_files ->
+read_memory_file -> read_transcript_chunk -> draft_memory_file -> SUBMIT chain executes for real
+(each tool's own tracing runs) with no live model, no Deno, and no network.
 
 It also pins the two structural invariants in CODE rather than in a docstring: the `pyodide` pin
 survives a caller passing something else, and the `output_model` carries no drafted content while the
@@ -104,7 +104,7 @@ def test_the_prompt_asks_for_the_prune_target_path_convention():
 
     That convention only works if the PROMPT side asks for it — `key_fields` is a free-form dict, so
     nothing else would ever tell the planner to fill it in. Pinned here so the two halves cannot
-    drift apart silently (docs/DESIGN.md, "The apply step", gap #1).
+    drift apart silently (CLAUDE.md invariant 8; the FIRST gap `apply.py`'s docstring records).
     """
     assert "target_path" in _INSTRUCTIONS
     assert "prune" in _INSTRUCTIONS
@@ -118,7 +118,7 @@ def test_the_prompt_teaches_the_promote_to_skill_scope_convention():
     `<project>/.claude/skills/`) and refuses a candidate without a valid one — which only works if
     the PROMPT side asks for it, `key_fields` being a free-form dict. The instructions must also say
     HOW to decide, or the planner is guessing: a project-tied finding is "project", a portable
-    technique is "global" (docs/DESIGN.md, "Architectural additions this research requires").
+    technique is "global" (CLAUDE.md invariant 9).
     """
     assert 'key_fields["scope"]' in _INSTRUCTIONS
     assert "promote_to_skill" in _INSTRUCTIONS

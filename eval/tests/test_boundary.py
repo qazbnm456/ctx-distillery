@@ -1,6 +1,6 @@
 """Boundary test: `ctx_distillery` (the rollout package) must NEVER import `ctx_distillery_eval`.
 
-This package is a ONE-WAY reader of `ctx_distillery`'s public surface (`docs/DESIGN.md`'s
+This package is a ONE-WAY reader of `ctx_distillery`'s public surface (`CLAUDE.md`'s
 eval-member boundary), mirroring `diff-sentry/eval/tests/test_boundary.py`. This test scans
 `ctx_distillery`'s own source tree for any reference to `ctx_distillery_eval` — a static, textual
 check that doesn't need either package's import machinery to be fully wired up, so it can't be

@@ -1,6 +1,6 @@
 """`ctx_distillery.rubric` — the ATLAS TF/TA/TG/PA facts, sourced from a run's trace.
 
-Corrected per `docs/IMPL_PLAN.md`'s implementation-plan audit: the main case matrix follows
+Corrected per an implementation-plan audit: the main case matrix follows
 `tests/test_session.py`'s REAL established convention (a hand-rolled `_tool_call()`-style dict
 helper), not `TraceRecorder` — `tests/test_apply.py` (the originally-cited precedent) doesn't
 build event lists at all. The ONE exception is `test_plan_from_events_round_trips_through_a_real_recorder`,
@@ -187,9 +187,9 @@ def test_a_prune_with_a_target_path_is_counted_as_named():
 
 
 def test_a_prune_without_a_target_path_is_not_counted_as_named():
-    """`trace_facts`'s `prune_targets_named` is a structural presence check only (per
-    `docs/DESIGN.md`'s TG correction) — `session.assemble` itself doesn't flag a missing
-    target_path as a candidate problem, so only the presence count moves, not `n_candidate_problems`."""
+    """`trace_facts`'s `prune_targets_named` is a structural presence check only — `session.assemble`
+    itself doesn't flag a missing target_path as a candidate problem, so only the presence count
+    moves, not `n_candidate_problems`."""
     plan = _plan_dict({"action": "prune", "key_fields": {"reason": "stale, no target named"}})
     facts = trace_facts([_result(plan)])
     assert facts["prune_targets_named"] == 0

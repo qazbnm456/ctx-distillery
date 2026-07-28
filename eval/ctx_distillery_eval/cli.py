@@ -1,8 +1,8 @@
 """`ctx-distillery-eval score <trace_glob> <transcript_path> [<transcript_path> ...]`.
 
-**Judgment call, stated explicitly** (`docs/IMPL_PLAN.md`'s resolved decision requires the transcript
+**Judgment call, stated explicitly** (the implementation plan's resolved decision requires the transcript
 path(s) to be a mandatory second input alongside the trace path, but does not specify how transcripts
-multiplex across a BATCH of runs matched by a glob — a real gap the plan itself flags as something to
+multiplex across a BATCH of runs matched by a glob — a real gap the plan itself flagged as something to
 resolve "before writing judge.py, not after"): **one CLI invocation's transcript path(s) apply to
 EVERY run `trace_glob` matches in that invocation.** This fits the shape this eval member is actually
 built for — scoring several runs (retries, ablations, rubric variants) over the SAME transcript set —

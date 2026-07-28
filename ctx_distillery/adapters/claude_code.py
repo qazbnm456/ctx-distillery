@@ -1,4 +1,4 @@
-"""The Claude Code harness adapter — the ONE concrete adapter `docs/DESIGN.md` scopes in.
+"""The Claude Code harness adapter — the ONE concrete adapter this project scopes in.
 
 Claude Code is the only harness whose real persistence format has been directly verified (a
 per-project `memory/` directory of `*.md` files with `name` / `description` / nested
@@ -9,8 +9,8 @@ Read-only, per `CLAUDE.md` invariant (4): this module opens files for reading on
 write/emit path of any kind.
 
 **Auto-discovery (`for_project`)** now locates the real storage instead of making the caller
-assemble it (`docs/DESIGN.md`, "Auto-discovery of the REAL Claude Code storage"). What each part of
-that rests on is stated honestly, because the parts do NOT have equal evidence behind them:
+assemble it (`CLAUDE.md` invariant (6), the CONFIRMED-vs-INHERITED-vs-UNCONFIRMED split). What each
+part of that rests on is stated honestly, because the parts do NOT have equal evidence behind them:
 
 * `sanitize(project_dir)` — every `/` of the project's absolute path replaced by `-`, giving
   `~/.claude/projects/<sanitized>/` — is CONFIRMED against real project directories. No other
@@ -242,7 +242,7 @@ class ClaudeCodeAdapter(HarnessAdapter):
     ) -> ClaudeCodeAdapter:
         """Discover the REAL storage for `project_dir` — memory, transcripts, and BOTH skill scopes.
 
-        The alternate constructor `docs/DESIGN.md` calls for: it computes `sanitize(project_dir)`,
+        The alternate constructor that removes the path-assembly step: it computes `sanitize(project_dir)`,
         derives `<claude_home>/projects/<sanitized>/memory`, renders every sibling
         `<session-id>.jsonl` as one transcript, and points skill enumeration at the global
         (`<claude_home>/skills`) and project (`<project_dir>/.claude/skills`) roots.
@@ -378,9 +378,9 @@ class ClaudeCodeAdapter(HarnessAdapter):
             # and that is what this reports as REQUIRED. `when_to_use` / `dispatch_intent` are
             # described as OPTIONAL because every real installed skill the research inspected does
             # carry them — but all of those were one author's single suite, so treating them as
-            # mandatory would generalize from N=1 (`docs/DESIGN.md`, corrected per audit). This
-            # schema must keep describing the same shape `make_skill_validator` actually ENFORCES;
-            # the two drifting apart is the specific failure mode the design calls out.
+            # mandatory would generalize from N=1 (`CLAUDE.md` invariant (7), corrected per audit).
+            # This schema must keep describing the same shape `make_skill_validator` actually
+            # ENFORCES; the two drifting apart is the specific failure mode that invariant calls out.
             return {
                 "type": "object",
                 "required": ["name", "description"],

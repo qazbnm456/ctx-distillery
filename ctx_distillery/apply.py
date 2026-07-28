@@ -1,7 +1,7 @@
 """`apply_plan` — the human-gated, host-side action that finally writes what a plan proposes.
 
 This module is the ONE place in `ctx_distillery` that mutates a file, and it is deliberately,
-structurally OUTSIDE the RLM (`docs/DESIGN.md`, "The apply step"):
+structurally OUTSIDE the RLM (`CLAUDE.md` invariant (8), "`apply.py` is the ONE writer"):
 
 * No `RLMTask` constructs it, no tool can reach it, and `task.py` / `session.py` do not import it —
   `run_distillation` never calls it at the end of a run. A human (or a thin CLI wrapper, out of
@@ -35,8 +35,8 @@ one is load-bearing rather than cosmetic:
    write is attempted.
 
 A SIXTH gap, found by the later primary-source research into Claude Code's real storage
-(`docs/DESIGN.md`, "Architectural additions this research requires"), needed an architecture fix
-rather than another path string: a skill does NOT live as a flat `<slug>.md` under `memory_dir` at
+(`CLAUDE.md` invariant (9), the per-kind roots), needed an architecture fix rather than another
+path string: a skill does NOT live as a flat `<slug>.md` under `memory_dir` at
 all. It is `<skills_root>/<slug>/SKILL.md` — one directory level deeper, under a COMPLETELY
 different root (`~/.claude/skills` for a global skill, `<project_dir>/.claude/skills` for a
 project-scoped one). The flat containment check above (`resolved.parent == root`) would have REFUSED
@@ -495,8 +495,8 @@ def _promote_skill(
 def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | None, str]:
     """`(<root>/<slug>/SKILL.md, "")`, or `(None, reason)` — the SKILL containment check.
 
-    A DIFFERENT check from the flat-file one, per `docs/DESIGN.md`, and in this order deliberately
-    (an escape attempt is diagnosed before a mere collision):
+    A DIFFERENT check from the flat-file one (`CLAUDE.md` invariant (9)), and in this order
+    deliberately (an escape attempt is diagnosed before a mere collision):
 
     1. `slug` is non-blank, carries no path separator, and is not a `.`/`..` traversal segment.
        `slugify` already makes all of that impossible by character class (and `_promote_skill`

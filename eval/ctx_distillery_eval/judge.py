@@ -1,19 +1,19 @@
 """The judge seam — reads an assembled plan + its transcript excerpt(s), returns an `EvalScore`.
 
-**Resolved per implementation-plan audit (`docs/IMPL_PLAN.md`)**: a finished trace does NOT carry
-the raw transcript verbatim — it is redacted host-side before the run and passed as a task INPUT,
-never itself recorded as a `tool_call` (`ctx_distillery/session.py:run_distillation`). Scoring
-against `read_transcript_chunk` / `read_memory_file` tool_call RESULTS recorded in the trace is not a
+**Resolved per implementation-plan audit**: a finished trace does NOT carry the raw transcript
+verbatim — it is redacted host-side before the run and passed as a task INPUT, never itself recorded
+as a `tool_call` (`ctx_distillery/session.py:run_distillation`). Scoring against
+`read_transcript_chunk` / `read_memory_file` tool_call RESULTS recorded in the trace is not a
 viable lossier substitute either: those payloads carry only offset/length/path/chars metadata by
 explicit design (`ctx_distillery/tools/transcript_reader.py`, `ctx_distillery/tools/memory_reader.py`
 docstrings — "never the body"), so scoring against them would score an EMPTY substitute, not a
 degraded one. The judge therefore takes the transcript text(s) as an explicit, MANDATORY argument
 alongside the rendered plan — there is no trace-only fallback path, here or in the CLI.
 
-Rubric-free: the judge prompt asks artifact-framed questions directly (per `docs/DESIGN.md`'s
-eval-member table) — it never imports or references `rlm_kit.rubric` / `ctx_distillery.rubric`, and
-never sees a criterion's deterministic `observed` facts. This keeps the judge a genuinely
-independent, artifact-level read, decoupled from the rollout side's own fact-surfacing.
+Rubric-free: the judge prompt asks artifact-framed questions directly (`JUDGE_QUESTIONS` below) — it
+never imports or references `rlm_kit.rubric` / `ctx_distillery.rubric`, and never sees a criterion's
+deterministic `observed` facts. This keeps the judge a genuinely independent, artifact-level read,
+decoupled from the rollout side's own fact-surfacing.
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ from typing import Protocol
 
 from .schema import EvalScore
 
-#: The artifact-framed question each category asks the judge, verbatim from `docs/DESIGN.md`'s
-#: eval-member table — kept as data (not just prose in a docstring) so `build_prompt` can render it
-#: without the wording drifting out of sync with the design doc's table over time.
+#: The artifact-framed question each category asks the judge — kept as DATA (not just prose in a
+#: docstring) so `build_prompt` renders this exact wording rather than a paraphrase, and so the one
+#: place a question is worded is the one place it can be changed.
 JUDGE_QUESTIONS = {
     "TF": "Does the plan capture what's actually worth keeping from the supplied transcript(s)?",
     "TA": "Did the plan's judgements (what to prune/promote/keep) follow a sensible evidentiary approach?",
@@ -65,7 +65,7 @@ class Judge(Protocol):
 class StubJudge:
     """The default, offline, fully-deterministic judge — fixed scores, no model call at all.
 
-    This is the tested default path, per `docs/IMPL_PLAN.md`: "ships behind the `judge` extra,
+    This is the tested default path, per the implementation plan: "ships behind the `judge` extra,
     default path uses a stub judge with fixed scores, same as every sibling eval member." A REAL
     judge (behind the optional `judge` extra) is deliberately deferred — see `eval/README.md`.
     """

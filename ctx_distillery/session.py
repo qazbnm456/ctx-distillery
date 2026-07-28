@@ -1,8 +1,8 @@
 """One-shot driver + assemble-on-read: run a distillation, then re-source what really happened.
 
 This project proposes ONE plan per run — there is no "adopt the best of N" search loop (nothing here
-has a reward signal to rank candidates by; see `docs/DESIGN.md`, "Trace/export"). So the driver is
-deliberately linear: ingest once, redact once, run once, assemble once.
+has a reward signal to rank candidates by). So the driver is deliberately linear: ingest once,
+redact once, run once, assemble once.
 
 `assemble` is the read side of `CLAUDE.md` invariant (2). The planner's `DistillPlan` carries only
 `{action, artifact_id, key_fields}`; the actual drafted markdown lives on the `draft_memory_file` /

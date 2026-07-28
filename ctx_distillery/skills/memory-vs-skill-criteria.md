@@ -6,11 +6,10 @@ description: Criteria for deciding whether a distillation finding is a memory ca
 # Memory vs. skill criteria (placeholder)
 
 This is a placeholder — to be filled with concrete criteria/examples for when a finding is a
-memory candidate vs. a skill candidate, once real distillation runs accumulate examples. See
-`docs/DESIGN.md`, "Skill promotion as a distinct target," for the current design-level
-distinction (a fact about the user/project is a memory; a reusable how-to/procedure discovered
-during a session is a skill), and `ctx_distillery/task.py`'s instructions for how the planner is
-currently told to draw that line.
+memory candidate vs. a skill candidate, once real distillation runs accumulate examples. The
+current design-level distinction is that a fact about the user/project is a memory, while a
+reusable how-to/procedure discovered during a session is a skill; see
+`ctx_distillery/task.py`'s instructions for how the planner is currently told to draw that line.
 
 This file follows the Agent-Skills convention used elsewhere in the rlm-kit ecosystem
 (`name`/`description` frontmatter, progressive disclosure via `skills.py`'s `list_skills`/

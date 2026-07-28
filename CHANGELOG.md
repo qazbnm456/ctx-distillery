@@ -69,7 +69,7 @@ never applies anything itself.
   reproduced against a running instance on both `GET /v1/runs/{run_id}` and
   `GET /v1/runs/{run_id}/events`. `studio/ctx_distillery_studio/app.py`'s `_load_trace` — the ONE
   entry point every endpoint's events pass through — now filters to dict-shaped entries only,
-  immediately after `load_events`, delivering on `docs/DESIGN.md`'s own "never 500 on a malformed
+  immediately after `load_events`, delivering on the Studio's own "never 500 on a malformed
   trace" requirement for real. The same underlying gap pre-exists in `ctx_distillery.rubric`/
   `ctx_distillery.session` for a locally-invoked caller (e.g. `eval/cli.py`'s real-trace-file path)
   — stated explicitly as separate, tracked future work, not silently rolled into this fix.
@@ -225,9 +225,9 @@ never applies anything itself.
   before `super().__init__`, not just documented), and a real scripted forward pass through
   `rlm_kit.testing.ScriptedInterpreter` covering planner → tools → SUBMIT.
 - `ClaudeCodeAdapter` — the one in-scope harness adapter. Enumerates `memory/*.md` with real,
-  NESTED-YAML frontmatter, plus `MEMORY.md` itself as a third `ArtifactKind`, `"index"` (needed for
-  `docs/DESIGN.md` success criterion (b): a kind that is never enumerated is unreachable through
-  `read_memory_file`'s allowlist). Every path is stored `.resolve()`d.
+  NESTED-YAML frontmatter, plus `MEMORY.md` itself as a third `ArtifactKind`, `"index"` (needed so
+  the plan can flag candidate `MEMORY.md` index lines at all: a kind that is never enumerated is
+  unreachable through `read_memory_file`'s allowlist). Every path is stored `.resolve()`d.
 - `ctx_distillery/frontmatter.py` (+ a `pyyaml` dependency) — `rlm_kit.skills`'s frontmatter reader
   only handles flat `key: value` lines and cannot express the memory schema's nested
   `metadata.type`, so parsing lives here and is used by BOTH the adapter and the drafting validators.
@@ -239,7 +239,7 @@ never applies anything itself.
 - Tools close over an immutable index SNAPSHOT, never a live adapter — `HarnessAdapter` promises
   nothing about `list_targets()` being stable, so a live reference could shift the read allowlist
   mid-run. `read_memory_file`'s check is an exact resolved-path match, never a prefix/substring test.
-- `tests/test_no_write_capability.py` — the write-capability scan `docs/DESIGN.md` mandated.
+- `tests/test_no_write_capability.py` — the design-mandated write-capability scan.
 - Initial scaffold: `RLMTask` declaration stub (`DistillSession`, no tools wired yet),
-  harness-adapter seam interface (Claude Code adapter deferred, not yet implemented), `docs/DESIGN.md`
-  planning reference, CI, project conventions synced from rlm-kit's downstream sibling consumers.
+  harness-adapter seam interface (Claude Code adapter deferred, not yet implemented), the planning
+  reference doc, CI, project conventions synced from rlm-kit's downstream sibling consumers.

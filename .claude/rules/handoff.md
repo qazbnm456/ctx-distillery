@@ -22,7 +22,7 @@ So a handoff summary should carry the *in-flight session state* those files miss
 4. **Open suggestions / TODOs** not yet tracked — mark each `proposed`, `accepted-not-done`, or `rejected`.
    e.g. the memory-vs-skill promotion split (a fact about the user/project vs. a reusable how-to) and the
    redaction policy (sensitive transcript content redacted before it becomes LM context) are both
-   `accepted-not-done` — designed in `docs/DESIGN.md`, no tool implements either yet.
+   `accepted-not-done` — the design was agreed and written down, no tool implements either yet.
 5. **The seams' status** — especially which harness adapters exist vs. are still deferred. Right now:
    Claude Code adapter buildable (real format inspected), Codex/Hermes/OpenClaw/OpenCode deliberately
    *not* designed (formats unverified) — don't let a session imply progress on those without a real

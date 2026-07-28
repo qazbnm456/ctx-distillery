@@ -1,6 +1,6 @@
 """ATLAS rubric facts for a `DistillSession` run — reward-free, deterministic, trace-sourced.
 
-Follows `docs/DESIGN.md`'s "ATLAS rubric facts + eval member" section and the same convention
+Follows `CLAUDE.md`'s known-simplification bullet on this module and the same convention
 `rlm_kit.rubric`'s docstring describes: rlm-kit owns the generic types + structural lint +
 per-criterion fact-assembly loop; THIS module supplies the taxonomy (`TF`/`TA`/`TG`/`PA`), the fixed
 criterion skeleton (`default_rubric`), the trace -> facts function (`trace_facts`), and the
@@ -189,7 +189,7 @@ def trace_facts(events: list[dict]) -> dict:
     }
 
 
-# Design decision (flagged for audit in docs/IMPL_PLAN.md, resolved here): TA's fact is the raw
+# Design decision (flagged during an implementation-plan audit, resolved here): TA's fact is the raw
 # min_read_step / min_draft_step step-id PAIR, not a pre-computed `evidence_before_drafting: bool`.
 # This keeps `trace_facts` a pure fact-surface per `rlm_kit.rubric.criteria_facts`'s own contract
 # ("never decides met/unmet") — the ordering COMPARISON is left to whatever reads `observed` later

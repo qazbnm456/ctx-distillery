@@ -11,7 +11,7 @@ Three project invariants live here:
 * **Write boundary.** Both tools return TEXT ONLY. Neither touches the memory directory, a
   `skill_dir`, or any other path — `rlm_kit.skills`'s own discovery being directory-based makes
   "helpfully write it where it belongs" a tempting mistake, so it is called out rather than assumed
-  (`CLAUDE.md` invariant 1; `docs/DESIGN.md`'s explicit write-boundary note).
+  (`CLAUDE.md` invariant 1, and its explicit note that the read-only tool set is CLOSED).
 * **`output_model` carries judgement only** (`CLAUDE.md` invariant 2), so the drafted bytes must be
   recoverable from the trace. Each call therefore records the FULL drafted text on its `tool_call`
   event, keyed by `artifact_id` — a deliberate departure from the leaner "record size, not body"
@@ -22,7 +22,7 @@ Three project invariants live here:
   circuit breaker after three calls, silently. The dataclass makes that impossible.
 
 Validation is STRUCTURAL only — is the draft well-formed and non-colliding — never semantic. Whether
-a memory is worth keeping is the human reviewer's call, per `docs/DESIGN.md`.
+a memory is worth keeping is the human reviewer's call.
 """
 
 from __future__ import annotations
@@ -62,8 +62,8 @@ def _existing_names(
 ) -> set[str]:
     """Names already taken for `kind`, narrowed to one `scope` when given.
 
-    Scope-awareness lives HERE rather than only in the caller (`docs/DESIGN.md`, corrected per
-    audit): a skill exists at two independent scopes — user-global `~/.claude/skills/` and
+    Scope-awareness lives HERE rather than only in the caller (`CLAUDE.md` invariant 7, corrected
+    per audit): a skill exists at two independent scopes — user-global `~/.claude/skills/` and
     project-relative `<project>/.claude/skills/` — and the same name in the OTHER scope is not a
     collision at all. `scope=None` keeps the pre-existing behaviour (every scope), which is the
     right conservative superset for a caller that has no scope to check against; a memory/index ref
@@ -146,8 +146,8 @@ def make_skill_validator(
     REQUIRED frontmatter is `name` + `description`, and nothing more. `when_to_use` and
     `dispatch_intent` are OPTIONAL: every real installed skill the research inspected carries them,
     but all of those were a single author's one suite, so requiring them would generalize from N=1
-    while Anthropic's own documented convention requires neither (`docs/DESIGN.md`, corrected per
-    audit). They pass through verbatim when the model supplies them — the drafted bytes are what
+    while Anthropic's own documented convention requires neither (`CLAUDE.md` invariant 7, corrected
+    per audit). They pass through verbatim when the model supplies them — the drafted bytes are what
     `apply.py` writes — and their absence is never an error. `ClaudeCodeAdapter.schema_for("skill")`
     reports this SAME shape; if one of the two changes, both must.
 
@@ -229,7 +229,7 @@ def _spec_for_memory(topic: str, memory_type: str, evidence: str) -> str:
 def _spec_for_skill(procedure: str, scope: str, evidence: str) -> str:
     """The MODEL-FACING prompt text — kept in lockstep with `make_skill_validator` on purpose.
 
-    `docs/DESIGN.md` calls out this exact drift risk: a model following prompt text that never
+    `CLAUDE.md` invariant 7 calls out this exact drift risk: a model following prompt text that never
     mentions `when_to_use` / `dispatch_intent` would simply never volunteer them (harmless while
     they are OPTIONAL), but if this text is ever tightened to describe them as required it must match
     what the validator actually enforces. So it names them here as optional extras, which is what the

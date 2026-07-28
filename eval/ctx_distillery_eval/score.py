@@ -4,15 +4,16 @@ Reconstructs the plan the SAME way `ctx_distillery.rubric.trace_facts` does (the
 `EVENT_RESULT` payload, re-validated as a `DistillPlan`), then re-sources it through
 `ctx_distillery.session.assemble` — both PUBLIC entry points of `ctx_distillery`'s surface,
 never a private helper reached across the package boundary (this package is a one-way READER of
-`ctx_distillery`, per `docs/DESIGN.md`'s eval-member boundary; `tests/test_boundary.py` in the root
-package pins that `ctx_distillery` never imports this package back).
+`ctx_distillery`, per `CLAUDE.md`'s known-simplification bullet on the eval member;
+`tests/test_boundary.py` in the root package pins that `ctx_distillery` never imports this package
+back).
 
 Studio pass, step 0: `plan_from_events` used to be a private, per-package-duplicated helper
 (`ctx_distillery.rubric._plan_from_events`, and a local copy here). It is now PUBLIC on
 `ctx_distillery.rubric` — already this package's own established boundary (public, top-level,
 already imported-from for `rubric_to_meta` elsewhere in this initiative) — so this module imports
 and calls it instead of keeping a second copy of the same reconstruction + `ValidationError`-degrade
-logic. See `docs/DESIGN.md`'s Studio section for the full boundary-ambiguity resolution.
+logic. See `CLAUDE.md` invariant 11 for the full boundary-ambiguity resolution.
 """
 
 from __future__ import annotations

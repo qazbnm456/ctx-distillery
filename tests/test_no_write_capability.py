@@ -1,4 +1,4 @@
-"""The design-mandated write-capability scan (docs/DESIGN.md: "add an explicit test").
+"""The design-mandated write-capability scan — an explicit TEST, never just a documented rule.
 
 Belt-and-suspenders on top of the sandbox itself: the `pyodide` interpreter has no host filesystem
 access at all, so a planner CANNOT mutate a file — but that guarantee only holds while this package
@@ -10,7 +10,7 @@ someone adds a writer, not to prove absence of every conceivable trick. It is a 
 not against a determined author — the sandbox is the real boundary (CLAUDE.md invariant 1).
 
 ONE module is exempt, and the exemption is itself tested: `apply.py` IS the human-gated writer
-(docs/DESIGN.md, "The apply step"). What makes that safe is not the absence of a write call but its
+(CLAUDE.md invariant 8). What makes that safe is not the absence of a write call but its
 UNREACHABILITY from the RLM — so `test_apply_is_unreachable_from_the_planner_path` asserts no
 RLM-path module imports it, which is the property the scan was really protecting all along.
 """
@@ -95,7 +95,7 @@ def test_the_scan_actually_sees_the_package():
 
 
 def test_apply_is_unreachable_from_the_planner_path():
-    """`apply.py` may write BECAUSE nothing on the RLM path can reach it (docs/DESIGN.md).
+    """`apply.py` may write BECAUSE nothing on the RLM path can reach it (CLAUDE.md invariant 8).
 
     `apply_plan` is called by a human, never by `run_distillation` or a tool — so no module the
     planner's execution path touches (including `__init__.py`, whose imports would make it eagerly
@@ -109,8 +109,8 @@ def test_apply_is_unreachable_from_the_planner_path():
         if IMPORTS_APPLY.search(line)
     ]
     assert not importers, (
-        "nothing on the RLM path may import the human-gated writer (docs/DESIGN.md, "
-        "'The apply step'):\n" + "\n".join(importers)
+        "nothing on the RLM path may import the human-gated writer (CLAUDE.md "
+        "invariant 8):\n" + "\n".join(importers)
     )
 
 

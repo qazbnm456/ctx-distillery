@@ -1,4 +1,4 @@
-"""The SSE server: REPLAY-ONLY (no live-drive endpoint — see `docs/DESIGN.md`'s Studio scope
+"""The SSE server: REPLAY-ONLY (no live-drive endpoint — see `CLAUDE.md` invariant 10's scope
 decision: `run_distillation` needs a caller-supplied `HarnessAdapter` + `chat_fn` already wired,
 unlike a self-contained one-shot driver a web request could reasonably own end-to-end).
 

@@ -1,7 +1,7 @@
 """`read_transcript_chunk` — a bounds-checked, AUDITED window onto one transcript.
 
 Why this tool exists at all, since the transcripts are ALREADY a REPL variable the planner can
-slice in its own code: **auditability**. `docs/DESIGN.md` binds raw transcript text as an RLM INPUT
+slice in its own code: **auditability**. This project binds raw transcript text as an RLM INPUT
 field (that unbounded-text-as-a-REPL-variable fit is the whole reason RLM suits this project), so
 this tool is not a security boundary — the model has the full text either way. What it adds is a
 recorded `tool_call` naming exactly which transcript, offset, and length the planner actually

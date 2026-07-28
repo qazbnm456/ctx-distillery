@@ -1,7 +1,7 @@
 """The DistillSession RLM task — declaration plus the runtime tool wiring.
 
 `DistillSession` declares the shape of the task (signature, output_model, instructions) as
-designed in docs/DESIGN.md, and its `__init__` wires the five READ-ONLY tools from an immutable
+CLAUDE.md's invariants require, and its `__init__` wires the five READ-ONLY tools from an immutable
 memory-index snapshot plus an already-redacted transcript list. `session.run_distillation` is the
 driver that produces both and assembles the result; nothing here reads a harness directly.
 """
@@ -28,7 +28,7 @@ PINNED_INTERPRETER = "pyodide"
 
 # --- Output contract -----------------------------------------------------------------------
 #
-# Per docs/DESIGN.md ("Judgement-only SUBMIT ... output_model shape"): the plan carries only
+# Per CLAUDE.md invariant (2), the judgement-only SUBMIT shape: the plan carries only
 # {action, artifact_id, key_fields} per candidate — never the drafted memory/skill content
 # itself. The actual markdown+frontmatter text for a promotion is produced by a separate
 # drafting tool (`draft_memory_file` / `draft_skill_file`, both TODO below) and re-sourced on
@@ -115,7 +115,7 @@ name existing in the OTHER scope is not a collision. A promote_to_skill candidat
 missing or is not one of those two values is refused at apply time rather than guessed at, exactly
 like a `prune` with no `target_path`.
 
-See docs/DESIGN.md for the full design and acceptance criteria this task is built against.
+See CLAUDE.md for the hard invariants this task is built against.
 """
 
 
@@ -123,8 +123,8 @@ class DistillSession(RLMTask):
     """Propose a distillation plan over one or more transcripts + the memory/skill index.
 
     Judgement-only: this task's authority stops at producing a `DistillPlan`. It never
-    mutates or deletes a transcript or memory/skill file — see CLAUDE.md invariant (1) and
-    docs/DESIGN.md's "Structural no-mutation guarantee."
+    mutates or deletes a transcript or memory/skill file — see CLAUDE.md invariant (1), the
+    structural no-mutation guarantee.
     """
 
     signature = "transcripts: list[str], memory_index: str -> plan: DistillPlan"

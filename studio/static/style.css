@@ -1,9 +1,10 @@
-/* ctx-distillery-studio — zero-build vanilla CSS; DESIGN.md is the contract. Mono-forward, same
-   visual family as the sibling studios (dark slate + a single signal accent), but this project's
-   own content — a KNOWN SIMPLIFICATION vs. diff-sentry-studio's literal precedent: no vendored
-   JetBrains Mono binary is copied into this new package (avoids binary bloat in a fresh repo); the
-   font-family stack below still PREFERS "JetBrains Mono" if the visitor's system has it installed,
-   falling back to the platform's own monospace stack otherwise. */
+/* ctx-distillery-studio — zero-build vanilla CSS; CLAUDE.md invariant 10 is the contract.
+   Mono-forward, same visual family as the sibling studios (dark slate + a single signal accent),
+   but this project's own content — a KNOWN SIMPLIFICATION vs. diff-sentry-studio's literal
+   precedent: no vendored JetBrains Mono binary is copied into this new package (avoids binary
+   bloat in a fresh repo); the font-family stack below still PREFERS "JetBrains Mono" if the
+   visitor's system has it installed, falling back to the platform's own monospace stack
+   otherwise. */
 
 :root {
   --bg:#0a0e13; --surface-1:#121a24; --surface-2:#1a2431; --surface-3:#232f3e;

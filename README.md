@@ -15,8 +15,8 @@ its transcript(s) — and **`studio/`** (`ctx-distillery-studio`) — a replay-o
 zero-build-vanilla-JS console previewing each candidate's drafted text next to its plan entry,
 purely from a finished run's trace file. Both reward-free/read-only by construction; see their own
 `eval/README.md`/`studio/README.md`. Still missing: a CLI, subagent-transcript distillation, and
-any harness other than Claude Code. See `docs/DESIGN.md` for the full design and `CLAUDE.md` for
-the invariants.
+any harness other than Claude Code. See `CLAUDE.md` for the hard invariants this project is built
+against.
 
 ## Point it at a project
 
@@ -123,11 +123,11 @@ interface.
 Right now, **only a Claude Code adapter is in scope to build**, because it's the only platform
 whose real on-disk persistence format (the memory frontmatter schema, the `MEMORY.md` index,
 scratchpad conventions) has actually been inspected and verified. Codex, Hermes, OpenClaw, and
-OpenCode are named as **future targets** in `docs/DESIGN.md` — deliberately not designed yet.
-Their real formats haven't been looked at from here, and guessing one would be speculation
-dressed as design, not genuine multi-harness support. When one of them is actually in scope, the
-honest next step is the same one taken for Claude Code: read its real current format first, then
-write the adapter.
+OpenCode are named as **future targets** in `CLAUDE.md`'s "Harness scope" — deliberately not
+designed yet. Their real formats haven't been looked at from here, and guessing one would be
+speculation dressed as design, not genuine multi-harness support. When one of them is actually in
+scope, the honest next step is the same one taken for Claude Code: read its real current format
+first, then write the adapter.
 
 ## Documentation — the guide
 
@@ -143,7 +143,7 @@ write-safety guarantees `apply_plan` enforces:
 
 For the ATLAS rubric facts, the eval member, and the Studio (Phase 1/2 of the rubric/eval/studio
 initiative), see [`eval/README.md`](eval/README.md) and [`studio/README.md`](studio/README.md).
-For the full design and rationale, see [`docs/DESIGN.md`](docs/DESIGN.md).
+For the hard invariants and the rationale behind each one, see [`CLAUDE.md`](CLAUDE.md).
 
 ## Relationship to rlm-kit
 

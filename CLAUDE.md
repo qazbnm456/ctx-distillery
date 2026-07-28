@@ -4,7 +4,7 @@
 an RLM-driven planner that reads AI coding-agent session transcripts + a persistent memory
 store and proposes a distillation plan (what to prune, what to merge across sessions, what to
 promote into a memory file or a Skill file). It never applies anything itself. See
-`docs/DESIGN.md` for the full design and `README.md` for the overview.
+`README.md` for the overview and `ctx_distillery/README.md` for the package-level guide.
 
 `rlm-kit` is pinned as a git dependency (see `pyproject.toml`). For local co-development against
 an in-progress rlm-kit checkout, install it editable over the top:
@@ -47,8 +47,8 @@ Run BOTH before pushing — the suite is fully offline (no live model, no Deno, 
 
 ## Invariants — do not break
 
-These are the hard constraints from `docs/DESIGN.md`; they exist because the operation this
-project reasons about (pruning/deleting a user's own history) is irreversible.
+These are the hard constraints this project is built against; they exist because the operation
+this project reasons about (pruning/deleting a user's own history) is irreversible.
 
 1. **No tool ever writes or deletes anything, and the interpreter stays pinned to `pyodide`.**
    Both halves matter: never add a tool that can `open(..., "w")`, delete, or otherwise mutate a
@@ -175,10 +175,10 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
     adversarial review post-merge: `rlm_kit.trace.load_events` does NO shape validation, so a
     JSON-valid non-dict line (`42`, `null`, `[1,2,3]`) used to reach `plan_from_events`/
     `trace_facts`/`mapper.to_event`'s `.get(...)` calls and raise a raw `AttributeError` — a genuine
-    500, not the "never raise on a malformed trace" guarantee this invariant (and `docs/DESIGN.md`)
-    claim. Don't remove this filter thinking it's redundant with `plan_from_events`'s own
-    `ValidationError` handling — that catches a DIFFERENT failure mode (a well-formed dict with the
-    wrong shape), not a non-dict line at all.
+    500, not the "never raise on a malformed trace" guarantee this invariant claims. Don't remove
+    this filter thinking it's redundant with `plan_from_events`'s own `ValidationError` handling —
+    that catches a DIFFERENT failure mode (a well-formed dict with the wrong shape), not a non-dict
+    line at all.
 11. **`rubric.plan_from_events` is the ONE public plan-from-trace reconstruction — `eval/` (and
     `studio/`) call it, neither keeps its own copy.** It used to be private
     (`rubric._plan_from_events`) with a duplicate local copy in `eval/ctx_distillery_eval/score.py`
@@ -202,14 +202,14 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
   files at all — they live in `subagents/agent-<id>.jsonl` (with a paired `.meta.json` carrying
   `agentType`/`description`/`spawnDepth`). Distilling those is a real deferred extension: the same
   file shape, a different glob. Not built.
-- **The project-scoped skills location is CONFIRMED** (empirically, via a real control experiment —
-  see `docs/DESIGN.md`'s "Project-scoped Skills" section), with real precedence/timing caveats to
-  respect: a GLOBAL skill of the same name SHADOWS a project one (`make_skill_validator` and
-  `apply_plan`'s `_promote_skill` both refuse a project-scope name a global skill already holds,
-  hard, with no `overwrite` bypass), and a project's very FIRST top-level skills directory needs a
-  Claude Code restart before it's discovered (`apply_plan`'s outcome says so explicitly for that
-  case). `<project>/.claude/skills/` is where this project writes a project-scoped promotion, and it
-  is now known to be picked up, subject to those two caveats — not merely "believed to belong there."
+- **The project-scoped skills location is CONFIRMED** (empirically, via a real control experiment),
+  with real precedence/timing caveats to respect: a GLOBAL skill of the same name SHADOWS a project
+  one (`make_skill_validator` and `apply_plan`'s `_promote_skill` both refuse a project-scope name a
+  global skill already holds, hard, with no `overwrite` bypass), and a project's very FIRST
+  top-level skills directory needs a Claude Code restart before it's discovered (`apply_plan`'s
+  outcome says so explicitly for that case). `<project>/.claude/skills/` is where this project
+  writes a project-scoped promotion, and it is now known to be picked up, subject to those two
+  caveats — not merely "believed to belong there."
 - **A skill's `references/` and `scripts/` are out of scope.** A real skill directory may carry them;
   `draft_skill_file` authors the `SKILL.md` body only, and `apply.py` writes only that one file.
 - **Skill enumeration is opt-in on the explicit constructor.** `ClaudeCodeAdapter(memory_dir)` (what
@@ -251,6 +251,6 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
 
 Claude Code is the only adapter being built — it's the only platform whose real persistence
 format has been directly verified. Codex, Hermes, OpenClaw, and OpenCode are named future
-targets in `docs/DESIGN.md`, deliberately **not** designed yet: their real on-disk formats
-haven't been inspected, and guessing one would be speculation dressed as design. Don't add an
-adapter for any of them until someone has actually looked at that harness's real format.
+targets, deliberately **not** designed yet: their real on-disk formats haven't been inspected,
+and guessing one would be speculation dressed as design. Don't add an adapter for any of them
+until someone has actually looked at that harness's real format.
