@@ -128,7 +128,13 @@ fields, in `--text-faint`.
 ### 5.1 Header
 `▣ ctx-distillery studio` wordmark (`▣` in `--signal`, "studio" in `--text-faint`). Sticky, 56px,
 one hairline bottom border. Right side: **one chip only** — `TRACES` + the directory from
-`GET /v1/config`, truncated with an ellipsis at `22ch` — then the theme toggle (`☾`).
+`GET /v1/config`, shown as its **last two path segments** (`…/ctx-distillery/traces`) with the full
+value on the chip's `title` — then the theme toggle (`☾`).
+
+*Why not the siblings' `22ch` head-truncation.* Their chip holds a MODEL NAME: short, and identified
+by its head. This one holds a PATH — 43 characters on the machine this was built against — so head
+truncation rendered `/Users/operator/Documents/…`, hiding the only segment a reader is checking. Two
+segments rather than one because the last is almost always `traces`, the same word for every project.
 
 *Not copied:* the siblings' three model-role chips (`planner / analyst / classifier`). This project's
 model is an INJECTED `chat_fn`, not an env-var-selected role trio, and `/v1/config` returns
@@ -183,45 +189,87 @@ this feed (no connector lines, no "because of the turn above"); it is a log, not
 *Not copied:* no "the live feed streams as it happens" claim, and no per-family inline-SVG icon chips
 (the badge carries the event name as text — there is no inline SVG anywhere in `index.html`).
 
-### 5.4 The result: PLAN stage + right modules
-Page-level **3 columns**: `320px` rail | `minmax(0,1fr)` stage | `300px` modules, `height:
-calc(100vh - 56px)` so the page itself never scrolls — each panel is its own scroll track.
+### 5.4 The result: candidate LIST (rail) + PLAN stage + meta modules
+Page-level **3 columns**: `320px` rail | `minmax(0,1fr)` stage | `300px` meta, `height:
+calc(100vh - 56px)` so the page itself never scrolls.
 
-**Middle stage — `▾ PLAN` (the money shot: candidate + drafted text, side by side).** One
-`.candidate-row` per `AssembledCandidate`, framed per §2, in plan order. Each row, top to bottom:
-1. a head: `#N` index · the **action pill** (`--signal` for the two promotions, `--warn` for `prune`,
-   `--text-dim` for `keep`) · the `artifact_id` when there is one · a `draft ok` / `draft failed`
-   chip when `draft_ok` is not null;
-2. `key_fields` as one compact JSON line (`word-break` on, because `target_path` is attacker-length
-   by nature — it is a path from a file the model read);
-3. **the draft** — a `<pre>` on `--surface-1`, `white-space:pre-wrap`, capped at `260px` with its own
-   scroll. Written with **`el.textContent` ONLY, never `innerHTML`**: a drafted memory/skill body is
-   untrusted model output, not markup to render. This rule is absolute and non-negotiable across the
-   whole file;
-4. any per-candidate `problems`, one `--bad` line each;
-5. the `⚠` refusal marker when the candidate is **blocked** (§2).
+**One scroll track per panel, never two.** A `.panel` is a flex BOX; the scroll belongs to exactly
+one designated child (`.feed`, `.cand-list`, `.stage-body`, and `.meta-col` is its own track). This
+is the discipline every sibling studio uses and the one this file had dropped: `.panel {
+overflow-y:auto }` *plus* an inner `overflow-y:auto` gives two nested scrollers per column, and the
+wheel hands off mid-gesture — the reader is thrown past what they were reading. Every track carries
+the top/bottom `mask-image` fade, which is what distinguishes a list that ENDS from one that
+CONTINUES. Pinned by `static-contract.test.js`.
 
-Run-level `problems` render in a `--bad`-bordered `.run-problems` block after the last candidate —
-including the one that matters most, `"no plan was produced by this run"` from `assemble(events,
-None)`. Empty states: `Load a run to see its assembled plan.` → `Loading…` → either the rows or
-`this run's plan proposed no candidates.`
+**Rail, middle — `▾ CANDIDATES (n)`.** One `.cand-item` per `AssembledCandidate`: index · action ·
+the artifact's short name · a single glyph carrying the only thing a list is scanned for (`⚠` when
+`apply_plan` would refuse it, `◆` when it is a backed promotion). The left stripe repeats the §2
+frame state **from the same derived value the stage uses**, so rail and stage cannot disagree.
+`↑`/`↓` step through the list; the selection scrolls into view.
 
-**Right module — `▾ RUBRIC FACTS (ATLAS)`.** The ten deterministic facts from
-`rubric.trace_facts`, grouped client-side under the four ATLAS categories (`CATEGORY_LENS` mirrors
-`rubric._CATEGORY_LENS`; the endpoint returns them flat and the grouping is DISPLAY only, adding no
-server dependency): **TF** `n_candidates` · `n_non_keep` · `plan_problems`; **TA** `min_read_step` ·
-`min_draft_step` · `any_circuit_broken`; **TG** `n_backed_promotions` · `prune_targets_named`; **PA**
-`n_candidate_problems` · `n_bad_skill_scope`. Category label in `--signal`, then `key` (dim, left) /
-`value` (bright, right) rows.
+*Why a list and not the old inline stage.* The middle column used to render every candidate with its
+drafted body expanded. Measured on a real run: **32,091 characters of draft across 10 candidates**,
+each `<pre>` capped at 260px with its OWN scrollbar, inside a panel that also scrolled — so reading
+candidate 5 meant scrolling the panel to it, scrolling inside its box, and being thrown to candidate
+6 the moment the wheel escaped. List here, one detail there: the siblings' rail → stage relationship.
 
-**Label them FACTS, never scores.** `trace_facts` decides no met/unmet and no field anywhere is a
-reward. A `min_read_step` / `min_draft_step` pair is a raw observation; whether "evidence came before
-drafting" is left to whoever reads it. Never render a total, a percentage, a bar, or a ✓/✗ over these.
+**Middle stage — the selected candidate, one at a time.** Head: `▾ [N] <action>` plus an
+`Entry | Draft` switch (hidden when there is no draft). *Entry* view: the head row (`#N` · action
+pill · `artifact_id` · a `draft ok` / `draft failed` chip when `draft_ok` is not null), then
+`key_fields` **one row per field** — never `JSON.stringify` of the whole object, because the longest
+value is `reason`, a paragraph of model prose, and the object collapsed into an unreadable ribbon
+exactly where a reviewer must read most carefully — then any per-candidate `problems`, then the `⚠`
+refusal marker when the candidate is **blocked** (§2), last, so it reads as the verdict on
+everything above it. *Draft* view: the drafted bytes in a `<pre>`, `white-space:pre-wrap`,
+`overflow-wrap:anywhere`, filling the stage's own scroll track (**no second scroller** — see above).
 
-The PLAN stage answers "what does this run propose, and what backs it". It cannot answer "how did the
-planner get there" — that is **§5.7**, the Trajectory drawer, and it is a separate surface on purpose:
-a reviewer deciding whether to call `apply_plan` reads the plan, and only sometimes needs the
-trajectory behind it.
+Written with **`el.textContent` ONLY, never `innerHTML`**: a drafted memory/skill body is untrusted
+model output, not markup to render. Absolute across every file under `static/`. It is also why this
+studio cannot copy the siblings' stage code, which assembles its markup with template strings.
+
+Run-level `problems` pin under the candidate LIST, not inside the stage — they belong to the run,
+not to whichever candidate happens to be selected. Empty states: `Load a run, then pick a
+candidate.` → `Loading…` → either the stage or `this run's plan proposed no candidates.`
+
+**Right column — meta modules, one per ATLAS category.** `.meta-col` of `.module` cards, each with
+the siblings' 3px `--signal → transparent` `.module-cap`, an `<h4>` title, and a right-side
+**headline**. Body: the criterion's own `description`, then one `.kv` row per fact (name left, value
+right, mono, `tabular-nums`).
+
+*The description is SERVED, never copied.* `GET /v1/runs/{id}` returns `rubric_criteria`, recovered
+from the run's own `run_start` meta by `rubric.rubric_from_meta`. Four descriptions transcribed into
+`app.js` would drift the moment a criterion is reworded — silently, because nothing compares the
+two — and reading it per run means an OLD trace explains itself with the rubric it actually ran
+under, not today's.
+
+*Facts with no category land in `outside the four criteria`.* The grouping is a whitelist, so
+without a catch-all a fact the server ADDS is silently invisible — which really happened:
+`n_transcripts` / `n_transcripts_read` were computed, served, and never rendered. The group is named
+after what it IS rather than after today's two members.
+
+**Label them FACTS, never scores, and never state more than the fact measures.** `trace_facts`
+decides no met/unmet and no field anywhere is a reward, so a headline may say `tools: read first`
+(an observation about ordering) and may never say `good`, a total, a percentage, a bar, or a ✓/✗.
+Two headlines had to be corrected against this, and the failure mode is the same both times —
+**rendering a count of TOOL CALLS as a conclusion about the planner's behaviour**:
+
+* TA read `draft → read`. Both numbers are step ids of *tool calls*, and the planner also receives
+  `transcripts` and `memory_index` as **REPL variables** (they are on `DistillSession`'s signature,
+  and `_INSTRUCTIONS` tells it to print and slice them). A real run read all three transcripts in
+  full at turns 0–2 by printing the variable and escalating the text to the sub-LM, then drafted at
+  turn 3 and called `list_memory_files` at step 9 — tool-wise `draft` first, in substance evidence
+  first. The headline now says `tools: draft first`, and a caveat block says the rest.
+* The unclaimed group read `0 / 3 read`. The FRACTION was the lie: it frames read-tool calls as a
+  proportion of transcripts, asserting the rest went unread, which the trace cannot support. The
+  numbers stay as plain rows; the arithmetic is gone.
+
+A caveat block (`.module-caveat`, set apart by a left rule so a reader can tell console text from
+rubric text) carries these, never edited into the server's own description.
+
+The PLAN surface answers "what does this run propose, and what backs it". It cannot answer "how did
+the planner get there" — that is **§5.7**, the Trajectory drawer, and it is a separate surface on
+purpose: a reviewer deciding whether to call `apply_plan` reads the plan, and only sometimes needs
+the trajectory behind it.
 
 ### 5.5 States (every state explicit)
 | derived state | frame | body |
@@ -268,17 +316,44 @@ be worse than one that does not open.
 feed `has_code: bool` and drops `output` entirely, so a turn's actual code and its actual REPL output
 exist nowhere else in this studio. Three panes:
 
-- **left — turn nav.** `Init`, then one entry per turn (`Turn N` + the first line of its reasoning,
-  plus its `duration_s` when the trace has one). `←`/`→` step through exactly these stops.
-- **centre — detail.** *Init*: the run's inputs as `kv` rows — project **basename** (never the path),
+**WIDTH IS TIME.** Above the two working columns, spanning the drawer, is a horizontal strip:
+an axis (`start` … total elapsed, `tabular-nums`) over a `74px` row of segments, each a tab whose
+width is its share of the run's wall clock, floored at `108px`, scrolling horizontally rather than
+squeezing (`flex-shrink:0` is load-bearing — without it flexbox re-equalises the widths and the
+encoding silently disappears). A segment's top edge carries its **tool family** hue
+(`--fam-read` / `--fam-draft` / `--fam-list`, overridden by `--bad` / `--warn` when the call failed or
+was unrecognised — the outcome outranks the taxonomy), which is the only information that survives a
+segment squeezed to the floor. Between turn groups sits a clickable `T<n> ▸` marker that opens that
+turn.
+
+*This replaced a 260px side column of equal-height rows,* which is the one place a duration can only
+ever be text. On the run it was rebuilt against, **one of nine calls took 242.6s of 313.4s (84.3%)**
+while the rest took 2–8s each: a fact a column of identical rows cannot show and a proportional strip
+cannot hide. The denominator is the SUM, not the slowest call — the strip is a ruler laid along the
+whole run, not a set of per-row bars.
+
+Below it, two columns:
+
+- **left — turn nav.** A **search box** over each turn's `reasoning + code + output` (`N matches`
+  beside it): a hit gains an amber edge, a miss DIMS to 0.4 rather than being filtered out, because
+  which turn matched is only meaningful against the run's sequence and a filtered list silently
+  renumbers what the reader is looking at. It earns its place here more than in the siblings — one
+  turn's REPL echo ran **16,038 characters** on the run this was built against. `←`/`→` step through
+  the stops, and are released while the search box has focus (there they are the caret keys).
+  Then `Init`, then one entry per turn (`Turn N` + the first line of its reasoning, plus its
+  `duration_s` when the trace has one).
+- **right — detail.** *Init*: the run's inputs as `kv` rows — project **basename** (never the path),
   transcript/artifact counts, `planner`/`drafter`, the pinned `interpreter` (always `pyodide`, which
   is the point: invariant 1's sandbox pin, visible per run), rubric criteria, and the two budgets.
   *Turn*: its `reasoning` as prose, then a collapsible **REPL** block with `code` and `output` in
   their own wells. *Timeline entry*: its label, its `ok`, and the fields that tool's own allowlist
   branch in `iterations._tool_entry` contributed (iterated, not switched per tool — the server owns
   that roster, and a second copy here would drift). A `sub_call` renders `model` + input/output wells.
-- **right — the tool timeline**, a flat list of every `tool_call`/`sub_call`, in `seq` order, each
-  showing `+rel_s · gap`.
+
+**A turn marker is a BUTTON.** It shipped once as a plain `div`: it sat in the strip looking exactly
+like the clickable segments beside it and did nothing when pressed. A control that LOOKS interactive
+and is not is worse than no control — and the test for it asserts that it opens the turn it NAMES,
+because a marker wired to the wrong turn would still pass a "has a handler" check.
 
 **The timeline is FLAT and UNCONDITIONAL; `turn_index` is only an enrichment.** That is forced by two
 measured numbers, not a hedge: a real live run's `main_step` span is 20.4s → `per_turn_timing = true`,
@@ -316,7 +391,10 @@ the sinks — widened in the same pass, because a scan that read only `app.js` w
 new file through.
 
 *Not built, each for a stated reason:* no `replay-core.js`, no ▶/⏸/speed transport, no progress bar,
-no expand-to-full, no in-drawer search, no `run-core.js`, and nothing implying a live run. A
+no expand-to-full, no `run-core.js`, and nothing implying a live run. (In-drawer search WAS on this
+list and is now built — see the turn nav above. It came off the list on evidence, not taste: a single
+turn's REPL echo measured 16,038 characters, so "which turn touched X" is otherwise a manual read of
+every turn.) A
 transport's payoff scales with tool-call count and this project's runs make a handful of calls;
 `app.js` has never even used the server's existing `?delay=` pacing. The `←`/`→` stop-walk survives as
 ~12 inlined lines (`buildStops` / stop index / step target) — vendoring `replay-core.js` to use a
@@ -384,9 +462,10 @@ plan's CLAIM and the exact thing this design exists to distrust.
    any offline-harness trace — **the tool timeline is still fully populated**, one entry per
    `tool_call`/`sub_call`, and each says `gap`, not "took". On a live-timed trace, selecting a turn
    also outlines its linked timeline entries.
-4. A `promote_to_memory` candidate whose drafting call succeeded shows a `--signal` left edge, a
-   `draft ok` chip, and its **verbatim drafted markdown+frontmatter** in the `<pre>` beside its
-   `action`/`key_fields` — the money shot, side by side.
+4. A `promote_to_memory` candidate whose drafting call succeeded shows a `--signal` stripe in the
+   rail LIST and a `◆`; selecting it heads the stage `▾ [N] promote_to_memory`, the `Entry` view
+   shows the `draft ok` chip and one row per `key_fields` entry, and the `Draft` switch shows its
+   **verbatim drafted markdown+frontmatter**. Exactly ONE scrollbar is reachable in that column.
 5. A candidate the apply step would refuse shows the full `--bad` frame, its `problems` lines and the
    `⚠` marker, and stays ON SCREEN. Check **both** shapes: (a) an `artifact_id` matching no drafting
    call, and (b) a promotion whose assembled draft is EMPTY though it carries no `problems` and may
@@ -399,5 +478,6 @@ plan's CLAIM and the exact thing this design exists to distrust.
    fails writes one red `trajectory` row into the feed and does **not** open an empty drawer.
 8. The theme toggle flips light/dark and survives a reload; at 375px nothing overflows horizontally
    — below `1040px` the three tracks STACK into one column, the viewport-height pin is released so
-   the page scrolls instead of the panels being crushed, the `<pre>` still scrolls inside its own
-   260px box, and the drawer's own three panes stack with the detail pane still reachable.
+   the page scrolls instead of the panels being crushed, and the drawer's panes stack with the detail
+   pane still reachable. The tool timeline keeps scrolling HORIZONTALLY at every width: its segment
+   widths are the time encoding, so they are never allowed to reflow to fit.

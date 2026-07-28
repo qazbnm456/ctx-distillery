@@ -14,6 +14,7 @@ from ctx_distillery_studio import app as appmod
 from fastapi.testclient import TestClient
 from rlm_kit.trace import TraceRecorder, record_tool_call
 
+from ctx_distillery.rubric import default_rubric, rubric_to_meta
 from ctx_distillery.task import DistillCandidate, DistillPlan
 
 client = TestClient(appmod.app)
@@ -81,6 +82,46 @@ def test_get_run_returns_the_assembled_plan_and_rubric_facts(tmp_path, monkeypat
     assert body["rubric_facts"]["n_candidates"] == 2
     assert body["rubric_facts"]["n_backed_promotions"] == 1
     assert body["rubric_facts"]["prune_targets_named"] == 1
+
+
+def test_get_run_serves_the_rubric_CRITERIA_the_run_actually_carried(tmp_path, monkeypatch):
+    """The criteria descriptions the console renders as each module's note.
+
+    THE COVERAGE GAP THIS CLOSES: every other fixture here records a `meta` with no `rubric` key, so
+    the criteria list was always empty and the conversion from `Criterion` never ran. A first draft
+    of the endpoint used `dataclasses.asdict` — `Criterion` is a PYDANTIC model, so it raises — and
+    the whole suite stayed green while `GET /v1/runs/{id}` 500'd on every real trace. A fixture that
+    never exercises a branch cannot defend it.
+
+    Served PER RUN from the trace's own meta rather than from `default_rubric()`, so an old trace
+    explains itself with the rubric it ran under; and as an explicit field allowlist, so a future
+    field on `Criterion` cannot ride into an HTTP response unnoticed.
+    """
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    meta = {"transcripts": 1, "rubric": rubric_to_meta(default_rubric())}
+    with TraceRecorder(str(tmp_path / "r1.jsonl"), run_id="r1", meta=meta) as rec:
+        rec.record_result(DistillPlan(candidates=[DistillCandidate(action="keep")]))
+
+    criteria = client.get("/v1/runs/r1").json()["rubric_criteria"]
+
+    assert [c["category"] for c in criteria] == ["TF", "TA", "TG", "PA"]
+    assert all(c["description"] for c in criteria), "a description is what the console renders"
+    assert set(criteria[0]) == {"name", "category", "description"}, "an allowlist, not a dump"
+    # The console keys its notes on `category`, so a duplicate would silently drop one.
+    assert len({c["category"] for c in criteria}) == len(criteria)
+
+
+def test_get_run_reports_no_criteria_for_a_trace_that_recorded_none(tmp_path, monkeypatch):
+    """An older trace carries no rubric in its meta. The key must still be present and empty — the
+    console reads `body.rubric_criteria || []`, and a 500 or a missing key would take the whole
+    panel down for a run whose FACTS are perfectly readable."""
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    with TraceRecorder(str(tmp_path / "r2.jsonl"), run_id="r2", meta={"transcripts": 1}) as rec:
+        rec.record_result(DistillPlan(candidates=[DistillCandidate(action="keep")]))
+
+    body = client.get("/v1/runs/r2").json()
+    assert body["rubric_criteria"] == []
+    assert body["rubric_facts"]["n_candidates"] == 1, "the facts still render"
 
 
 def test_get_run_404_when_no_such_trace(tmp_path, monkeypatch):

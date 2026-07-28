@@ -130,6 +130,17 @@ def dict_events(events: Iterable[object]) -> list[dict]:
     corruption did. A consumer sees an event with no payload fields, which every one of them already
     handles — that is the shape a legitimately payload-less event has.
 
+    * a `payload["meta"]` that is present but NOT a dict is likewise coerced to `{}`. THIRD normal-
+      ization, added after the same failure appeared one level deeper: `rubric_from_meta` reaches
+      `payload["meta"].get("rubric")`, so a `{"payload": {"meta": "nope"}}` line — an object whose
+      payload is an object, passing both filters above — raised the identical
+      `AttributeError: 'str' object has no attribute 'get'`. It cost the studio's `/v1/runs/{id}`
+      a 500 the moment that endpoint started serving the criteria, and it already cost
+      `ctx-distillery export` a whole bundle for one bad line (caught and reported, but the run's
+      data is lost either way). `meta` is the only payload key in this workspace that is itself
+      unwrapped with `.get`, which is what makes it the one worth normalizing by name rather than
+      recursing.
+
     Fixing it HERE rather than at the ~12 unwrap sites is the same reasoning invariant 11 gives for
     `plan_from_events`: one implementation, so a future consumer inherits the guarantee instead of
     having to remember it.
@@ -140,6 +151,9 @@ def dict_events(events: Iterable[object]) -> list[dict]:
             continue
         if "payload" in event and not isinstance(event["payload"], dict):
             event = {**event, "payload": {}}
+        payload = event.get("payload")
+        if isinstance(payload, dict) and "meta" in payload and not isinstance(payload["meta"], dict):
+            event = {**event, "payload": {**payload, "meta": {}}}
         out.append(event)
     return out
 

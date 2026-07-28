@@ -12,6 +12,11 @@
   --text:#e8eef4; --text-dim:#a2b4c4; --text-faint:#6a7c8d;
   --signal:#22d3c2; --signal-dim:#3fb3a8; --signal-glow:rgba(34,211,194,0.24);
   --ok:#3fb950; --bad:#f85149; --warn:#d29922;
+  /* Tool FAMILIES. The siblings all carry a domain semantic layer (diff-sentry has five severity
+     hues plus matched glows); this file had only ok/bad/warn, so every tool call on the timeline
+     was the same colour and the strip carried no taxonomy at all. Five tools, five hues, drawn from
+     the same slate family rather than a new palette. */
+  --fam-read:#5aa9e6; --fam-draft:#22d3c2; --fam-list:#8b7fd4; --fam-other:#6a7c8d;
   --mono:"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --radius:2px;
 }
@@ -20,6 +25,7 @@
   --border:#cdd8e2; --border-strong:#aebccb;
   --text:#132029; --text-dim:#41566a; --text-faint:#6a7c8d;
   --signal:#0f9c8f; --signal-dim:#0d8a7f; --signal-glow:rgba(15,156,143,0.18);
+  --fam-read:#2b6cb0; --fam-draft:#0f9c8f; --fam-list:#6b5cc4; --fam-other:#5a6b7c;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
@@ -27,6 +33,7 @@
     --border:#cdd8e2; --border-strong:#aebccb;
     --text:#132029; --text-dim:#41566a; --text-faint:#6a7c8d;
     --signal:#0f9c8f; --signal-dim:#0d8a7f; --signal-glow:rgba(15,156,143,0.18);
+    --fam-read:#2b6cb0; --fam-draft:#0f9c8f; --fam-list:#6b5cc4; --fam-other:#5a6b7c;
   }
 }
 
@@ -54,7 +61,16 @@ button { font-family:var(--mono); cursor:pointer; }
   background:var(--surface-2); border:1px solid var(--border); font-size:.72rem; color:var(--text-dim);
 }
 .chip .role-name { text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); flex:none; }
-.chip .role-model { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:22ch; }
+.chip { min-width:0; }
+/* 22ch is the siblings' number, and it is right FOR THEM: their chips hold a model name, which is
+   short and whose head is the identifying part. This one holds a PATH — 43 characters on this
+   machine — so a head-truncating 22ch rendered `/Users/operator/Documents/…`, hiding the only segment
+   a reader is checking. Widened, allowed to shrink, and the tail is what survives (`_tailPath` in
+   app.js keeps the last two segments); the full value is on the `title`. */
+.chip .role-model {
+  color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  min-width:0; max-width:34ch;
+}
 .theme-toggle {
   width:32px; height:32px; border-radius:var(--radius); background:var(--surface-2);
   border:1px solid var(--border); color:var(--text-dim); font-size:1rem; flex:none;
@@ -68,7 +84,15 @@ button { font-family:var(--mono); cursor:pointer; }
   height:calc(100vh - 56px);
 }
 .rail { display:flex; flex-direction:column; gap:16px; min-height:0; }
-.panel { background:var(--surface-1); border:1px solid var(--border); border-radius:var(--radius); padding:12px; overflow-y:auto; }
+/* A panel is a BOX, never a scroll container. Scrolling belongs to ONE designated track inside it
+   (`.feed`, `.cand-list`, `.stage-body`), which is the discipline every sibling studio uses and the
+   one this file had dropped: `.panel { overflow-y:auto }` plus an inner `overflow-y:auto` makes two
+   nested scrollers per column, so the wheel hands off mid-gesture and the reader is thrown past what
+   they were reading. Panels flex; their one track scrolls. */
+.panel {
+  background:var(--surface-1); border:1px solid var(--border); border-radius:var(--radius);
+  padding:12px; display:flex; flex-direction:column; min-height:0;
+}
 .panel-label {
   font-size:.6875rem; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint);
   margin-bottom:10px;
@@ -91,9 +115,20 @@ button { font-family:var(--mono); cursor:pointer; }
 .arrow { margin-left:2px; }
 .hint { margin-top:8px; font-size:.7rem; color:var(--text-faint); }
 
-/* ── live feed ──────────────────────────────────────────────────────────── */
-.feed-panel { flex:1; min-height:220px; display:flex; flex-direction:column; }
-.feed { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
+/* ── rail sizing: the review surface gets the height, the feed gets the remainder ──────────── */
+.load-panel { flex:0 0 auto; }
+.cand-panel { flex:1 1 60%; min-height:180px; }
+.feed-panel { flex:1 1 40%; min-height:160px; }
+
+/* The ONE scroll track per panel. `mask-image` is the affordance the siblings carry and this file
+   lacked: without the top/bottom fade a full track looks like a hard edge, so a reader cannot tell
+   a list that ends from a list that continues. */
+.feed, .cand-list, .stage-body {
+  flex:1; min-height:0; overflow-y:auto;
+  -webkit-mask-image:linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 10px), transparent);
+          mask-image:linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 10px), transparent);
+}
+.feed { display:flex; flex-direction:column; gap:4px; }
 .feed-row {
   display:flex; gap:8px; padding:8px 6px; border-radius:var(--radius); align-items:flex-start;
   border-left:2px solid var(--border);
@@ -111,10 +146,39 @@ button { font-family:var(--mono); cursor:pointer; }
 .fr-reasoning { font-size:.76rem; color:var(--text-dim); white-space:pre-wrap; margin-top:2px; }
 .fr-fields { font-size:.74rem; color:var(--text-faint); word-break:break-word; margin-top:2px; }
 
-/* ── plan panel (the money shot) ───────────────────────────────────────── */
-.plan-panel { min-width:0; }
-.plan-empty { color:var(--text-faint); font-size:.85rem; padding:12px 4px; }
-.plan-list { display:flex; flex-direction:column; gap:12px; }
+/* ── candidate LIST (rail) + STAGE (middle) ────────────────────────────── */
+.stage-panel { min-width:0; }
+.plan-empty, .cand-empty { color:var(--text-faint); font-size:.85rem; padding:12px 4px; }
+.cand-list { display:flex; flex-direction:column; gap:2px; }
+
+/* A list row is scannable in one line: index, action, and the frame stripe that says whether
+   apply_plan would take it. Everything else is the stage's job. */
+.cand-item {
+  display:flex; gap:8px; align-items:baseline; width:100%; text-align:left;
+  padding:7px 8px; background:none; border:1px solid transparent; border-left-width:3px;
+  border-radius:var(--radius); color:var(--text); font-family:var(--mono); font-size:.79rem;
+  cursor:pointer;
+}
+.cand-item:hover { background:var(--surface-2); }
+.cand-item.on { background:var(--surface-3); border-color:var(--border-strong); }
+.cand-item.on .ci-action { color:var(--text); }
+.cand-item:focus-visible { outline:2px solid var(--signal); outline-offset:-2px; }
+.ci-index { flex:none; color:var(--text-faint); }
+.ci-action { flex:1; min-width:0; color:var(--text-dim); overflow-wrap:anywhere; }
+.ci-mark { flex:none; font-size:.72rem; }
+.ci-mark.bad { color:var(--bad); }
+.ci-mark.ok { color:var(--signal); }
+
+.stage-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.stage-switch { display:flex; gap:2px; margin-bottom:10px; }
+.stage-switch button {
+  font-family:var(--mono); font-size:.72rem; padding:3px 10px; cursor:pointer;
+  background:var(--surface-2); color:var(--text-dim);
+  border:1px solid var(--border); border-radius:var(--radius);
+}
+.stage-switch button.on { background:var(--surface-3); color:var(--text); border-color:var(--border-strong); }
+.stage-switch button:focus-visible { outline:2px solid var(--signal); outline-offset:1px; }
+.stage-nav-hint { margin-top:10px; font-size:.7rem; color:var(--text-faint); }
 .candidate-row {
   border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; background:var(--surface-2);
   border-left-width:3px; border-left-style:solid;
@@ -124,6 +188,11 @@ button { font-family:var(--mono); cursor:pointer; }
 .candidate-row.state-blocked { border-color:var(--bad); }
 .candidate-row.state-backed  { border-left-color:var(--signal); }
 .candidate-row.state-inert   { border-left-color:var(--border-strong); }
+/* The list row carries the same stripe from the same derived state, so the rail and the stage can
+   never disagree about whether apply_plan would take a candidate. */
+.cand-item.state-blocked { border-left-color:var(--bad); }
+.cand-item.state-backed  { border-left-color:var(--signal); }
+.cand-item.state-inert   { border-left-color:var(--border-strong); }
 .candidate-blocked {
   margin-top:8px; padding:6px 8px; font-size:.76rem; color:var(--bad);
   border:1px solid var(--bad); border-radius:var(--radius); word-break:break-word;
@@ -140,7 +209,15 @@ button { font-family:var(--mono); cursor:pointer; }
 .chip-ok, .chip-bad { font-size:.7rem; padding:1px 7px; border-radius:999px; }
 .chip-ok { color:var(--ok); background:color-mix(in srgb, var(--ok) 16%, transparent); }
 .chip-bad { color:var(--bad); background:color-mix(in srgb, var(--bad) 16%, transparent); }
-.candidate-key-fields { margin-top:6px; font-size:.74rem; color:var(--text-dim); word-break:break-word; }
+/* One row per key field. The old form was `JSON.stringify(key_fields)` on one line — and the
+   longest value is `reason`, a paragraph of model prose, so the whole object collapsed into an
+   unreadable ribbon exactly where a reviewer needs to read most carefully. */
+.candidate-key-fields {
+  display:flex; gap:8px; margin-top:6px; font-size:.74rem; color:var(--text-dim);
+  word-break:break-word; align-items:baseline;
+}
+.kf-key { flex:none; min-width:11ch; color:var(--text-faint); }
+.kf-value { min-width:0; color:var(--text-dim); word-break:break-word; overflow-wrap:anywhere; }
 /* `white-space:pre-wrap` alone wraps at WHITESPACE only, so a drafted body containing one
    attacker-length unbroken token (a base64 blob, a 5000-char path) blew straight through the
    column and gave the whole PAGE a horizontal scrollbar. `overflow-wrap:anywhere` is the fix and it
@@ -149,7 +226,7 @@ button { font-family:var(--mono); cursor:pointer; }
 .candidate-draft {
   margin-top:8px; padding:10px; background:var(--surface-1); border:1px solid var(--border);
   border-radius:var(--radius); font-family:var(--mono); font-size:.78rem; white-space:pre-wrap;
-  overflow-wrap:anywhere; max-height:260px; overflow-y:auto; color:var(--text);
+  overflow-wrap:anywhere; max-height:none; overflow-y:auto; color:var(--text);
 }
 .candidate-problems { margin-top:8px; }
 .problem-line { font-size:.76rem; color:var(--bad); }
@@ -158,13 +235,73 @@ button { font-family:var(--mono); cursor:pointer; }
 /* ── rubric panel ───────────────────────────────────────────────────────── */
 .rubric-panel { min-width:0; }
 .rubric-empty { color:var(--text-faint); font-size:.85rem; }
-.rubric-category { margin-bottom:14px; }
-.rubric-category-label {
-  font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--signal); margin-bottom:6px;
+/* The meta column: the sibling studios' `.module` card, lifted with their exact values. The old
+   form was a single flat panel of `key ......... JSON.stringify(value)` rows, which rendered ten
+   INTEGERS as right-aligned prose — no number styling, no grouping weight, nothing to scan. */
+.meta-col {
+  display:flex; flex-direction:column; gap:14px; min-width:0; min-height:0; overflow-y:auto;
+  -webkit-mask-image:linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 10px), transparent);
+          mask-image:linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 10px), transparent);
 }
-.rubric-fact { display:flex; justify-content:space-between; gap:8px; font-size:.76rem; padding:2px 0; }
-.rubric-fact-key { color:var(--text-dim); }
-.rubric-fact-value { color:var(--text); text-align:right; word-break:break-word; }
+/* `.module` carries `overflow:hidden` (corner clipping), which flips its flex automatic min-size to
+   0 — inside this fixed-height column the modules would COMPRESS to fit (content crushed, nothing
+   left to scroll) instead of overflowing. Pin them at content height; the COLUMN is the scroller.
+   Same note the siblings carry, same reason. */
+.meta-col .module { flex-shrink:0; }
+.module {
+  background:var(--surface-1); border:1px solid var(--border); border-radius:var(--radius);
+  overflow:hidden;
+}
+.module-cap { height:3px; background:linear-gradient(90deg, var(--signal), transparent); }
+/* head = title + a HEADLINE, cve-reverser's `.module-head h4` + emblem shape. The headline is a
+   FACT, never a verdict: this rubric is reward-free and decides nothing met/unmet (CLAUDE.md), so a
+   pass/fail emblem is exactly the thing it may not grow. "read -> draft" is an observation about
+   ordering; "good" would be a score. */
+.module-head {
+  padding:9px 12px 0; display:flex; align-items:center; justify-content:space-between; gap:10px;
+}
+.module-head h4 {
+  margin:0; font-size:.6875rem; text-transform:uppercase; letter-spacing:.12em; color:var(--text-faint);
+}
+.headline {
+  font-size:.6875rem; text-transform:uppercase; letter-spacing:.05em; font-weight:700;
+  padding:2px 7px; border-radius:2px; border:1px solid currentColor; white-space:nowrap;
+  color:var(--text-faint);
+}
+.headline.ok { color:var(--signal); }
+.headline.warn { color:var(--warn); }
+.headline.bad { color:var(--bad); }
+.module-body { padding:10px 12px 12px; }
+/* A fact row: name left, value right in mono. NOT a stat grid — these facts are heterogeneous, and
+   the two that matter most are ORDINALS. `min_draft_step: 1` is "the first draft happened at step
+   1", not a magnitude, so a big bold number in a comparison grid states something false about it
+   ("bigger is more"), and splitting it from `min_read_step` destroys the only thing TA asks: which
+   came first. Rows keep them adjacent and let the headline carry the relation. */
+.kv { display:flex; gap:8px; align-items:baseline; font-size:.76rem; margin:4px 0; }
+.kv > span { flex:1; min-width:0; color:var(--text-faint); overflow-wrap:anywhere; }
+.kv > code {
+  flex:none; color:var(--text); font-family:var(--mono); font-variant-numeric:tabular-nums;
+  word-break:break-all;
+}
+.kv > code.zero { color:var(--text-faint); }
+.kv > code.bad { color:var(--bad); }
+.kv > code.ok { color:var(--signal); }
+/* What the category ASKS. Sits ABOVE the facts, because a reader who does not already know the
+   rubric cannot interpret `min_draft_step: 1` after the fact. */
+.module-desc {
+  margin:0 0 9px; font-size:.7rem; color:var(--text-faint); line-height:1.5; overflow-wrap:anywhere;
+}
+/* A CAVEAT about how to read the numbers below — set apart from the server's own description so a
+   reader can tell which text is the rubric's and which is this console's. */
+.module-caveat {
+  margin:0 0 9px; padding-left:8px; border-left:2px solid var(--border-strong);
+  font-size:.68rem; color:var(--text-faint); line-height:1.5; overflow-wrap:anywhere;
+}
+/* A FINDING, not an explanation — run-level problem text, so it reads in the warning colour. */
+.module-note {
+  margin:8px 0 0; font-size:.7rem; color:var(--warn); line-height:1.5; overflow-wrap:anywhere;
+}
+.rubric-list { display:flex; flex-direction:column; gap:14px; }
 
 /* ── trajectory drawer (DESIGN.md §5.7) ─────────────────────────────────── */
 /* Same tokens as everything above — no new colour, no new radius, no vendored asset. The drawer is
@@ -202,33 +339,108 @@ button { font-family:var(--mono); cursor:pointer; }
 .traj-note.live .note-tag { color:var(--signal); }
 .traj-note.info .note-tag { color:var(--text-faint); }
 .traj-note .note-body { color:var(--text-dim); word-break:break-word; }
-.traj-main { flex:1; min-height:0; display:grid; grid-template-columns:220px minmax(0,1fr) 260px; }
-.traj-nav, .traj-side { display:flex; flex-direction:column; min-height:0; }
-.traj-nav { border-right:1px solid var(--border); }
-.traj-side { border-left:1px solid var(--border); }
+/* The timeline is a full-width GANTT STRIP above the two working columns, not a third column.
+   Width is time; a segment is a tab whose top edge carries its tool family's colour. */
+.traj-timeline-wrap { padding:8px 18px 12px; border-bottom:1px solid var(--border); }
+.traj-axis {
+  display:flex; justify-content:space-between; gap:12px; align-items:baseline;
+  font-size:.6rem; color:var(--text-faint); text-transform:uppercase; letter-spacing:.08em;
+  margin-bottom:5px; font-variant-numeric:tabular-nums;
+}
+.traj-axis-note { text-transform:none; letter-spacing:0; min-width:0; overflow-wrap:anywhere; }
+.traj-timeline {
+  display:flex; gap:4px; height:74px; overflow-x:auto; overflow-y:hidden; padding-bottom:4px;
+}
+.traj-main { flex:1; min-height:0; display:grid; grid-template-columns:220px minmax(0,1fr); }
+.traj-nav { display:flex; flex-direction:column; min-height:0; border-right:1px solid var(--border); }
 .traj-col-label {
   font-size:.6875rem; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint);
   padding:10px 12px 4px;
 }
 .traj-col-note { font-size:.66rem; color:var(--text-faint); padding:0 12px 6px; }
-.traj-steps, .traj-timeline {
+.traj-search-wrap { display:flex; align-items:baseline; gap:8px; padding:0 12px 6px; }
+.traj-search {
+  flex:1; min-width:0; padding:6px 9px; border-radius:var(--radius); font-size:.74rem;
+  font-family:var(--mono); background:var(--surface-3); border:1px solid var(--border); color:var(--text);
+}
+.traj-search:focus { outline:none; border-color:var(--signal); box-shadow:0 0 0 1px var(--signal-glow); }
+.traj-search::placeholder { color:var(--text-faint); }
+.traj-search-count {
+  flex-shrink:0; font-size:.62rem; color:var(--text-faint); font-variant-numeric:tabular-nums;
+}
+/* A hit keeps its full weight and gains an amber edge; a miss dims rather than disappearing, so the
+   turn SEQUENCE stays legible — which turn matched matters as much as that one did. */
+.tstep.match { border-left:3px solid var(--warn); }
+.tstep.match .ts-lab { color:var(--warn); }
+.tstep.dim { opacity:.4; }
+.traj-steps {
   flex:1; min-height:0; overflow-y:auto; padding:6px; display:flex; flex-direction:column; gap:3px;
 }
-.tstep, .seg {
+.tstep {
   text-align:left; display:flex; flex-direction:column; gap:2px; padding:7px 9px;
   border-radius:var(--radius); background:transparent; border:1px solid transparent;
   color:var(--text-dim); font-family:var(--mono); min-width:0;
 }
-.tstep:hover, .seg:hover { background:var(--surface-2); }
-.tstep.on, .seg.on { background:var(--surface-3); border-color:var(--border-strong); color:var(--text); }
+/* A segment is a TAB sitting on the axis: family colour on the top edge, the same hue at 11% as its
+   fill, square-bottomed so the strip reads as one ruler rather than a row of pills. `flex-shrink:0`
+   is what makes width mean time — without it flexbox would equalise them back to fitting the row,
+   which is precisely the vertical list this replaced. */
+.seg {
+  flex-shrink:0; overflow:hidden; cursor:pointer; white-space:nowrap;
+  display:flex; flex-direction:column; justify-content:center; gap:3px;
+  padding:8px 10px; text-align:left; font-family:var(--mono); min-width:0;
+  border:1px solid color-mix(in srgb, var(--fam, var(--text-dim)) 40%, var(--border));
+  border-top:3px solid var(--fam, var(--text-dim));
+  background:color-mix(in srgb, var(--fam, var(--text-dim)) 11%, var(--surface-2));
+  border-radius:2px 2px 0 0; color:var(--text-dim);
+}
+.seg:hover { background:color-mix(in srgb, var(--fam, var(--text-dim)) 20%, var(--surface-2)); }
+.seg.on {
+  background:color-mix(in srgb, var(--fam, var(--text-dim)) 28%, var(--surface-2)); color:var(--text);
+  box-shadow:inset 0 0 0 1px var(--fam, var(--border-strong));
+}
+.seg.related { box-shadow:inset 0 0 0 2px var(--signal); }
+.seg-lab { overflow:hidden; text-overflow:ellipsis; }
+/* The turn boundary, as a vertical rule between groups rather than a row of its own — the strip is
+   horizontal now, so "from here = turn N" has to read left-to-right. */
+.turn-mark {
+  flex:0 0 auto; align-self:stretch; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  padding:0 6px; background:transparent; border:none; border-left:2px solid var(--border-strong);
+  color:var(--text-faint); font-size:.58rem; letter-spacing:.02em;
+}
+.turn-mark .tm-lab { font-weight:700; font-variant-numeric:tabular-nums; }
+.turn-mark:hover { color:var(--signal); border-left-color:var(--signal); }
+.turn-mark:focus-visible { outline:2px solid var(--signal); outline-offset:-2px; }
+.turn-mark .tm-arrow { font-size:.72rem; line-height:1; }
+.tstep:hover { background:var(--surface-2); }
+.tstep.on { background:var(--surface-3); border-color:var(--border-strong); color:var(--text); }
 /* The cross-highlight. It only ever fires when `turn_index` is present, which is the ENRICHMENT
    half of §5.7 — neither pane's contents depend on it. */
-.tstep.related, .seg.related { border-color:var(--signal); }
-.seg.seg-bad { border-left:2px solid var(--bad); }
-.seg.seg-unknown { border-left:2px solid var(--warn); }
+.tstep.related { border-color:var(--signal); }
+/* A failed or unrecognised call overrides its family hue — the outcome outranks the taxonomy. */
+.seg.seg-bad { --fam:var(--bad); }
+.seg.seg-unknown { --fam:var(--warn); }
 .ts-lab, .seg-lab { font-size:.76rem; font-weight:600; }
 .ts-sub { font-size:.68rem; color:var(--text-faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ts-dur, .seg-time { font-size:.66rem; color:var(--text-faint); }
+.ts-dur, .seg-time { font-size:.66rem; color:var(--text-faint); font-variant-numeric:tabular-nums; }
+/* Duration as SPACE, not only as text — a sibling consumer's timeline idea, applied to this studio's
+   VERTICAL column instead of its horizontal strip (that strip works because its drawer is full
+   width; here the timeline is one column of a three-track grid). It is not decoration: on the run
+   this was built against, ONE of nine calls took 242.6s of 313.4s — 84.3% — and every other call
+   took 2-8s. In a list of equal-height rows carrying "gap 242.6s" as small grey text, the single
+   fact that dominates the run's wall clock is the easiest thing on the screen to miss. */
+
+/* "from here = Turn N", the boundary marker between turn groups (a sibling consumer's `.turn-mark`). The
+   timeline is otherwise a flat sequence: which calls the planner made INSIDE one turn, versus
+   across turns, is the thing a reader is actually trying to reconstruct. */
+.turn-mark {
+  display:flex; align-items:baseline; gap:6px; padding:6px 9px 2px; margin-top:4px;
+  border-top:1px solid var(--border); color:var(--text-faint); font-size:.62rem;
+  text-transform:uppercase; letter-spacing:.06em;
+}
+.turn-mark:first-child { border-top:none; margin-top:0; }
+.turn-mark .tm-lab { font-weight:700; font-variant-numeric:tabular-nums; color:var(--text-dim); }
 .traj-detail { overflow-y:auto; padding:14px 18px; min-width:0; }
 .det-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
 .det-title { margin:0; font-size:.95rem; }

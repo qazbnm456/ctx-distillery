@@ -143,6 +143,43 @@ def test_dict_events_coerces_a_non_dict_payload_instead_of_crashing_every_consum
     assert [e["step_id"] for e in events] == [1, 2, 3, 4, 5, 6]
 
 
+def test_dict_events_coerces_a_non_dict_META_one_level_deeper():
+    """The SAME failure, one level down, and the one the payload fix did not reach. REGRESSION TEST.
+
+    `rubric_from_meta` unwraps `payload["meta"].get("rubric")`, so a line whose payload IS a dict but
+    whose `meta` is a string sails through both filters above and raises the identical
+    `AttributeError: 'str' object has no attribute 'get'`. It cost `GET /v1/runs/{id}` a 500 the
+    moment that endpoint began serving the rubric criteria, and it had ALREADY cost
+    `ctx-distillery export` an entire bundle for one bad line (reported rather than crashed, but the
+    run's data is lost the same way). `meta` is the only payload key in this workspace that is itself
+    unwrapped with `.get`, which is why it is normalized by name rather than by recursing.
+    """
+    events = dict_events(
+        [
+            {"type": "run_start", "step_id": 0, "payload": {"meta": "nope"}},
+            {"type": "run_start", "step_id": 1, "payload": {"meta": [1, 2]}},
+            {"type": "run_start", "step_id": 2, "payload": {"meta": None}},
+            {"type": "run_start", "step_id": 3, "payload": {"meta": {"planner": "x"}, "other": 1}},
+            {"type": "run_start", "step_id": 4, "payload": {"no_meta": True}},
+        ]
+    )
+    assert len(events) == 5, "a bad meta must not drop the event either"
+    assert events[0]["payload"]["meta"] == {}
+    assert events[1]["payload"]["meta"] == {}
+    assert events[2]["payload"]["meta"] == {}
+    assert events[3]["payload"] == {"meta": {"planner": "x"}, "other": 1}, "a good meta is untouched"
+    assert events[4]["payload"] == {"no_meta": True}, "an absent meta stays absent, not invented"
+
+
+def test_rubric_from_meta_survives_a_non_dict_meta_end_to_end():
+    """The consumer the normalization above exists for — asserted through the REAL function, not
+    only against `dict_events`' output, so deleting the coercion cannot stay green here."""
+    from ctx_distillery.rubric import rubric_from_meta
+
+    events = [{"type": "run_start", "step_id": 0, "ts": 1.0, "payload": {"meta": "nope"}}]
+    assert rubric_from_meta(events).criteria == []
+
+
 def test_dict_events_does_not_mutate_the_caller_s_events():
     """Coercion returns a new dict — a shared events list must not be rewritten under the caller."""
     original = {"type": "tool_call", "step_id": 1, "payload": "oops"}

@@ -610,6 +610,34 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 
 ## Known simplifications (stated, not hidden)
 
+- **A rendered transcript is roughly 85% USER text, and the assistant's THINKING is not available
+  at all.** "Deliberately LOSSY" (invariant 6) understates what that costs on real data, and the
+  ratio is worth knowing before reading any plan this project produces. Measured on one real
+  180 KB transcript, by block type:
+
+  | assistant block | raw JSON | rendered | kept |
+  |---|---|---|---|
+  | `text` | 25,469 | 23,863 | 93.7% |
+  | `tool_use` | 66,152 | 2,080 | 3.1% — becomes `[used tool: X]`, by design |
+  | `thinking` | 299,839 | **0** | **0%** |
+
+  Net: user 153,285 chars vs assistant 27,443 — while the RAW content is the other way round
+  (305,816 vs 392,030). Two separate causes, and only one of them is ours:
+
+  * `tool_use` collapsing to a label is this renderer's deliberate choice, and it is most of what an
+    agent transcript's assistant side consists of.
+  * **`thinking` renders to nothing because Claude Code does not persist the thinking TEXT.** The
+    block is present and carries `type` + `signature` + `thinking`, but `thinking` is the EMPTY
+    STRING and the ~1,840-character `signature` is a crypto signature, not prose. Checked across 60
+    session files: **2,384 thinking blocks, 0 with content.** `_render_block` returning `""` for
+    them is CORRECT — do not "fix" it, and do not reach for `signature`.
+
+  This was found by a user asking why the transcripts looked like only their own messages. The
+  immediate cause of that impression was different again and worth recording so it is not
+  re-diagnosed: the planner's own turn-0 code is
+  `print("\n".join(t.split("\n")[0] for t in transcripts))`, which prints each transcript's FIRST
+  LINE — and a conversation's first line is always `user:`.
+
 - **`read_memory_file` reads through `ArtifactRef.path` directly**, not through a fourth adapter
   method. The ABC answers "what exists" and "give me everything", not "give me one body on
   demand"; every in-scope harness is a local filesystem, so a plain read of the enumerated,

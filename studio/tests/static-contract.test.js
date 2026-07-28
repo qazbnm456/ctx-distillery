@@ -52,11 +52,17 @@ test("the grid owns the viewport height so the page itself never scrolls", () =>
 });
 
 test("every model-supplied field wraps attacker-length tokens", () => {
-  // These three render UNTRUSTED model output inline: a feed row's scalar fields, a candidate's
-  // `key_fields` (which carries `target_path`, a path from a file the model read), and a rubric
-  // value. One unbroken token would otherwise give the whole page a horizontal scrollbar.
-  for (const sel of [".fr-fields", ".candidate-key-fields", ".rubric-fact-value"]) {
-    const rule = css.match(new RegExp("(^|\\n)\\" + sel + "\\s*\\{([^}]*)\\}"));
+  // These render UNTRUSTED model output inline: a feed row's scalar fields, a candidate's
+  // `key_fields` (which carries `target_path`, a path from a file the model read), the stage's
+  // key/value split, and the meta column's fact rows. One unbroken token would otherwise give the
+  // whole page a horizontal scrollbar.
+  //
+  // The list is SELECTORS, so it goes stale silently when a surface is restyled: `.rubric-fact-value`
+  // became `.kv > code` in the meta-column rework and this assertion is what noticed. Whenever a
+  // class here is renamed, move the entry — do not drop it, and do not let the loop shrink.
+  for (const sel of [".fr-fields", ".candidate-key-fields", ".kf-value", ".kv > code"]) {
+    const pattern = sel.replace(/[.>]/g, (c) => "\\" + c).replace(/\s+/g, "\\s*");
+    const rule = css.match(new RegExp("(^|\\n)" + pattern + "\\s*\\{([^}]*)\\}"));
     assert.ok(rule, sel + " rule is missing");
     assert.match(rule[2], /word-break|overflow-wrap/, sel + " must wrap long tokens");
   }
@@ -72,8 +78,28 @@ test("the draft <pre> breaks unbroken tokens, not just at whitespace", () => {
   assert.ok(rule, ".candidate-draft rule is missing");
   assert.match(rule[2], /overflow-wrap\s*:\s*(anywhere|break-word)/,
     ".candidate-draft must break unbroken tokens (pre-wrap breaks at whitespace only)");
-  assert.match(rule[2], /max-height\s*:/, ".candidate-draft must cap its height");
-  assert.match(rule[2], /overflow-y\s*:\s*auto/, ".candidate-draft must scroll inside its own box");
+});
+
+test("exactly ONE scroll track per panel — no nested scroller", () => {
+  // This REPLACED a pair of assertions that required `.candidate-draft` to carry `max-height` and
+  // its own `overflow-y:auto`. Those encoded the old middle column, where ten drafts stacked inline
+  // and each needed its own porthole. In the list -> stage layout the draft IS the stage's content
+  // and `.stage-body` is the track, so a second scroller on the draft would rebuild the exact defect
+  // the redesign removed: a wheel gesture that hands off mid-scroll and throws the reader past what
+  // they were reading. Keeping the old assertions would have passed against `max-height:none`
+  // (`/max-height\s*:/` matches it) while constraining nothing — a contract that cannot fail.
+  const panel = css.match(/(^|\n)\.panel\s*\{([^}]*)\}/);
+  assert.ok(panel, ".panel rule is missing");
+  assert.ok(!/overflow-y\s*:\s*auto/.test(panel[2]),
+    ".panel must not scroll — its ONE designated inner track does");
+  for (const track of [".feed", ".cand-list", ".stage-body"]) {
+    const re = new RegExp("(^|\\n)[^{}]*\\" + track + "\\b[^{}]*\\{([^}]*)\\}", "g");
+    const found = [...css.matchAll(re)].some((m) => /overflow-y\s*:\s*auto/.test(m[2]));
+    assert.ok(found, track + " must be a scroll track");
+  }
+  // The affordance that says a full track continues rather than ends. Every sibling studio carries
+  // it on its feed; this file had dropped it along with the layout it belongs to.
+  assert.match(css, /mask-image\s*:\s*linear-gradient/, "a scroll track must fade at its edges");
 });
 
 test("the derived-state frame classes exist and blocked is the refusal color", () => {

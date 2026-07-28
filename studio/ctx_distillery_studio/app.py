@@ -40,7 +40,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from ctx_distillery.rubric import plan_from_events, trace_facts
+from ctx_distillery.rubric import plan_from_events, rubric_from_meta, trace_facts
 from ctx_distillery.schema import assemble
 from ctx_distillery.trace_io import load_trace
 
@@ -186,14 +186,43 @@ def list_runs() -> JSONResponse:
 
 @app.get("/v1/runs/{run_id}")
 def get_run(run_id: str) -> JSONResponse:
-    """The assembled plan (re-sourced from the trace, never trusted from the plan's own claim) plus
-    the ATLAS rubric facts for the same run — `{"plan": {...}, "rubric_facts": {...}}`. 404 when the
-    trace file doesn't exist; NEVER 500 on a malformed-but-readable trace."""
+    """The assembled plan (re-sourced from the trace, never trusted from the plan's own claim),
+    the ATLAS rubric facts for the same run, and the CRITERIA those facts belong to —
+    `{"plan": {...}, "rubric_facts": {...}, "rubric_criteria": [...]}`. 404 when the trace file
+    doesn't exist; NEVER 500 on a malformed-but-readable trace.
+
+    `rubric_criteria` carries each criterion's own `description`, recovered from the run's
+    `run_start` meta by `rubric.rubric_from_meta`. The console renders it as the note under each
+    module heading, which is what makes a bare `min_draft_step: 1` legible to a reviewer who did
+    not write the rubric. The alternative — four descriptions copied into `app.js` — is the
+    duplication invariant 11 exists to stop: it would drift the moment a criterion is reworded,
+    and silently, because nothing compares the two. Recovered PER RUN rather than from
+    `default_rubric()`, so an OLD trace renders the rubric it actually ran under, not today's.
+    """
     events = _load_trace(run_id)
     plan = plan_from_events(events)
     assembled = assemble(events, plan)
     facts = trace_facts(events)
-    return JSONResponse({"plan": dataclasses.asdict(assembled), "rubric_facts": facts})
+    # Built field by field, NOT `dataclasses.asdict` and not `model_dump()`. `Criterion` is a
+    # PYDANTIC model, so `asdict` raises outright — and the test suite stayed green through that
+    # bug because no fixture trace carries `meta["rubric"]`, so the list was always empty and the
+    # conversion never ran. It took a real trace to fail. An explicit allowlist also means a future
+    # field on `Criterion` cannot ride into an HTTP response unnoticed.
+    criteria = [
+        {
+            "name": getattr(c, "name", ""),
+            "category": getattr(c, "category", ""),
+            "description": getattr(c, "description", ""),
+        }
+        for c in rubric_from_meta(events).criteria
+    ]
+    return JSONResponse(
+        {
+            "plan": dataclasses.asdict(assembled),
+            "rubric_facts": facts,
+            "rubric_criteria": criteria,
+        }
+    )
 
 
 @app.get("/v1/runs/{run_id}/iterations")
