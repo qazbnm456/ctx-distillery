@@ -12,6 +12,36 @@ never applies anything itself.
 
 ## [Unreleased]
 
+### Open questions
+
+Carried forward from `docs/DESIGN.md`'s "Known risks / open questions" and each pass's "What
+stays deferred" sections before those design docs were dropped from the tracked tree (see
+"Removed" below) — per `.claude/rules/handoff.md`'s own rule that open/proposed work belongs here,
+not only in a design doc. Tag format: `[proposed|accepted-not-done|rejected]`.
+
+- `[proposed]` Whether Studio should drive `apply_plan` interactively (tick approvals in the
+  browser, call `apply` from an HTTP handler) — deliberately left open by the Studio design, not
+  resolved by it; needs its own review of whether that still honors "a human reads the plan first."
+- Risk, not a TODO: "safe to prune" is inherently a judgment call and the RLM WILL sometimes be
+  wrong — mitigated structurally by propose-never-apply (see the write-capability invariants), not
+  eliminated.
+- `[proposed]` Re-verify which Claude Code internal file formats to target against the ACTUAL
+  current schema before further implementation — these could change between Claude Code versions.
+- `[proposed]` A real (non-stub) judge wired end-to-end for `ctx-distillery-eval` — ships behind
+  the `judge` extra, not exercised by the offline suite.
+- `[proposed]` Live-drive mode for the Studio (an endpoint that runs a real distillation from the
+  browser) — `run_distillation` has no one-shot, web-callable shape yet.
+
+### Removed — `docs/DESIGN.md` / `docs/IMPL_PLAN.md` dropped from the tracked tree
+
+Neither file is part of this project family's real convention — none of the three already-public
+sibling projects (`cve-reverser`, `diff-sentry`, `toolscout`) track a design-blueprint/
+implementation-plan document, and neither does `rlm-kit` itself. Per `.claude/rules/handoff.md`'s
+own rule, durable knowledge already routes into `CLAUDE.md` (invariants) and this file (shipped
+changes) — the design docs' remaining value was the round-by-round audit narrative and the
+still-open items above, now preserved here instead. Still available locally as working documents
+during active collaboration; no longer committed.
+
 - **`studio/` — a new `ctx-distillery-studio` workspace member (Phase 2 of the rubric/eval/studio
   initiative)** (root `pyproject.toml`'s `[tool.uv.workspace] members` now `["eval", "studio"]`): a
   REPLAY-ONLY FastAPI + zero-build vanilla-JS console over a finished `DistillSession` run's
