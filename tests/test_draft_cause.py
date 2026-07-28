@@ -104,6 +104,32 @@ def test_an_endpoint_error_that_STRINGIFIED_TO_NOTHING_is_not_a_validator_declin
     assert draft_cause({"ok": False, "endpoint_error": ""}) == CAUSE_ENDPOINT
 
 
+def test_the_endpoint_string_is_read_under_error_as_well_as_endpoint_error():
+    """The key set is rlm-kit's (`trace.payload_cause`, `f217cfad`): the consumer convention has
+    recorded the endpoint string under EITHER name, so reading only one classifies the other as a
+    validator rejection — a bare connection failure rendered as the model failing its format check."""
+    assert draft_cause({"ok": False, "error": "502 Bad Gateway"}) == CAUSE_ENDPOINT
+    assert draft_cause({"ok": False, "error": ""}) == CAUSE_ENDPOINT
+
+
+def test_the_kits_TRUTHINESS_test_is_not_adopted_along_with_its_key_set():
+    """The half of `payload_cause` this project deliberately does NOT take, pinned so a future
+    "collapse into the kit" cannot quietly regress it.
+
+    Upstream reads `payload.get("endpoint_error") or payload.get("error")`. Six common transport
+    failures stringify to `''` (measured: `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`,
+    `TimeoutError`, `OSError`, `RemoteDisconnected`), so truthiness sends every one of them down the
+    validator branch — the exact misclassification `payload_cause`'s own docstring exists to prevent.
+    Aliasing `draft_cause` to the kit today would fix the rarer key-name case and regress the common
+    ones. Take the key set, keep the `is not None` test.
+    """
+    for key in ("endpoint_error", "error"):
+        payload = {"ok": False, key: ""}
+        assert draft_cause(payload) == CAUSE_ENDPOINT, key
+        # What upstream's truthiness form would return for the same payload:
+        assert not (payload.get("endpoint_error") or payload.get("error"))
+
+
 def test_the_breaker_outranks_the_endpoint_because_it_is_the_stronger_claim():
     """`make_model_tool` never sets both; the chain makes the four causes partition anyway, which is
     what lets `run_metrics` slice AND total without double-counting."""

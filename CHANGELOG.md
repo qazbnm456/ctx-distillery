@@ -12,6 +12,10 @@ never applies anything itself.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-07-29
+
 - **Subagent-transcript distillation, OPT-IN** (`ClaudeCodeAdapter.for_project(...,
   include_subagents=True)` / `ctx-distillery distill --include-subagents`). The corpus this was
   designed against is 875 subagent transcripts across 11 projects; three of the findings below are
@@ -102,17 +106,6 @@ never applies anything itself.
   `EvalRow`/`EvalReport` fields the design never specified, and it is ill-defined for `score`, whose
   rows come from a glob of traces each with its own composition. The load-bearing half did land:
   `judge.py` states that comparability is per-row and the trace is the authority.
-
-- **Refreshed a stale evidence label: the `memory/` sub-path is CONFIRMED.** `CLAUDE.md` invariant 6,
-  `adapters/claude_code.py`'s module docstring and `ctx_distillery/README.md` all still said the
-  `memory/` directory inside a project's storage was "INHERITED, not re-verified — no `memory/`
-  directory existed on the machine the research ran on". It exists now: **12 of 24 project storage
-  directories carry one, every one a DIRECT child of the project storage directory (exactly where the
-  code looks), holding 51 `.md` files and 9 `MEMORY.md` indexes** — the assumed layout, unchanged.
-  The three sites now cite that observation instead of repeating the adjective. Invariant 6 exists to
-  stop a stale CONFIRMED/UNCONFIRMED label from outliving the evidence that set it, and this is the
-  SECOND time it has caught itself: the project-skills location sat labelled UNCONFIRMED for a long
-  while after a control experiment closed it. The invariant now says so about itself.
 
 - **FIXED — a symlinked `~/.claude` silently yielded ZERO transcripts** (`claude_home`). The helper
   was `Path.home().resolve() / CLAUDE_DIRNAME`, which resolves the home component and leaves
@@ -216,22 +209,12 @@ never applies anything itself.
   judge unconditionally on every run. The fact behind it is `draft_ok`, which answers "did this call
   yield usable bytes", the same answer for all three causes; the description now says that instead.
 
-- **Doc-rot corrections, each independently verified.** (a) `redact.py`, `CLAUDE.md` and `README.md`
-  all claimed `private_key` was "a DOTALL BEGIN/END block matcher gitleaks has no equivalent for —
-  upstream's rules match the header, not the body." **That is FALSE.** The vendored `private-key`
-  regex ends `[\s\S-]{64,}?KEY(?: BLOCK)?-----` — RE2's own DOTALL idiom — and matched a full
-  202-character block at span `(0, 202)`, body included. `CLAUDE.md` contradicted itself eight lines
-  later by listing the pair as redundant-today. The honest justification is REFRESH RESILIENCE, the
-  same one the other redundancies carry; only `bearer_token` (RE2 cannot express its lookbehind) and
-  `secret_assignment` (replacement semantics) are genuinely unavailable from gitleaks, and the
-  redundancy count is **five** of seven, not four. (b) "the golden corpus only reaches 45 of them"
-  matched nothing computable — the corpus has **54** rule ids, **40** with a string the rules
-  actually match, **17** with an upstream true positive; every site now says which. (c) 505 KB vs
-  426 KB for the same transcript measurement, unified on 426. (d) "three lines apart" where the
-  `ModelToolResult` field comments are adjacent. (e) entropy delta 34 → the measured **33**.
-  (f) test-count deltas (+805 claimed vs +1202 measured) replaced with measured per-file numbers.
-  (g) "three things happen at load" vs the four checks `redact.py` enumerates.
-
+- **Seven measured figures corrected across the docs, each independently verified**, and each now
+  stated once at its source rather than restated per site: only **two** of the seven tier-one patterns
+  are genuinely unavailable from gitleaks (`bearer_token`'s lookbehind, `secret_assignment`'s
+  replacement semantics), so the redundancy count is **five**; the golden corpus carries **54** rule
+  ids, **40** with a string the rules match and **17** with an upstream true positive; the reference
+  transcript is **426 KB**; the entropy delta is **33**.
 - **Test-quality gaps closed, each verified by mutation.** `_excerpt`/`_SAMPLE_ECHO_CHARS` (the
   truncated `sample` echo) had ZERO coverage — deleting the truncation left the suite green, so the
   mitigation was a comment; now pinned in both directions. `test_redact_golden.py`'s end-to-end
@@ -398,10 +381,14 @@ never applies anything itself.
   **~110 ms** (tier one alone: ~32 ms) with **zero false positives** on real content.
 
   **Why tier one had to stay, and stay first.** This was the finding that settled the design rather
-  than an act of politeness to the old code. `private_key` is a DOTALL BEGIN/END *block* matcher
-  gitleaks has no equivalent for; `bearer_token` is anchored with a **lookbehind, which RE2 cannot
-  express**, so no gitleaks rule ever will; `secret_assignment` replaces the VALUE ONLY, keeping
-  `api_key = ` legible. And on the real transcript, the operator's own live API key — an
+  than an act of politeness to the old code. EXACTLY TWO of the seven are genuinely unavailable from
+  gitleaks: `bearer_token` is anchored with a **lookbehind, which RE2 cannot express**, so no gitleaks
+  rule ever will; and `secret_assignment` replaces the VALUE ONLY, keeping `api_key = ` legible.
+  (`private_key` is NOT one of them — an earlier draft of this entry called it "a DOTALL BEGIN/END
+  block matcher gitleaks has no equivalent for", which was checked and is FALSE: the vendored
+  `private-key` regex ends `[\s\S-]{64,}?KEY(?: BLOCK)?-----`, RE2's own DOTALL idiom, and matched a
+  full 202-character block at span `(0, 202)`. It stays in tier one for REFRESH RESILIENCE, the same
+  reason the other four redundant patterns do.) And on the real transcript, the operator's own live API key — an
   `sk-<uuid-shaped>` **private-proxy** key — was matched by **none** of the 120 vendored rules,
   because it is not a published provider format. Tier one caught it. An anchored corpus of vendor
   prefixes is structurally blind to a key minted by whoever is in front of you. Running tier one
@@ -970,9 +957,9 @@ never applies anything itself.
 - **`## Versioning` in `CLAUDE.md`** (all three siblings had one; this repo did not) — keep
   `pyproject.toml` `[project].version` and `ctx_distillery.__version__` in sync, fold a bump's changes
   into this file, plus two facts specific to this repo: the two workspace members carry their OWN
-  `version` (both `0.1.0`) and NOTHING checks them, and 0.1.0 is UNRELEASED — `## [Unreleased]` is
-  this file's only version heading, so the first bump is a RENAME of it plus a fresh empty one above,
-  never a new section under a shipped one.
+  `version` (both `0.1.0`) and NOTHING checks them; and the changelog rule that a new version is a
+  RENAME of `[Unreleased]` plus a fresh empty one ABOVE it, never a section added under a shipped
+  one. (That rule was first exercised by the `0.1.0` cut this section heads.)
 - **`pytest-asyncio` / `asyncio_mode = "auto"` DECLINED, recorded as a decision** (`CLAUDE.md`
   `## Verify`). All three siblings carry them; all three of this repo's suites have ZERO async tests,
   and the four async call sites are driven from synchronous tests through explicit `asyncio.run(...)`,
@@ -1081,21 +1068,6 @@ never applies anything itself.
   reviewer and the judge as a bare, actively misleading "proposed no candidates" with no reason
   attached. Fixed once, in the one place; the two sections are now independent, which changes
   nothing for a plan that has candidates or a plan that has neither.
-- **Corrected a stale "UNCONFIRMED" claim that outlived the experiment which closed it.** The
-  project-repo-relative `<project>/.claude/skills/<name>/SKILL.md` location was an unverified
-  hypothesis for exactly one pass; a dedicated control experiment then confirmed it (a scratch
-  directory seeded with a probe skill WAS read by a genuinely fresh `claude -p` process launched
-  inside it — listed and invokable — while a sibling control directory without `.claude/skills/`
-  was not, isolating the effect to the project-relative directory rather than a global leak), and
-  the two caveats it surfaced — a global skill of the same name SHADOWS a project one, and a
-  project's very FIRST skills directory needs a restart to be discovered — were BUILT ON by
-  `make_skill_validator` and `apply_plan._promote_skill`. But that pass never updated the prose:
-  `CLAUDE.md` invariant 6 still said "Nobody has verified it", contradicting its own
-  "Known simplifications" section three screens below, and `ctx_distillery/README.md` and
-  `adapters/claude_code.py` (module docstring and `project_skills_root`) repeated the stale version
-  to users. All four now agree, and the experiment's evidence is recorded in `CLAUDE.md` itself
-  rather than only in the design document that carried it. The historical entry below is left as
-  written — it was accurate when made.
 - **Closed the non-dict trace-line gap the Studio pass explicitly deferred — the shared library
   functions are now hardened, with ONE implementation instead of three.** `rlm_kit.trace.load_events`
   does no shape validation, so a JSONL line that is valid JSON but not an object (`42`, `null`,
@@ -1242,16 +1214,19 @@ never applies anything itself.
   `<claude_home>/projects/<sanitized>/memory`, discovers every sibling `<session-id>.jsonl` as one
   transcript, and points skill enumeration at both skill roots. `home=` overrides `~/.claude`
   everywhere, which is how the tests stay hermetic — no test reads this machine's real `~/.claude`.
-  What the evidence actually supports is stated per-part rather than uniformly: the sanitization rule,
-  the transcript layout, and the global skill layout are CONFIRMED by direct inspection; the `memory/`
-  SUB-PATH is this project's pre-existing assumption carried forward, NOT independently re-verified;
-  and the project-repo-relative `<project>/.claude/skills/` location is an UNCONFIRMED hypothesis
-  (motivated by `.claude/rules/` genuinely being read project-relative) that nobody has verified by
-  seeding a test skill and checking whether Claude Code offers it. This pass targets it as the best
-  available option for project-scoped promotions and claims nothing more. **(Both caveats in this
-  paragraph were later closed and are kept here as the record of what THIS pass claimed — see
-  "Corrected a stale UNCONFIRMED claim" above for the skills control experiment, and the `memory/`
-  sub-path is confirmed too. Do not read this paragraph as current.)**
+  Every part is confirmed, but the EVIDENCE differs and each part says which it rests on — a stale
+  CONFIRMED label outliving the evidence that set it is the failure mode this project has now caught
+  in its own docs twice (`CLAUDE.md` invariant 6 records both). The sanitization rule, the transcript
+  layout and the global skill layout are CONFIRMED by direct inspection. The project-repo-relative
+  `<project>/.claude/skills/` location is CONFIRMED by a dedicated control experiment: a scratch
+  directory seeded with a probe skill WAS read by a genuinely fresh `claude -p` launched inside it
+  (listed and invokable) while a sibling control directory without `.claude/skills/` was not,
+  isolating the effect to the project-relative directory rather than a global leak. Two caveats it
+  surfaced are BUILT ON by `make_skill_validator` and `apply_plan._promote_skill`: a global skill of
+  the same name SHADOWS a project one, and a project's very first skills directory needs a Claude
+  Code restart to be discovered. The `memory/` SUB-PATH began as this project's pre-existing
+  assumption and is CONFIRMED by observation: 12 of 24 real project storage directories carry one,
+  every one a direct child, holding 51 `.md` files and 9 `MEMORY.md` indexes.
 - **A JSONL → text renderer** (`render_transcript_events` / `render_transcript_file`) turning raw
   events into the `list[str]` the pipeline already expects — deliberately LOSSY, and specified rather
   than improvised, covering the shapes really observed on disk: only `user`/`assistant` events are
