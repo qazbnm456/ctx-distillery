@@ -127,6 +127,12 @@ function stopReplay() {
 
 function startReplay(runId) {
   stopReplay();
+  // The one place the live run id is set. `trajectory`'s `getRunId` reads THIS, at click time —
+  // this page can load a second run without a reload, and a snapshot would pin the drawer to the
+  // first one.
+  currentRunId = runId;
+  trajectory.reset();
+  trajectory.showHandle();
   const feed = document.getElementById("feed");
   clear(feed);
   // "replaying…", not "streaming…" — the rows come from a FINISHED trace (there is no live-drive
@@ -321,6 +327,37 @@ function renderRubric(facts) {
     rubricList.appendChild(block);
   }
 }
+
+// -- the Trajectory drawer (static/trajectory.js) ---------------------------------------------
+
+// The run currently loaded into the page. `startReplay` owns it; the drawer READS it through the
+// `getRunId` getter below and never holds a copy.
+let currentRunId = null;
+
+// The drawer's error sink. It renders into the Replay feed rather than owning a status line of its
+// own: a failed `/iterations` fetch happens BEFORE the drawer opens (a drawer that opened empty
+// would be worse than one that does not open), so the message has to land somewhere already on
+// screen. Reuses the feed's existing row classes — `fam-bad` is the refusal edge, per DESIGN.md §3.
+function trajectoryError(message) {
+  const feed = document.getElementById("feed");
+  const row = el("div", "feed-row fam-bad");
+  row.appendChild(el("span", "fr-badge", "trajectory"));
+  const body = el("div", "fr-body");
+  body.appendChild(el("div", "fr-line", message));
+  row.appendChild(body);
+  feed.appendChild(row);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+// The injected-deps roster is deliberately short and honest: `el`/`clear` are the only helpers this
+// file HAS (there is no `esc` — nothing is escaped because nothing becomes markup — no `$`, no
+// `ICONS`, no `tint`, no `fmtBytes`), plus the live-run getter and an error sink.
+const trajectory = window.Trajectory({
+  el: el,
+  clear: clear,
+  getRunId: () => currentRunId,
+  onError: trajectoryError,
+});
 
 // -- theme toggle (persisted, mirrors the sibling studios' convention) ------------------------
 

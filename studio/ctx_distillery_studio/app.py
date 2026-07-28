@@ -18,12 +18,13 @@ returns an in-memory `AssembledPlan` and persists nothing (the whole point of `C
 1). So this studio's sole source of truth, for both discovery and replay, is the trace file itself
 (`{TRACES_DIR}/{run_id}.jsonl`) — there is no second JSON to read alongside it.
 
-Five endpoints:
+Six endpoints:
 - `GET /`                                — serve the frontend shell.
 - `GET /v1/config`                       — `{"traces_dir": ...}` only.
 - `GET /v1/runs`                         — discover run ids by globbing `{TRACES_DIR}/*.jsonl`.
 - `GET /v1/runs/{run_id}`                — the assembled plan + rubric facts, read-only.
 - `GET /v1/runs/{run_id}/events`         — SSE replay of the trace, mapped through `mapper.to_event`.
+- `GET /v1/runs/{run_id}/iterations`     — the per-turn Trajectory breakdown (`iterations.build_iterations`).
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from ctx_distillery.rubric import plan_from_events, trace_facts
 from ctx_distillery.schema import assemble
 from ctx_distillery.trace_io import load_trace
 
+from .iterations import build_iterations
 from .mapper import to_event
 
 # The workspace ROOT that owns this studio/ member (parents[2] of studio/ctx_distillery_studio/app.py).
@@ -169,6 +171,20 @@ def get_run(run_id: str) -> JSONResponse:
     assembled = assemble(events, plan)
     facts = trace_facts(events)
     return JSONResponse({"plan": dataclasses.asdict(assembled), "rubric_facts": facts})
+
+
+@app.get("/v1/runs/{run_id}/iterations")
+def get_iterations(run_id: str) -> JSONResponse:
+    """The Trajectory drawer's data: the run's REPL turns, its tool/sub-LM timeline, and its initial
+    state — `iterations.build_iterations` over the same events every other endpoint reads.
+
+    Deliberately routed through `_load_trace` rather than a local reader. All three sibling studios
+    still carry a non-dict-line 500 in THEIR `/iterations` path (their loader catches only
+    `JSONDecodeError`, so a JSON-valid `42`/`null`/`[1,2,3]` line reaches a `.get(...)` and raises a
+    raw `AttributeError`). Going through `_load_trace` inherits `trace_io.load_trace`'s dict-shape
+    filter, the 404/502 split `docs/DESIGN.md` §5.6 requires as a UI contract, and `_slug_id`
+    sanitization — all three for free, and `iterations.py` itself stays web-dep-free."""
+    return JSONResponse(build_iterations(_load_trace(run_id)))
 
 
 @app.get("/v1/runs/{run_id}/events")

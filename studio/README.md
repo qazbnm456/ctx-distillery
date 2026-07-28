@@ -85,6 +85,7 @@ loopback-bind / auth posture.
 | `GET /v1/runs` | discovers run ids by globbing `{TRACES_DIR}/*.jsonl`, sorted |
 | `GET /v1/runs/{run_id}` | the assembled plan (`ctx_distillery.schema.assemble`) + ATLAS rubric facts (`ctx_distillery.rubric.trace_facts`), re-derived from the trace — never trusted from the plan's own claim |
 | `GET /v1/runs/{run_id}/events` | SSE replay of the trace, mapped through `mapper.to_event` to a stable `distill.*` event vocabulary, paced by an optional `?delay=` |
+| `GET /v1/runs/{run_id}/iterations` | the Trajectory drawer's per-turn breakdown (`iterations.build_iterations`): the run's `initial` state, its REPL turns (reasoning + code + output), and a flat tool/sub-LM `timeline` |
 
 `run_id` is sanitized (`_slug_id`) before it ever becomes a path component — a studio reachable over
 HTTP must not open a path-traversal hole on itself just because this project's own trace files are
@@ -92,13 +93,24 @@ normally trusted.
 
 ## Frontend
 
-Zero-build vanilla JS/CSS (`static/index.html` / `app.js` / `style.css`), no bundler, no
-`node_modules`: a Load box (`GET /v1/runs` feeds a `<datalist>`), the **Replay feed** panel — an SSE
-re-stream of a FINISHED trace, including the planner's own reasoning turns and any sub-LM escalation
-— the PLAN panel — one row per candidate, its `action`/`key_fields` next to its `draft`, rendered
-via `el.textContent = draft` **only** (never `innerHTML` — a drafted memory/skill body is untrusted
-model output, not markup to render) — and a Rubric panel listing `rubric_facts` per ATLAS category.
-A `problems`-carrying candidate is visually flagged, never silently dropped.
+Zero-build vanilla JS/CSS (`static/index.html` / `app.js` / `trajectory.js` / `style.css`), no
+bundler, no `node_modules`: a Load box (`GET /v1/runs` feeds a `<datalist>`), the **Replay feed**
+panel — an SSE re-stream of a FINISHED trace, including the planner's own reasoning turns and any
+sub-LM escalation — the PLAN panel — one row per candidate, its `action`/`key_fields` next to its
+`draft`, rendered via `el.textContent = draft` **only** (never `innerHTML` — a drafted memory/skill
+body is untrusted model output, not markup to render) — and a Rubric panel listing `rubric_facts` per
+ATLAS category. A `problems`-carrying candidate is visually flagged, never silently dropped.
+
+Plus the **Trajectory drawer** (`static/trajectory.js`, a `window.Trajectory(deps)` factory over
+`GET /v1/runs/{id}/iterations`, opened from a `◫ Trajectory` handle): a turn nav, a detail pane
+rendering each turn's reasoning + its REPL `code`/`output`, and a FLAT tool/sub-LM timeline. The
+timeline never depends on `turn_index` — that field exists only when `per_turn_timing` is true, which
+no offline trace is — so it stays populated on every trace; `turn_index` only drives a cross-highlight
+when it is really there. The no-`innerHTML` rule is sharpest here: a turn's `output` is the REPL's own
+echo and does carry drafted bodies and evidence, so **rendering it as text IS the mitigation** —
+`iterations.py`'s leak tests cover `timeline` and `initial`, not turn text. There are no transport
+controls, no progress bar and no expand button; see `DESIGN.md` §5.7 for why each is absent rather
+than missing.
 
 The feed panel is labelled **Replay feed** and its status reads `replaying…`. It used to say "Live
 feed" / "streaming…", which promised a capability this backend does not have (there is no
@@ -130,8 +142,13 @@ e.g. `pip install -e . -e ./studio` from the repo root.
 
 `tests/static-contract.test.js` pins the CSS/JS rules that regress silently because nothing in the
 Python suite opens a browser — the `[hidden]` guard, the `.layout` viewport-height pin, `word-break`
-on every model-supplied field, the draft `<pre>`'s `overflow-wrap`, the §2 derived-state frame
-classes, the responsive stack, and the absolute no-`innerHTML` rule. Plain CommonJS, run directly:
+on every model-supplied field, the draft `<pre>`'s and the drawer well's `overflow-wrap`, the §2
+derived-state frame classes, the responsive stack, and the absolute no-`innerHTML` rule, which scans
+**every `static/*.js`** (it read only `app.js` until `trajectory.js` existed) and asserts it really
+found the files it exists to police. `tests/trajectory.test.js` is the drawer factory's
+dependency-injection contract: a stub DOM, the facade shape, a missing injected dep refused at
+construction, and proof that `getRunId` is re-consulted rather than snapshotted. Plain CommonJS, run
+directly:
 
 ```sh
 for f in studio/tests/*.test.js; do node "$f"; done

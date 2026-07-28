@@ -36,13 +36,40 @@ from rlm_kit.trace import load_events
 
 
 def dict_events(events: Iterable[object]) -> list[dict]:
-    """Keep only dict-shaped entries — the shape every consumer in this workspace assumes.
+    """Normalize to the shape every consumer in this workspace assumes: a dict with a dict `payload`.
 
-    Silently DROPS anything else rather than raising: a malformed line is a corrupt-input problem
-    for whichever human reads the trace, never a reason to crash a batch scoring run or a studio
-    replay over one bad line in one file.
+    Two normalizations, and the second was added after the first turned out to be only half the job:
+
+    * a non-dict ENTRY (`42`, `null`, `"x"`, `[1,2,3]`) is DROPPED. A malformed line is a
+      corrupt-input problem for whichever human reads the trace, never a reason to crash a batch
+      scoring run or a studio replay over one bad line in one file.
+    * an entry whose `payload` is present but NOT a dict is KEPT with its payload coerced to `{}`.
+
+    **Why the second one is not covered by the first.** Every consumer in the workspace unwraps with
+    the idiom `(event.get("payload") or {}).get(...)`, which absorbs `None` and other falsy values
+    but NOT a truthy non-dict: `("oops" or {})` is `"oops"`, and `.get` on a `str` raises
+    `AttributeError`. So a line that is a perfectly well-formed JSON OBJECT — passing the filter
+    above — still crashed `rubric.trace_facts`, `session.assemble` and the studio's
+    `/v1/runs/{id}/iterations` with a 500, which is exactly the guarantee `CLAUDE.md` invariant 10
+    says this module exists to provide. Found by an adversarial review of the drawer pass.
+
+    Coerced rather than dropped, deliberately: the entry's `type`/`step_id`/`ts`/`run_id` envelope is
+    still true and still orders the trace, so discarding the whole event would lose more than the
+    corruption did. A consumer sees an event with no payload fields, which every one of them already
+    handles — that is the shape a legitimately payload-less event has.
+
+    Fixing it HERE rather than at the ~12 unwrap sites is the same reasoning invariant 11 gives for
+    `plan_from_events`: one implementation, so a future consumer inherits the guarantee instead of
+    having to remember it.
     """
-    return [event for event in events if isinstance(event, dict)]
+    out: list[dict] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if "payload" in event and not isinstance(event["payload"], dict):
+            event = {**event, "payload": {}}
+        out.append(event)
+    return out
 
 
 def load_trace(path: str, run_id: str | None = None) -> list[dict]:

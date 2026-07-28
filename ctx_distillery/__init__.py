@@ -10,6 +10,7 @@ Public surface::
 
     from ctx_distillery import DistillConfig, setup, make_chat_fn, main   # drive a run
     from ctx_distillery import DistillSession, run_distillation           # the task + its driver
+    from ctx_distillery import run_distillation_artifacts, DistillArtifacts  # ... + what it drew from
     from ctx_distillery import DistillPlan, DistillCandidate, DistillAction     # the SUBMIT shape
     from ctx_distillery import AssembledPlan, AssembledCandidate, assemble      # the read side
     from ctx_distillery import HarnessAdapter, ArtifactRef, ClaudeCodeAdapter   # the harness seam
@@ -159,7 +160,9 @@ __all__ = [  # noqa: RUF022
     "rubric_signal",
     # dspy-bearing (lazy):
     "DistillSession",
+    "DistillArtifacts",
     "run_distillation",
+    "run_distillation_artifacts",
     "main",
 ]
 
@@ -175,6 +178,17 @@ def __getattr__(name: str):  # PEP 562 — defer the dspy import to first use
         from . import session
 
         return session.run_distillation
+    if name == "run_distillation_artifacts":
+        from . import session
+
+        return session.run_distillation_artifacts
+    if name == "DistillArtifacts":
+        # A dataclass, not a callable seam — but it is DEFINED in the dspy-bearing `session.py`
+        # (its `plan` field is the driver's own return shape), so it belongs in the lazy block
+        # rather than the eager one. `tests/test_public_api.py::test_all_names_resolve` getattrs it.
+        from . import session
+
+        return session.DistillArtifacts
     if name == "main":
         from . import cli
 

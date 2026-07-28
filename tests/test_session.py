@@ -23,9 +23,11 @@ from rlm_kit.trace import EVENT_TOOL_CALL, load_events
 from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
 from ctx_distillery.session import (
     AssembledPlan,
+    DistillArtifacts,
     assemble,
     render_memory_index,
     run_distillation,
+    run_distillation_artifacts,
 )
 from ctx_distillery.task import DistillCandidate, DistillPlan
 
@@ -304,3 +306,75 @@ def test_run_distillation_writes_nothing_into_the_memory_store(memory_dir, tmp_p
         )
     )
     assert sorted(p.name for p in memory_dir.iterdir()) == before
+
+
+# -- run_distillation_artifacts: the same run, with what it was drawn from ----------------------
+
+
+def test_run_distillation_artifacts_returns_the_redacted_transcripts_the_run_saw(memory_dir, tmp_path):
+    """The reason this function exists: the judge (`eval/`'s `run`) must read the SAME redaction the
+    planner did. Re-`ingest()`ing and re-`redact()`ing would score against a different one, and the
+    trace records only offset/length metadata for a transcript, never the body — so a trace-sourced
+    substitute would be EMPTY, not merely lossier."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    adapter = ClaudeCodeAdapter(memory_dir, transcripts=["user: the key is " + _SECRET + "\n"])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    assert isinstance(artifacts, DistillArtifacts)
+    assert len(artifacts.transcripts) == 1
+    assert _SECRET not in artifacts.transcripts[0]
+    assert "[REDACTED:api_key]" in artifacts.transcripts[0]
+    assert artifacts.run_id == "r0"
+    assert artifacts.trace_path == str(tmp_path / "trace.jsonl")
+    assert artifacts.events and all(isinstance(e, dict) for e in artifacts.events)
+    assert isinstance(artifacts.plan, AssembledPlan)
+    assert artifacts.memory_index == adapter.list_targets()
+
+
+def test_run_distillation_artifacts_reports_a_generated_run_id(memory_dir, tmp_path):
+    """A caller passing `run_id=None` could previously never learn which id was generated for it —
+    and that id is the key every downstream reader (`load_trace(..., run_id=)`, the eval's task
+    pairing, the studio's replay) is keyed on."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    adapter = ClaudeCodeAdapter(memory_dir, transcripts=["t"])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    assert artifacts.run_id
+    assert {e.get("run_id") for e in artifacts.events} == {artifacts.run_id}
+
+
+def test_run_distillation_is_a_thin_wrapper_returning_exactly_the_same_plan(memory_dir, tmp_path):
+    """`run_distillation`'s signature AND return type are UNCHANGED — the artifacts function was
+    ADDED beside it, not folded into it, so no existing caller needed an edit."""
+
+    def drive(fn, name):
+        # Re-scripted per drive: `scripted_lm` hands out a FIXED list of turns, so the second run in
+        # one test would otherwise fall off the end of the first's script.
+        _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+        return asyncio.run(
+            fn(
+                ClaudeCodeAdapter(memory_dir, transcripts=["t"]),
+                lambda spec: _DRAFT,
+                str(tmp_path / f"{name}.jsonl"),
+                run_id=name,
+                interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+            )
+        )
+
+    plan = drive(run_distillation, "wrapper")
+    artifacts = drive(run_distillation_artifacts, "full")
+    assert isinstance(plan, AssembledPlan)
+    assert plan == artifacts.plan

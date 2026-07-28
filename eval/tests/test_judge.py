@@ -116,6 +116,66 @@ def test_build_prompt_states_the_absence_when_no_transcripts_are_supplied():
     assert "(none supplied)" in build_prompt(PLAN_TEXT, [])
 
 
+# -- the judge-only reference slot (the taskset pass) ----------------------------------------------
+
+REFERENCE = "Expected plan: promote the merge-freeze rule; prune the debugging session."
+
+
+def test_build_prompt_renders_the_reference_section_when_there_is_one():
+    prompt = build_prompt(PLAN_TEXT, TRANSCRIPTS, REFERENCE)
+    assert "=== REFERENCE (judge-only; the planner never saw this) ===" in prompt
+    assert REFERENCE in prompt
+
+
+def test_build_prompt_omits_the_reference_section_entirely_when_there_is_none():
+    """THE decision this pass made explicitly, where the siblings render an unconditional
+    "(no reference provided; …)" fallback: every sibling ALWAYS has a taskset, and this package's
+    primary path (`score` without `--taskset`) usually does not. So the no-reference prompt must be
+    byte-identical to `atlas-ctxd-eval-v1`'s rather than gaining a permanent placeholder line."""
+    prompt = build_prompt(PLAN_TEXT, TRANSCRIPTS)
+    assert "REFERENCE" not in prompt
+    assert "no reference provided" not in prompt
+    assert prompt == build_prompt(PLAN_TEXT, TRANSCRIPTS, "")
+    assert prompt == build_prompt(PLAN_TEXT, TRANSCRIPTS, "   \n ")  # whitespace-only is absent too
+
+
+def test_the_untrusted_data_fence_accounts_for_the_reference_only_when_it_is_rendered():
+    """`UNTRUSTED_DATA_RULE` enumerates exactly two bodies ("The PLAN and the TRANSCRIPT(S) below").
+    A third section appearing under it unaccounted for would leave the fence ambiguous about the one
+    thing it does not name — so the trust sentence rides along with the section, and only with it.
+
+    And it says TRUSTED, deliberately: a taskset reference is human-authored, reviewed in a diff, and
+    is the only body in this prompt that is neither model output nor a recording of someone else's
+    session. That is a different provenance from the other two, and the fence must not flatten them.
+    """
+    with_ref = build_prompt(PLAN_TEXT, TRANSCRIPTS, REFERENCE)
+    without = build_prompt(PLAN_TEXT, TRANSCRIPTS)
+    assert judge_mod.UNTRUSTED_DATA_RULE in with_ref and judge_mod.UNTRUSTED_DATA_RULE in without
+    assert judge_mod.REFERENCE_TRUST_RULE.strip() in with_ref
+    assert judge_mod.REFERENCE_TRUST_RULE.strip() not in without
+    assert "TRUSTED input" in with_ref
+
+
+def test_every_judge_in_this_package_accepts_the_third_argument():
+    """The `Judge` protocol widened to three positional arguments, so all three implementations had
+    to widen identically — `score.score_run` passes the reference POSITIONALLY."""
+    assert StubJudge()(PLAN_TEXT, TRANSCRIPTS, REFERENCE).ok
+    live = make_eval_judge(EvalJudgeConfig(), chat_fn=lambda prompt: GOOD)
+    assert live(PLAN_TEXT, TRANSCRIPTS, REFERENCE).ok
+
+
+def test_the_live_judge_forwards_the_reference_into_the_rendered_prompt():
+    seen = {}
+
+    def chat(prompt: str) -> str:
+        seen["prompt"] = prompt
+        return GOOD
+
+    make_eval_judge(EvalJudgeConfig(), chat_fn=chat)(PLAN_TEXT, TRANSCRIPTS, REFERENCE)
+    assert seen["prompt"] == build_prompt(PLAN_TEXT, TRANSCRIPTS, REFERENCE)
+    assert REFERENCE in seen["prompt"]
+
+
 # -- the three unscored paths, and the happy one ---------------------------------------------------
 
 
@@ -228,11 +288,61 @@ def test_config_defaults_to_no_live_judge_and_a_60s_hard_timeout():
     assert c.model == "" and c.base_url is None and c.api_key == "" and c.timeout == 60.0
 
 
+def test_a_nan_score_is_refused_rather_than_silently_awarded_full_marks():
+    """NaN is a WORSE bug than the bool case above, and the clamp is what makes it worse.
+
+    Reported from a sibling project and reproduced HERE before fixing. Two layers conspire:
+    `isinstance(nan, (int, float))` is True (NaN *is* a float, so the type gate passes it), and then
+    EVERY comparison with NaN is False — so `min(10.0, nan)` returns 10.0 and `max(0.0, 10.0)`
+    returns 10.0. The clamp does not merely fail to reject NaN, it AWARDS FULL MARKS. Measured on
+    this module before the fix: `_clamp(float("nan")) == 10.0`.
+
+    The trigger is real. `json.loads` accepts a bare `NaN` literal by default (it is not standard
+    JSON, but Python's decoder emits `float('nan')` for it), so a provider's JSON mode does not stop
+    it. And the damage propagates: one poisoned row dragged a two-row TF mean from a truthful 2.0 to
+    6.0, because `compute_means` cannot tell a fabricated 10 from a real one.
+
+    This contradicted this module's own stated position — "there is no default-to-5 anywhere: the run
+    lands `unscored`, never a guessed score". A NaN was not landing on 5. It was landing on 10.
+
+    `inf` is deliberately NOT special-cased: it clamps to 10.0, which is the correct reading of
+    "larger than the top of the scale". Only NaN is meaningless, and only NaN defeats the clamp.
+    """
+    import math
+
+    assert math.isnan(json.loads('{"x": NaN}')["x"]), "the trigger path itself must still be real"
+
+    # Note `-NaN` is NOT a second case to add here: Python's decoder accepts `NaN`, `Infinity` and
+    # `-Infinity` but rejects `-NaN` outright, so it would fail at the JSON layer and never reach
+    # the check under test — a hollow assertion dressed as extra coverage.
+    for payload in (
+        '{"scores": {"TF": NaN, "TA": 5, "TG": 5, "PA": 5}}',
+        '{"scores": {"TF": 5, "TA": 5, "TG": 5, "PA": NaN}}',
+    ):
+        v = parse_eval_json(payload)
+        assert v.ok is False, "a NaN score must be refused, never clamped to full marks"
+        assert any("NaN" in e for e in v.errors), v.errors
+        assert v.scores == {}, "no partial scores survive a refused parse"
+
+    # ...and the neighbouring infinities still CLAMP, which is the right answer for them.
+    fine = parse_eval_json('{"scores": {"TF": Infinity, "TA": -Infinity, "TG": 5, "PA": 5}}')
+    assert fine.ok is True
+    assert (fine.scores["TF"], fine.scores["TA"]) == (10.0, 0.0)
+
+
 def test_prompt_version_is_pinned():
     """Pinned so a scorecard's number is attributable to the prompt that produced it. Bumping this is
-    the deliberate cost of changing `build_prompt` — including adding the judge-only `reference` slot
-    the deferred taskset work would need."""
-    assert PROMPT_VERSION == "atlas-ctxd-eval-v1"
+    the deliberate cost of changing `build_prompt`.
+
+    **v1 -> v2, and this assertion was updated DELIBERATELY, not to make a red test green.** The v1
+    docstring here named the judge-only `reference` slot as the change that would have to bump the
+    constant; the taskset pass added it (`build_prompt`'s third argument, the `=== REFERENCE ===`
+    section, and `REFERENCE_TRUST_RULE`), so it bumped. Note the subtlety this pin cannot express and
+    the next test can: with NO reference the rendered v2 prompt is byte-identical to v1's. The
+    version still moves, because provenance is per-REPORT — a scorecard cannot say "v1 for some rows,
+    v2 for others".
+    """
+    assert PROMPT_VERSION == "atlas-ctxd-eval-v2"
 
 
 def test_openai_is_imported_lazily_inside_the_chat_closure_never_at_module_level():

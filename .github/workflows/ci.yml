@@ -126,4 +126,9 @@ jobs:
         with:
           enable-cache: true
       - name: Lint
-        run: uvx ruff check .
+        # PINNED deliberately. `uvx ruff check .` resolves the LATEST ruff at run time, so a
+        # release that widens the DEFAULT rule set turns this job red with nobody having touched a
+        # line of code — ruff 0.16's expansion did exactly that to two sibling projects (256 and 224
+        # fresh errors, same pyproject, same source). Bump this pin on purpose, and land the
+        # resulting fixes in the SAME commit as the bump.
+        run: uvx ruff@0.16.0 check .

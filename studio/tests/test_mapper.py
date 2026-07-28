@@ -162,3 +162,42 @@ def test_scalar_fields_drops_tool_ok_args_and_any_bulky_or_nested_value():
         }
     )
     assert out == {"name": "conventions", "kind": "memory", "chars": 42, "truncated": False}
+
+
+def test_scalar_fields_never_streams_a_filesystem_path_or_a_refusal_note():
+    """A REGRESSION TEST for a real leak an adversarial review found in shipped code.
+
+    This project's evidence reads run against the operator's OWN `~/.claude` store, so
+    `read_memory_file` records `resolved_path` as an absolute path like
+    `/Users/<you>/.claude/projects/-Users-<you>-<project>/memory/<file>.md`, and its refusal `note`
+    embeds a model-supplied path verbatim inside a sentence. Both are SHORT strings, so the
+    `_MAX_SCALAR` length guard never caught them — and `app.js` renders the whole data object into
+    the live feed. The path identifies the machine and the account; nothing a plan reviewer needs.
+
+    Two independent guards, and this test pins BOTH: the key names are dropped outright, and any
+    value that LOOKS like a path is dropped whatever key it arrives under, so a future tool
+    recording one under a new name cannot silently reopen the hole.
+    """
+    home_path = "/Users/somebody/.claude/projects/-Users-somebody-proj/memory/conventions.md"
+    out = _scalar_fields(
+        {
+            "tool": "read_memory_file",
+            "ok": True,
+            "name": "conventions",
+            "kind": "memory",
+            "resolved_path": home_path,
+            "note": f"no memory artifact at {home_path}",
+            "chars": 812,
+            "truncated": False,
+        }
+    )
+    assert out == {"name": "conventions", "kind": "memory", "chars": 812, "truncated": False}
+    assert home_path not in str(out)
+    assert "somebody" not in str(out)
+
+    # The by-shape half: a path under a key the drop-set has never heard of.
+    assert _scalar_fields({"some_future_key": home_path}) == {}
+    assert _scalar_fields({"rel": "./local/thing.md", "up": "../escape.md"}) == {}
+
+    # ...without over-dropping: an ordinary sentence that merely CONTAINS a slash is not a path.
+    assert _scalar_fields({"msg": "read 3 of 5 chunks a/b"}) == {"msg": "read 3 of 5 chunks a/b"}

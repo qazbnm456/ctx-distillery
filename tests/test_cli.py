@@ -166,6 +166,59 @@ def test_from_env_reads_the_endpoint_and_budget_vars(monkeypatch):
     assert (cfg.max_iterations, cfg.max_llm_calls) == (7, 2)
 
 
+def test_the_planner_generation_cap_and_adapter_are_reachable_from_the_env(monkeypatch):
+    """Both were UNPASSED to `RLMConfig` and unreachable from `CD_*` — a real, reported defect.
+
+    `max_tokens` is not a tuning knob here, it is a failure mode. rlm-kit defaults it to 8192, and
+    dspy reads `content` while DISCARDING `reasoning_content` — so a reasoning planner's
+    chain-of-thought is billed against a cap it never appears in. It then dies one of two ways
+    (reasoning exhausts the cap -> empty `content`; or the answer is cut mid-JSON), and BOTH are
+    terminal because `setup` pins `max_retries=1` on purpose. A sibling project hit exactly this on
+    its first live turn. The default is the recommended planner value, not rlm-kit's.
+    """
+    monkeypatch.setenv("CD_ROOT_LM", "planner")
+    assert config.DistillConfig.from_env().planner_max_tokens == 16384
+    assert config.DistillConfig.from_env().adapter == "json"
+
+    monkeypatch.setenv("CD_PLANNER_MAX_TOKENS", "32768")
+    monkeypatch.setenv("CD_ADAPTER", "chat")
+    cfg = config.DistillConfig.from_env()
+    assert (cfg.planner_max_tokens, cfg.adapter) == (32768, "chat")
+
+
+def test_a_bogus_adapter_is_refused_in_from_env_like_every_other_CD_mistake(monkeypatch):
+    """`CD_ADAPTER` refuses HERE, with the same clean `SystemExit` the rest of the surface gives.
+
+    Two rounds. This test first pinned only that `setup` PASSED `adapter` to `RLMConfig` at all —
+    while it went unpassed, any value of `CD_ADAPTER` was silently inert, so reaching rlm-kit's own
+    `KNOWN_ADAPTERS` validation was the property worth having. A review then pointed out that
+    `CD_ADAPTER` was the ONE variable on this surface whose typo produced a raw traceback from deep
+    inside `RLMConfig.__post_init__`, where `CD_ROOT_LM`, `CD_INTERPRETER` and every non-integer
+    budget give a clean, actionable `SystemExit`. Consistency on an env surface is not cosmetic —
+    it is the difference between "I typed it wrong" and "the tool is broken".
+
+    rlm-kit still validates independently; this is a second gate, not a replacement, and the mirrored
+    vocabulary is pinned by `test_the_known_adapters_match_rlm_kits` below.
+    """
+    monkeypatch.setenv("CD_ROOT_LM", "planner")
+    monkeypatch.setenv("CD_ADAPTER", "nonsense")
+    with pytest.raises(SystemExit) as excinfo:
+        config.DistillConfig.from_env()
+    assert "nonsense" in str(excinfo.value) and "json" in str(excinfo.value)
+
+    # Case matters, and saying so beats a mysterious failure: rlm-kit's set is lower-case.
+    monkeypatch.setenv("CD_ADAPTER", "JSON")
+    with pytest.raises(SystemExit):
+        config.DistillConfig.from_env()
+
+
+def test_the_known_adapters_match_rlm_kits(monkeypatch):
+    """Our mirrored vocabulary must equal rlm-kit's, or we would refuse a value the kit accepts."""
+    from rlm_kit.config import KNOWN_ADAPTERS
+
+    assert set(config._KNOWN_ADAPTERS) == set(KNOWN_ADAPTERS)
+
+
 def test_from_env_refuses_a_non_integer_budget(monkeypatch):
     monkeypatch.setenv("CD_ROOT_LM", "planner")
     monkeypatch.setenv("CD_MAX_ITERATIONS", "lots")

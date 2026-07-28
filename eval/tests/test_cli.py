@@ -10,11 +10,14 @@ transcript, and (below) a malformed trace line taking down an entire scoring bat
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from ctx_distillery_eval.cli import _pick_judge, _read_transcripts, main, render_scorecard
 from ctx_distillery_eval.judge import PROMPT_VERSION, JudgeVerdict, StubJudge
 from ctx_distillery_eval.schema import EvalReport, EvalRow, EvalScore
-from rlm_kit.trace import TraceRecorder, record_tool_call
+from rlm_kit.trace import EVENT_RESULT, TraceRecorder, record_tool_call
 
 from ctx_distillery.task import DistillCandidate, DistillPlan
 
@@ -177,7 +180,7 @@ def test_score_command_exits_non_zero_when_the_judge_scored_nothing(tmp_path, tr
     dead judge prints a table of `--` and exits 0, which reads as a pass."""
     _recorded_trace(tmp_path / "good.jsonl", "good-run")
 
-    def dead_judge(plan_text, transcript_texts):
+    def dead_judge(plan_text, transcript_texts, reference=""):
         return JudgeVerdict(ok=False, reason="judge endpoint error: connection refused")
 
     monkeypatch.setattr("ctx_distillery_eval.cli._pick_judge",
@@ -194,3 +197,217 @@ def test_score_command_footer_names_the_stub_on_the_offline_path(tmp_path, trans
     footer = capsys.readouterr().out.strip().splitlines()[-1]
     assert "n=1 (0 unscored)" in footer and "judge=stub" in footer
     assert "prompt=" not in footer  # the stub claims no prompt provenance
+
+
+# -- `score --taskset`: the OPTIONAL reference source -----------------------------------------
+
+
+def _taskset(path, *entries):
+    path.write_text(json.dumps(list(entries)), encoding="utf-8")
+    return str(path)
+
+
+def _reference_spy(seen):
+    def judge(plan_text, transcript_texts, reference=""):
+        seen.append(reference)
+        return JudgeVerdict(ok=True, score=EvalScore(TF=5, TA=5, TG=5, PA=5))
+    return judge
+
+
+def test_score_taskset_pairs_a_reference_onto_the_matching_run_id(tmp_path, transcript_file,
+                                                                  monkeypatch):
+    """The pairing is `Task.run_id == EvalTask.id`, and `collect_tasks` reads the trace ENVELOPE's
+    run_id — so a `run`-produced `<id>-<stamp>.jsonl` filename pairs just as well as `<id>.jsonl`."""
+    _recorded_trace(tmp_path / "good-run-20260728T000000Z.jsonl", "good-run")
+    ts = _taskset(tmp_path / "ts.json", {"id": "good-run", "reference": "expected: promote X"})
+    seen: list[str] = []
+    monkeypatch.setattr("ctx_distillery_eval.cli._pick_judge",
+                        lambda force_stub: (_reference_spy(seen), "judge-x", PROMPT_VERSION))
+    assert main(["score", str(tmp_path / "*.jsonl"), str(transcript_file), "--taskset", ts]) == 0
+    assert seen == ["expected: promote X"]
+
+
+def test_score_without_a_taskset_passes_no_reference_at_all(tmp_path, transcript_file, monkeypatch):
+    """`--taskset` is OPTIONAL and the two positionals did not move — the shipped `score` contract is
+    unchanged, and the no-taskset path renders the byte-identical v1 prompt."""
+    _recorded_trace(tmp_path / "good.jsonl", "good-run")
+    seen: list[str] = []
+    monkeypatch.setattr("ctx_distillery_eval.cli._pick_judge",
+                        lambda force_stub: (_reference_spy(seen), "judge-x", PROMPT_VERSION))
+    assert main(["score", str(tmp_path / "*.jsonl"), str(transcript_file)]) == 0
+    assert seen == [""]
+
+
+def test_score_taskset_leaves_an_undescribed_run_with_an_empty_reference(tmp_path, transcript_file,
+                                                                        monkeypatch):
+    """A run the taskset does not mention is scored WITHOUT a reference, never skipped and never
+    refused: scoring traces a taskset does not describe is the normal case here, not an error."""
+    _recorded_trace(tmp_path / "a.jsonl", "described")
+    _recorded_trace(tmp_path / "b.jsonl", "not-described")
+    ts = _taskset(tmp_path / "ts.json", {"id": "described", "reference": "R"})
+    seen: list[str] = []
+    monkeypatch.setattr("ctx_distillery_eval.cli._pick_judge",
+                        lambda force_stub: (_reference_spy(seen), "judge-x", PROMPT_VERSION))
+    assert main(["score", str(tmp_path / "*.jsonl"), str(transcript_file), "--taskset", ts]) == 0
+    assert sorted(seen) == ["", "R"]
+
+
+def test_score_refuses_a_malformed_taskset_the_operator_explicitly_passed(tmp_path, transcript_file):
+    """Asymmetry with the case above, and it is deliberate: a run the taskset does not describe is
+    normal, but a taskset FILE that cannot be read is a typo to fix, not a condition to degrade past."""
+    _recorded_trace(tmp_path / "good.jsonl", "good-run")
+    bad = _taskset(tmp_path / "ts.json", {"reference": "no id here"})
+    with pytest.raises(ValueError):
+        main(["score", str(tmp_path / "*.jsonl"), str(transcript_file), "--taskset", bad])
+
+
+# -- `run`: the drive-then-score subcommand ----------------------------------------------------
+
+
+class _FrozenClock:
+    """Just enough of `datetime` for `_run_command`'s one `datetime.now(UTC).strftime(...)` call."""
+
+    def __init__(self, stamp: str) -> None:
+        self._stamp = stamp
+
+    def now(self, _tz=None):
+        return self
+
+    def strftime(self, _fmt):
+        return self._stamp
+
+
+class _FakeArtifacts:
+    """The `DistillArtifacts` fields `_run_command` reads. A real one needs dspy + a live model."""
+
+    def __init__(self, trace_path, run_id):
+        self.trace_path = str(trace_path)
+        self.run_id = run_id
+        self.events = [
+            {"type": EVENT_RESULT,
+             "payload": {"output": DistillPlan(
+                 candidates=[DistillCandidate(action="keep", key_fields={"reason": "still true"})]
+             ).model_dump()}}
+        ]
+        self.transcripts = ["a redacted transcript the run actually saw"]
+
+
+def test_run_demo_materializes_drives_and_scores(tmp_path, monkeypatch, capsys):
+    """The happy path end to end, with the DRIVE stubbed at `_drive` (a real one needs `CD_*`
+    credentials and a sandbox, which CI has neither of). Everything else is real: the demo taskset is
+    genuinely materialized under `--out`, the trace filename is derived, the rows are scored by the
+    stub judge and the scorecard is rendered."""
+    driven: list[tuple[str, str]] = []
+
+    def fake_drive(task, trace_path):
+        driven.append((task.id, str(trace_path)))
+        return _FakeArtifacts(trace_path, task.id)
+
+    monkeypatch.setattr("ctx_distillery_eval.cli._drive", fake_drive)
+    assert main(["run", "demo", "--out", str(tmp_path), "--stub"]) == 0
+
+    assert [task_id for task_id, _ in driven] == ["demo-durable-fact", "demo-one-off-debugging"]
+    # the demo taskset really materialized, under --out and nowhere else
+    assert (tmp_path / "demo" / "demo-durable-fact").is_dir()
+    assert (tmp_path / "demo" / "claude-home" / "projects").is_dir()
+    out = capsys.readouterr().out
+    assert "demo-durable-fact" in out and "demo-one-off-debugging" in out
+    assert "n=2 (0 unscored)" in out and "judge=stub" in out
+
+
+def test_run_gives_each_invocation_a_unique_trace_filename_but_keeps_run_id(tmp_path, monkeypatch):
+    """`TraceRecorder` APPENDS and `os.remove` is forbidden in this project, so a second `run` of the
+    same taskset must not write into the first's file — the FILENAME carries a UTC stamp while the
+    run_id stays `task.id`, which is what `score --taskset`'s pairing keys on."""
+    seen: list[str] = []
+
+    def fake_drive(task, trace_path):
+        seen.append(Path(trace_path).name)
+        return _FakeArtifacts(trace_path, task.id)
+
+    monkeypatch.setattr("ctx_distillery_eval.cli._drive", fake_drive)
+    monkeypatch.setattr("ctx_distillery_eval.cli.datetime", _FrozenClock("20260728T101500Z"))
+    main(["run", "demo", "--out", str(tmp_path), "--stub"])
+    monkeypatch.setattr("ctx_distillery_eval.cli.datetime", _FrozenClock("20260728T101600Z"))
+    main(["run", "demo", "--out", str(tmp_path), "--stub"])
+
+    assert seen == [
+        "demo-durable-fact-20260728T101500Z.jsonl",
+        "demo-one-off-debugging-20260728T101500Z.jsonl",
+        "demo-durable-fact-20260728T101600Z.jsonl",
+        "demo-one-off-debugging-20260728T101600Z.jsonl",
+    ]
+    assert len(set(seen)) == 4  # two invocations of two tasks, four distinct files
+
+
+def test_run_refuses_to_append_into_an_existing_trace_file(tmp_path, monkeypatch, capsys):
+    """The one case the per-invocation stamp does not cover: two runs in the same second, or two
+    distinct task ids that slug to the same token. `TraceRecorder` appends and nothing here may
+    delete, so it must REFUSE that one task rather than interleave two runs under two run ids into
+    one file — after which `load_trace(path, run_id=...)` could no longer separate them."""
+    monkeypatch.setattr("ctx_distillery_eval.cli.datetime", _FrozenClock("20260728T101500Z"))
+    monkeypatch.setattr("ctx_distillery_eval.cli._drive",
+                        lambda task, trace_path: _FakeArtifacts(trace_path, task.id))
+    traces = tmp_path / "traces"
+    traces.mkdir(parents=True)
+    (traces / "demo-durable-fact-20260728T101500Z.jsonl").write_text("{}\n", encoding="utf-8")
+
+    assert main(["run", "demo", "--out", str(tmp_path), "--stub"]) == 0
+    out = capsys.readouterr().out
+    assert "run skipped:" in out and "already exists" in out
+    assert "n=2 (1 unscored)" in out  # the OTHER task still ran
+
+
+def test_run_reports_a_failing_task_as_unscored_and_keeps_going(tmp_path, monkeypatch, capsys):
+    """cve-reverser raises a bare `SystemExit` inside its run loop, so task 1 of 50 kills the other
+    49. Here a failure is a ROW: the batch survives, the reason is printed, and the aggregate gate
+    still refuses to call an all-unscored batch green."""
+    def fake_drive(task, trace_path):
+        if task.id == "demo-durable-fact":
+            raise SystemExit("CD_ROOT_LM is not set")
+        return _FakeArtifacts(trace_path, task.id)
+
+    monkeypatch.setattr("ctx_distillery_eval.cli._drive", fake_drive)
+    assert main(["run", "demo", "--out", str(tmp_path), "--stub"]) == 0
+    out = capsys.readouterr().out
+    assert "unscored: run failed: SystemExit: CD_ROOT_LM is not set" in out
+    assert "demo-one-off-debugging" in out and "n=2 (1 unscored)" in out
+
+
+def test_run_exits_non_zero_when_every_task_failed(tmp_path, monkeypatch, capsys):
+    def boom(task, trace_path):
+        raise RuntimeError("planner exploded")
+
+    monkeypatch.setattr("ctx_distillery_eval.cli._drive", boom)
+    assert main(["run", "demo", "--out", str(tmp_path), "--stub"]) == 1
+    assert "(no runs scored)" in capsys.readouterr().out
+
+
+def test_run_refuses_a_task_with_no_project_loudly_but_per_row(tmp_path, capsys):
+    """`_drive` is REAL here — the refusal under test is its own, before any model is reached.
+    cve-reverser's stance (refuse loudly) over diff-sentry's (silently drive `{}`), but as a row."""
+    ts = tmp_path / "ts.json"
+    ts.write_text(json.dumps([{"id": "no-project", "reference": "r"}]), encoding="utf-8")
+    assert main(["run", str(ts), "--out", str(tmp_path / "out"), "--stub"]) == 1
+    out = capsys.readouterr().out
+    assert "no-project" in out and "has no project.project_dir" in out
+
+
+def test_run_reports_a_missing_taskset_file_without_a_traceback(tmp_path, capsys):
+    assert main(["run", str(tmp_path / "nope.json"), "--out", str(tmp_path / "out")]) == 1
+    assert "cannot load taskset" in capsys.readouterr().err
+
+
+def test_run_writes_only_under_out(tmp_path, monkeypatch):
+    """cve-reverser's `run` builds CWD-relative `sources/`/`traces/`/`responses/` paths despite its
+    docstring promising everything lands under `--out`. This one must not: the working directory
+    stays empty, and both the traces and the materialized demo taskset are inside `--out`."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    out = tmp_path / "out"
+    monkeypatch.setattr("ctx_distillery_eval.cli._drive",
+                        lambda task, trace_path: _FakeArtifacts(trace_path, task.id))
+    monkeypatch.chdir(cwd)
+    assert main(["run", "demo", "--out", str(out), "--stub"]) == 0
+    assert list(cwd.iterdir()) == []
+    assert (out / "traces").is_dir() and (out / "demo").is_dir()

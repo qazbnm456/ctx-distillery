@@ -47,20 +47,39 @@ _DRAFT_TOOLS = ("draft_memory_file", "draft_skill_file")
 #: instead of a raw blob. This project's read-only tools never carry a `draft` body (only the two
 #: drafting tools do, and those get their own bespoke event above), but the drop-set stays defensive
 #: about any list/dict-shaped value regardless of key name — see `_scalar_fields` below.
-_SCALAR_DROP = frozenset({"tool", "ok", "args"})
+#: `resolved_path` and `note` are dropped for a DIFFERENT reason than the three above, and it is a
+#: privacy one: this project's evidence reads run against the operator's OWN `~/.claude` store, so
+#: `read_memory_file` records an absolute path like
+#: `/Users/<you>/.claude/projects/-Users-<you>-<project>/memory/<file>.md`, and its refusal `note`
+#: embeds a model-supplied path verbatim in a sentence. Both are short strings, so the length guard
+#: below never caught them and BOTH were streaming into the live feed, where `app.js` renders the
+#: whole data object. Found by an adversarial review of the trajectory-drawer design — the leak
+#: predates that work and had no test. `name` + `kind` + `chars` + `truncated` already say which
+#: artifact was read; the absolute path adds nothing a reviewer needs and identifies the machine.
+_SCALAR_DROP = frozenset({"tool", "ok", "args", "resolved_path", "note"})
 _MAX_SCALAR = 200  # a payload scalar longer than this is treated as bulky and dropped
+
+#: Any key whose value could carry a filesystem path is dropped by NAME above. This is the
+#: belt-and-braces half: a value that LOOKS like an absolute or home-relative path is dropped
+#: whatever it is called, so a future tool that records one under a new key does not reopen the hole.
+#: Deliberately narrow — it tests the VALUE's shape, never a substring, so an ordinary sentence that
+#: merely contains a slash is unaffected.
+def _looks_like_a_path(value: str) -> bool:
+    return value.startswith(("/", "~/", "\\", "./", "../"))
 
 
 def _scalar_fields(p: dict) -> dict:
     """The payload's SHORT scalar fields (str/int/float/bool) for a tool with no bespoke event —
-    the already-surfaced `tool`/`ok`/`args` keys are dropped, and any list/dict-shaped value is
-    dropped regardless of its key name, so an evidence-read tool_call streams a meaningful row
-    instead of a raw blob."""
+    the already-surfaced `tool`/`ok`/`args` keys are dropped, any list/dict-shaped value is dropped
+    regardless of its key name, and any value that is or looks like a filesystem path is dropped so
+    the feed never identifies the operator's machine (see `_SCALAR_DROP`)."""
     out: dict = {}
     for k, v in (p or {}).items():
         if k in _SCALAR_DROP:
             continue
-        if isinstance(v, (bool, int, float)) or isinstance(v, str) and len(v) <= _MAX_SCALAR:
+        if isinstance(v, (bool, int, float)) or (
+            isinstance(v, str) and len(v) <= _MAX_SCALAR and not _looks_like_a_path(v)
+        ):
             out[k] = v
     return out
 
@@ -75,7 +94,13 @@ def to_event(trace_event: dict) -> dict[str, Any] | None:
     p = trace_event.get("payload") or {}
 
     if t == EVENT_RUN_START:
-        meta = p.get("meta") or {}
+        # `or {}` absorbs a falsy meta but NOT a truthy non-dict — the same one-level-in shape as
+        # the payload bug `trace_io.dict_events` fixes. A `"meta": "nope"` used to kill the SSE
+        # generator on its FIRST event, so the whole replay returned an empty stream and the UI
+        # showed "connection closed". Found by review.
+        meta = p.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
         rubric = meta.get("rubric") or []
         return _ev(
             "distill.run.created",

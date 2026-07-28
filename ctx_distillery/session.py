@@ -12,8 +12,9 @@ this module imports `task.py`, which does `from rlm_kit import RLMTask`, so `eva
 which only ever REPLAY a finished trace — were paying for dspy purely to reach a pure function over
 `(events, plan)`. See `schema.py`'s docstring for the numbers and the full argument.
 
-What stayed HERE is what genuinely needs the LM stack or the harness: `run_distillation` (it
-constructs a `DistillSession`) and `render_memory_index` (it renders `ArtifactRef`s for THIS task's
+What stayed HERE is what genuinely needs the LM stack or the harness: `run_distillation_artifacts`
+and its `run_distillation` wrapper (they construct a `DistillSession`) and `render_memory_index`
+(it renders `ArtifactRef`s for THIS task's
 `memory_index: str` signature input — prompt-side presentation for one task, not part of the plan's
 shape, so it would be a bad fit for a shapes module).
 
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from rlm_kit.trace import TraceRecorder
@@ -43,9 +45,11 @@ __all__ = [
     "PROMOTION_ACTIONS",
     "AssembledCandidate",
     "AssembledPlan",
+    "DistillArtifacts",
     "assemble",
     "render_memory_index",
     "run_distillation",
+    "run_distillation_artifacts",
 ]
 
 
@@ -63,7 +67,42 @@ def render_memory_index(memory_index: Sequence[ArtifactRef]) -> str:
     )
 
 
-async def run_distillation(
+@dataclass(frozen=True)
+class DistillArtifacts:
+    """Everything ONE distillation run produced — the plan, and what it was actually drawn from.
+
+    The plan alone is not enough for anything that has to grade or replay a run. Three of these
+    fields are otherwise UNRECOVERABLE from outside `run_distillation_artifacts`' own frame:
+
+    * **`transcripts` are the REDACTED texts the run actually saw** (`redact` applied once, per
+      CLAUDE.md invariant 3). A caller cannot reconstruct them by re-`ingest()`ing and
+      re-`redact()`ing: `HarnessAdapter` promises nothing about a second `ingest()` returning the
+      same bytes, and a caller-supplied `redact=` may not even be reachable from where the grading
+      happens. Reading them back out of the TRACE is permanently ruled out on this project's own
+      record — `tools/transcript_reader.py` records offset/length/total_length and never the text
+      itself, "that is the audit point" — so a trace-sourced substitute would be EMPTY, not merely
+      lossier.
+    * **`run_id`** closes a real blind spot: a caller passing `run_id=None` could previously never
+      learn which id was generated for it, and the id is the key every downstream reader
+      (`load_trace(path, run_id=...)`, `eval/`'s task pairing, `studio/`'s replay) is keyed on.
+    * **`events`** is the just-recorded trace, already filtered to this run — so a caller that wants
+      to re-assemble, score, or export does not have to re-open the file and guess the filter.
+
+    **These fields deliberately do NOT live on `AssembledPlan`.** That shape is defined in the
+    dspy-free `schema.py`, is shared with `eval/` and `studio/`, and `render.plan_as_dict` is a
+    plain `dataclasses.asdict(plan)` — putting full transcript bodies on it would dump every
+    redacted transcript into `ctx-distillery show --json`.
+    """
+
+    plan: AssembledPlan
+    events: list[dict]
+    run_id: str
+    trace_path: str
+    transcripts: list[str]
+    memory_index: list[ArtifactRef]
+
+
+async def run_distillation_artifacts(
     adapter: HarnessAdapter,
     chat_fn: Any,
     trace_path: str,
@@ -72,8 +111,12 @@ async def run_distillation(
     run_id: str | None = None,
     meta: dict | None = None,
     **kw: Any,
-) -> AssembledPlan:
-    """Ingest once, redact once, run one `DistillSession`, and assemble the result.
+) -> DistillArtifacts:
+    """Ingest once, redact once, run one `DistillSession`, assemble — and return ALL of it.
+
+    The full-fidelity driver. `run_distillation` below is a one-line wrapper over it that keeps the
+    historical `-> AssembledPlan` contract; this is the entry point for a caller that also needs the
+    redacted transcripts, the resolved run id, or the recorded events (see `DistillArtifacts`).
 
     * `adapter.ingest()` is called EXACTLY ONCE. Its `memory_index` is the immutable snapshot every
       tool closes over (so the read allowlist can't shift mid-run), and its `transcripts` are
@@ -81,7 +124,10 @@ async def run_distillation(
       `.arun()` — which is what makes "nothing unredacted ever reaches the model" a property of the
       code rather than a claim (CLAUDE.md invariant 3).
     * Extra `**kw` go to `DistillSession` (e.g. `config=`, `interpreter=` for an offline test).
-    * Writes/applies nothing: the returned `AssembledPlan` is inert until a human acts on it.
+    * Writes/applies nothing: the returned artifacts are inert until a human acts on them. This
+      module is inside `tests/test_no_write_capability.py`'s mutation scan and returning more data
+      changes nothing about that — the only file this function's frame touches is the trace, and
+      `TraceRecorder` (rlm-kit's) owns that, exactly as before.
     """
     raw = adapter.ingest()
     redacted_transcripts = [redact(t) for t in raw.transcripts]
@@ -105,4 +151,37 @@ async def run_distillation(
     # `load_trace`, not `load_events`: this trace is well-formed by construction (the recorder just
     # wrote it), so this is consistency rather than a live bug — but it means no module in the
     # workspace passes `run_id=` into `load_events`'s own unguarded filter any more (`trace_io.py`).
-    return assemble(load_trace(trace_path, run_id=rid), plan)
+    events = load_trace(trace_path, run_id=rid)
+    return DistillArtifacts(
+        plan=assemble(events, plan),
+        events=events,
+        run_id=rid,
+        trace_path=trace_path,
+        transcripts=redacted_transcripts,
+        memory_index=memory_index,
+    )
+
+
+async def run_distillation(
+    adapter: HarnessAdapter,
+    chat_fn: Any,
+    trace_path: str,
+    *,
+    redact: Callable[[str], str] = redact_transcript,
+    run_id: str | None = None,
+    meta: dict | None = None,
+    **kw: Any,
+) -> AssembledPlan:
+    """Ingest once, redact once, run one `DistillSession`, and assemble the result.
+
+    UNCHANGED in signature and in return type — this is the historical driver, and every existing
+    caller (`cli._cmd_distill`, the tests, any downstream script) keeps working untouched. It is now
+    a thin wrapper over `run_distillation_artifacts`, which returns the same plan plus the three
+    things that used to die as locals in this frame (see `DistillArtifacts`). Widening this
+    function's return type instead would have been a public API break for a need only `eval/`'s
+    `run` has; ADDING the wider function costs nobody anything.
+    """
+    artifacts = await run_distillation_artifacts(
+        adapter, chat_fn, trace_path, redact=redact, run_id=run_id, meta=meta, **kw
+    )
+    return artifacts.plan

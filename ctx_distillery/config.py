@@ -72,9 +72,35 @@ def _env_int(name: str, default: int) -> int:
     if raw is None or not raw.strip():
         return default
     try:
-        return int(raw.strip())
+        value = int(raw.strip())
     except ValueError:
         raise SystemExit(f"{name}={raw!r} is not an integer") from None
+    # Every `CD_*` integer on this surface is a BUDGET, and none of them is meaningful at zero or
+    # below. Without this, `CD_PLANNER_MAX_TOKENS=-5` sailed through to `dspy.LM(max_tokens=-5)` —
+    # found by review, and the same "accepted silently, dies far away" shape as the unpassed
+    # `max_tokens` itself.
+    if value < 1:
+        raise SystemExit(f"{name}={raw!r} must be a positive integer (it is a budget)")
+    return value
+
+
+#: rlm-kit's own `KNOWN_ADAPTERS`, mirrored so a typo is refused HERE with the same clean `SystemExit`
+#: every other `CD_*` mistake gets. Passing it through unvalidated meant `CD_ADAPTER=Json` died deep
+#: inside `RLMConfig.__post_init__` as a raw traceback — the one variable on this surface that
+#: behaved differently from all the others. Found by review.
+_KNOWN_ADAPTERS = ("json", "chat", "default")
+
+
+def _adapter_from_env() -> str:
+    raw = (os.getenv("CD_ADAPTER") or "").strip()
+    if not raw:
+        return "json"
+    if raw not in _KNOWN_ADAPTERS:
+        raise SystemExit(
+            f"CD_ADAPTER={raw!r} is not a known adapter; expected one of "
+            f"{', '.join(_KNOWN_ADAPTERS)} (see .env.example for what each one does)"
+        )
+    return raw
 
 
 @dataclass(frozen=True)
@@ -100,6 +126,36 @@ class DistillConfig:
     interpreter: str = PINNED_INTERPRETER
     max_iterations: int = 30
     max_llm_calls: int = 10
+
+    #: The planner's PER-CALL generation cap, and the one knob whose absence used to be able to kill
+    #: a whole run with no way out. `RLMConfig.max_tokens` defaults to 8192; this project never
+    #: passed it, and no `CD_*` variable could raise it. That is fine for an instruct model and a
+    #: trap for a reasoning one: dspy reads `content` and DISCARDS `reasoning_content`, so the
+    #: chain-of-thought is billed against the same cap it never appears in. Two deaths follow —
+    #: reasoning exhausts the cap (empty `content`) or the answer is cut mid-JSON — and BOTH are
+    #: terminal, because `max_retries=1` above deliberately refuses a whole-run retry. A sibling
+    #: project hit exactly this on its first live turn (`AdapterParseError: Expected [reasoning,
+    #: code], actual [code]`). 16384 is the recommended planner default; raise it with
+    #: `CD_PLANNER_MAX_TOKENS`.
+    planner_max_tokens: int = 16384
+
+    #: The per-REPL-OUTPUT truncation cap rlm-kit hands `dspy.RLM`, and the LAST field of the same
+    #: shape as `planner_max_tokens` — a full audit of `RLMConfig` found exactly these two. dspy
+    #: head+tail-truncates every REPL output before it enters the planner's prompt, and THIS
+    #: project's transcripts arrive as a REPL variable, so a bare `print(transcripts[0])` silently
+    #: lost the middle of any transcript over rlm-kit's 10,000 default with no way to raise it.
+    #: Measured over 25 real Claude Code transcripts: median 2,739 chars, max 32,920, 2 already past
+    #: the default. Milder than the `max_tokens` trap — dspy leaves a visible "(N characters
+    #: omitted)" marker and `read_transcript_chunk` is the deliberate paging escape hatch — but it is
+    #: the same class, so it gets the same exit: `CD_MAX_OUTPUT_CHARS`.
+    max_output_chars: int = 40000
+
+    #: The structured-output adapter rlm-kit hands dspy (`json` / `chat` / `default`). `json` is
+    #: rlm-kit's own default and the right one here: the decoder ENFORCES the schema, so a model
+    #: that formats imperfectly still produces a valid plan. `chat` sends no `response_format` at
+    #: all and needs the model to follow text field-markers by discipline alone — a dropped field
+    #: has no recovery. Switch only for an endpoint with no structured-output support.
+    adapter: str = "json"
 
     @classmethod
     def from_env(cls) -> DistillConfig:
@@ -160,6 +216,9 @@ class DistillConfig:
             interpreter=interpreter,
             max_iterations=_env_int("CD_MAX_ITERATIONS", 30),
             max_llm_calls=_env_int("CD_MAX_LLM_CALLS", 10),
+            planner_max_tokens=_env_int("CD_PLANNER_MAX_TOKENS", 16384),
+            max_output_chars=_env_int("CD_MAX_OUTPUT_CHARS", 40000),
+            adapter=_adapter_from_env(),
         )
 
 
@@ -226,6 +285,12 @@ def setup(config: DistillConfig) -> DistillConfig:
             interpreter=config.interpreter,
             max_iterations=config.max_iterations,
             max_llm_calls=config.max_llm_calls,
+            # Both were previously UNPASSED, so rlm-kit's defaults applied with no way to reach
+            # them from this project's env surface. `max_tokens` in particular is not a tuning
+            # knob but a failure mode — see `DistillConfig.planner_max_tokens`.
+            max_tokens=config.planner_max_tokens,
+            max_output_chars=config.max_output_chars,
+            adapter=config.adapter,
             # ONE attempt: max_iterations is a hard budget, never multiplied by a whole-run retry.
             max_retries=1,
         ),

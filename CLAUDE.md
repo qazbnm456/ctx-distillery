@@ -17,7 +17,12 @@ uv pip install -e ../rlm-kit
 
 Run BOTH before pushing — the suite is fully offline (no live model, no Deno, no network):
 
-- `uvx ruff check .` — lint (line-length 110, matching rlm-kit's config). A bare `ruff` is not
+- `uvx ruff@0.16.0 check .` — lint (line-length 110, matching rlm-kit's config). **The version pin is
+  deliberate and CI carries the same one.** An unpinned `uvx ruff check .` resolves the LATEST ruff at
+  run time, so a release that widens the DEFAULT rule set turns the job red with nobody having touched
+  a line of code — ruff 0.16's expansion did exactly that to two sibling projects (256 and 224 fresh
+  errors, same pyproject, same source). Bump the pin on purpose, and land the resulting fixes in the
+  SAME commit as the bump. A bare `ruff` is not
   installed in this workspace; `uvx` is how CI runs it too.
 - `pytest -q` — the whole suite. The dspy-bearing tests (`test_task.py`, `test_session.py`)
   drive a REAL `dspy.RLM.aforward` through `rlm_kit.testing.ScriptedInterpreter` +
@@ -425,18 +430,33 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   Build ONE judge per batch: the circuit breaker lives in the closure. `CDEVAL_*` is a SEPARATE env
   surface from the root's `CD_*` on purpose — the judge must be pointable at a different model than
   the run it scores.
-- **The eval member has `score` and NO `run` subcommand, and that is a stated deferral with three
-  named blockers** (recorded in full in `eval/README.md`): `taskset.py` is not a taskset —
-  `collect_tasks(glob)` enumerates `{run_id, trace_path}` from TRACES, where every sibling's `run`
-  iterates a real `EvalTask` with an id, a planner-visible input and a judge-only `reference`;
-  `judge.build_prompt` has no `{reference}` slot at all, so adding judge-only ground truth is a
-  PROMPT change and prompt changes are what `PROMPT_VERSION` exists to make attributable; and
-  `run_distillation` returns an `AssembledPlan`, not artifacts, and never returns the REDACTED
-  transcript text it ingested — so an eval `run` would have to re-`ingest()`/re-`redact()` and could
-  then score against a DIFFERENT redaction than the run actually saw. The clean fix for the third is
-  a returned artifacts object, i.e. a driver signature change that belongs with the taskset design.
-  None of this blocked the live judge: this project's judge takes `transcript_texts` as its
-  ground-truth analogue and needs no `reference`, so it is exercisable end-to-end on `score` alone.
+- **The eval member now has BOTH `score` and `run`; the three former blockers were closed
+  ADDITIVELY, and each fix's shape is the part worth keeping.** (1) `taskset.py` carries BOTH
+  concepts side by side — `Task`/`collect_tasks` (from TRACES, what `score` was always built on) and
+  `EvalTask`/`load_taskset`/`demo_taskset` (the siblings' checked-in list to DRIVE). Neither replaced
+  the other. (2) `judge.build_prompt` grew a third positional `reference` slot and `PROMPT_VERSION`
+  bumped to `atlas-ctxd-eval-v2`, which is exactly what the constant is for; the `=== REFERENCE ===`
+  section renders ONLY when `reference` is non-empty — a divergence from all three siblings'
+  unconditional `"(no reference provided; …)"` fallback, because theirs ALWAYS have a taskset and
+  this project's primary path (`score` with no `--taskset`) does not, so a no-reference run must keep
+  rendering the byte-identical v1 prompt. When the section IS rendered, `REFERENCE_TRUST_RULE` is
+  appended to `UNTRUSTED_DATA_RULE` (which enumerates exactly two untrusted bodies), stating that a
+  taskset reference is TRUSTED input — a human wrote it into a checked-in file — while still not a
+  licence to change the scale or output format. (3) `session.run_distillation_artifacts` returns a
+  `DistillArtifacts(plan, events, run_id, trace_path, transcripts, memory_index)` where
+  `transcripts` are the REDACTED texts the run actually saw, and `run_distillation` became a
+  one-line wrapper with its signature AND return type unchanged (zero call-site edits). Those fields
+  deliberately do NOT go on `AssembledPlan`: `render.plan_as_dict` is `dataclasses.asdict`, so
+  transcript bodies would land in `ctx-distillery show --json`. Three properties of `run` that are
+  NOT copied from the siblings and must not be "fixed" back: no `os.remove` of a stale trace (the
+  FILENAME is `<slug(task.id)>-<UTC stamp>.jsonl`, unique per invocation, while `run_id` stays `task.id`
+  for the pairing), everything under `--out`, and a failing task becoming an `unscored` ROW rather
+  than a `SystemExit` that aborts the batch. `demo_taskset(root)` MATERIALIZES under a
+  caller-supplied root (a `~/.claude` stand-in is machine-dependent, so no sibling's static-JSON
+  form is possible) — layout only, with the transcript CONTENT staying checked in as
+  `eval/ctx_distillery_eval/demo/*.jsonl`. Because `eval/` now imports product code to drive it,
+  `eval/tests/test_boundary.py` gained an AST assertion that no eval module imports
+  `ctx_distillery.apply` — the root package's own tripwire scans `ctx_distillery/` only.
 - **`studio/`'s frontend does not vendor a JetBrains Mono binary**, unlike the literal
   `diff-sentry-studio` precedent it otherwise mirrors. `static/style.css`'s `--mono` font stack
   PREFERS `"JetBrains Mono"` (matching the sibling studios' visual family when the visitor's system
@@ -445,9 +465,26 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   literally copy every asset of the cloned reference. (`static/vendor/` does not exist.) Two more
   deliberate divergences live in `studio/DESIGN.md`: the type is MONO-ONLY with no sans-prose split
   (this console's "prose" is a drafted memory/skill file — frontmatter and markdown structure a
-  reviewer is checking, not paragraphs they are reading), and there is no Trajectory drawer, which
-  is honest DEFERRED scope (no `iterations.py`, no `trajectory.js`, no route) rather than something
-  the spec may describe as built.
+  reviewer is checking, not paragraphs they are reading), and the replay TRANSPORT is not built —
+  no `replay-core.js`, no play/pause/speed. That one is argued, not deferred by default: the
+  siblings' transport animates a walk through data `iterations.py` already renders as static
+  numbers, its payoff scales with tool-call count (a ctx-distillery run makes a handful), and this
+  studio has never even used the `?delay=` pacing its own server already offers. ←/→ stop-stepping
+  is inlined instead. The Trajectory drawer ITSELF is now BUILT (`studio/ctx_distillery_studio/
+  iterations.py`, `GET /v1/runs/{run_id}/iterations`, `static/trajectory.js`) — this bullet used to
+  say it did not exist, which went false the moment the endpoint landed.
+- **The drawer's TURN TEXT is not scrubbed, and cannot be — `textContent` rendering IS the
+  mitigation, not a stylistic preference.** `iterations.py`'s `timeline` and `initial` are
+  allowlist-shaped and verified clean on a real live trace (no `resolved_path`, no `note`, no
+  drafted body, no `evidence`, no `/`-leading string). But `iterations[*].code` and `.output` carry
+  the planner's own REPL echo — measured on that same trace: 4 of 6 drafted bodies and ALL 6
+  evidence blobs appear there, because the planner printed a drafting tool's return value and typed
+  its evidence as a literal. That is inherent to showing turns at all, which is the drawer's whole
+  reason to exist (`mapper.to_event` gives `has_code: bool` and drops `output`, so this is genuinely
+  new information). So: never read the leak tests as a promise that turn text is clean, and never
+  let a node in that pane be built with anything but `textContent`.
+  `studio/tests/static-contract.test.js` scans EVERY `static/*.js` for markup sinks — it used to
+  read `app.js` only, which a new `trajectory.js` would have sailed straight past.
 - **`studio/DESIGN.md` is a VISUAL & UX spec, not an architecture doc, and that division is the
   point.** All three siblings' studio design docs open the same way — architecture is locked in the
   README, the design doc owns the look and feel only — so writing one does NOT reintroduce the

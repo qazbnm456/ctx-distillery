@@ -1,9 +1,9 @@
 # ctx-distillery-studio: visual & UX spec
 
-The web frontend's design contract. Implementation (`static/{index.html,app.js,style.css}`) follows
-this file. **Architecture is locked in [`README.md`](README.md)** — the five endpoints, the SSE event
-mapping, the replay-only scope decision and its reopening conditions, install/run, and every deferred
-item. This doc owns the *look and feel* only.
+The web frontend's design contract. Implementation (`static/{index.html,app.js,trajectory.js,style.css}`)
+follows this file. **Architecture is locked in [`README.md`](README.md)** — the six endpoints, the SSE
+event mapping, the replay-only scope decision and its reopening conditions, install/run, and every
+deferred item. This doc owns the *look and feel* only.
 
 (Context worth stating once: this repo deliberately purged its project-level design blueprint. This
 file is a different species — a visual spec, the one design-shaped file that IS a family convention
@@ -95,6 +95,11 @@ that removes something. `--ok` marks a successful drafting call (`chip-ok`, and 
 feed row's left edge). Do not cross-use: **the frame carries derived state and nothing else.** Nested
 surfaces step (`bg` → `surface-1` → `surface-2` → `surface-3`), each with a 1px `--border`.
 
+The §5.7 drawer reuses the same three, unchanged in meaning: `--signal` for the `◫` handle mark, the
+`Trajectory` tag, and a `.related` cross-highlight; `--bad` for a failed timeline entry's left edge
+and a sub-LM `error` line; `--warn` for an `unrecognized` tool's edge, because an unknown tool in a
+CLOSED tool set is a "look at this", not a failure. It introduces **no new token**.
+
 *Not copied, and the reasons are real:* there is **no** multi-stop metal "alloy" gradient here.
 diff-sentry's verdict alloy and toolscout's grounding alloy encode a 4–5 way verdict axis; ours is a
 three-state derived fact, and a gradient would be decoration dressed as information.
@@ -130,7 +135,10 @@ model is an INJECTED `chat_fn`, not an env-var-selected role trio, and `/v1/conf
 `{"traces_dir": ...}` and nothing else. The traces directory is what genuinely varies by deployment
 and what a "why is my run not in the list" user needs to see, so it takes the slot. **Never render a
 model name here** — the server does not know one, and inventing the chip would be fabricating a field
-the response lacks.
+the response lacks. (The Trajectory drawer's Init pane DOES show `planner` / `drafter`, and that is
+not a loophole: those are recorded facts about one past run, read out of that run's own
+`run_start.meta`, and they render as ordinary `kv` rows — never as a header chip, and never on a page
+state where no run is loaded.)
 
 ### 5.2 Load box (left rail, top)
 `▾ LOAD A RUN`. One row: a mono text input bound to a `<datalist>` filled from `GET /v1/runs`
@@ -208,10 +216,10 @@ server dependency): **TF** `n_candidates` · `n_non_keep` · `plan_problems`; **
 reward. A `min_read_step` / `min_draft_step` pair is a raw observation; whether "evidence came before
 drafting" is left to whoever reads it. Never render a total, a percentage, a bar, or a ✓/✗ over these.
 
-*Not copied:* a `§5.7 Trajectory drawer` and `GET /v1/runs/{id}/iterations`. There is no
-`iterations.py`, no `trajectory.js`, and no such route in this studio — describing one would be
-fabrication. It is legitimate **deferred** scope, and the fix belongs in `app.py` (a new endpoint
-serving per-turn init/reasoning/REPL) plus a `static/trajectory.js`, in that order.
+The PLAN stage answers "what does this run propose, and what backs it". It cannot answer "how did the
+planner get there" — that is **§5.7**, the Trajectory drawer, and it is a separate surface on purpose:
+a reviewer deciding whether to call `apply_plan` reads the plan, and only sometimes needs the
+trajectory behind it.
 
 ### 5.5 States (every state explicit)
 | derived state | frame | body |
@@ -243,58 +251,151 @@ serving per-turn init/reasoning/REPL) plus a `static/trajectory.js`, in that ord
     left retrying.
   **Never blank, and never a bare "error".**
 
+### 5.7 Trajectory drawer
+A bottom sheet over `GET /v1/runs/{run_id}/iterations`, opened from a fixed `◫ Trajectory` handle at
+the bottom right. The handle appears the moment a run is loaded and hides again on `reset`; a
+backdrop click, the `✕`, or `Esc` closes it. `static/trajectory.js` exposes a `window.Trajectory(deps)`
+factory loaded **before** `app.js`, with a deliberately short injected-deps roster —
+`{ el, clear, getRunId, onError }`. `el`/`clear` are the only helpers `app.js` has (there is no `esc`
+here, because nothing is escaped — nothing becomes markup); `getRunId` is a **getter, never a
+construction-time value**, because this page can load a second run without a reload; `onError` renders
+into the Replay feed, since a failed fetch happens *before* the drawer opens and an empty drawer would
+be worse than one that does not open.
+
+**Centred on the TURN, because that is the information nothing else has.** `mapper.to_event` gives the
+feed `has_code: bool` and drops `output` entirely, so a turn's actual code and its actual REPL output
+exist nowhere else in this studio. Three panes:
+
+- **left — turn nav.** `Init`, then one entry per turn (`Turn N` + the first line of its reasoning,
+  plus its `duration_s` when the trace has one). `←`/`→` step through exactly these stops.
+- **centre — detail.** *Init*: the run's inputs as `kv` rows — project **basename** (never the path),
+  transcript/artifact counts, `planner`/`drafter`, the pinned `interpreter` (always `pyodide`, which
+  is the point: invariant 1's sandbox pin, visible per run), rubric criteria, and the two budgets.
+  *Turn*: its `reasoning` as prose, then a collapsible **REPL** block with `code` and `output` in
+  their own wells. *Timeline entry*: its label, its `ok`, and the fields that tool's own allowlist
+  branch in `iterations._tool_entry` contributed (iterated, not switched per tool — the server owns
+  that roster, and a second copy here would drift). A `sub_call` renders `model` + input/output wells.
+- **right — the tool timeline**, a flat list of every `tool_call`/`sub_call`, in `seq` order, each
+  showing `+rel_s · gap`.
+
+**The timeline is FLAT and UNCONDITIONAL; `turn_index` is only an enrichment.** That is forced by two
+measured numbers, not a hedge: a real live run's `main_step` span is 20.4s → `per_turn_timing = true`,
+while the offline scripted harness spans 0.0019s → `false`, and `turn_index` back-mapping runs *only*
+when it is true. So on every trace this workspace's tests can produce — and on any genuinely fast run
+— no timeline entry carries a `turn_index` at all. A drawer that reached tool calls only *through*
+turn grouping would render an empty pane in exactly those cases (an audit caught precisely that in an
+earlier design). Nothing about whether an entry renders reads `turn_index`; only the cross-highlight
+does (`.related` on the linked turn / the linked entries), and it simply switches off when the link
+is not real.
+
+**Timing is stated, never dressed up.** `timing_note` renders **verbatim** — `per_turn_timing` picks
+the tag (`● per-turn timing` / `ⓘ timing`) and nothing else, because that sentence is the honest
+description of what this trace's timing does and does not mean. A turn with no `rel_s`/`duration_s`
+says so ("no per-turn timing on this trace… the tool timeline is unaffected") instead of showing a
+zero. And every timeline entry carries the caveat in words: **`duration_s` is the gap since the
+previous recorded event — planner-think + tool-exec.** There is no per-call instrumentation anywhere
+in this project, so calling it a tool latency would be a fabricated measurement.
+
+**The `textContent` rule is the drawer's actual mitigation, not hygiene.** `iterations.py`'s leak
+tests prove `timeline` and `initial` carry no paths, no drafted bodies and no evidence. They do **not**
+cover a turn's `reasoning`/`code`/`output`, and they cannot: on the real live run those numbers came
+from, **4 of 6 drafted bodies and all 6 evidence blobs appear in `iterations[*].code` /
+`iterations[*].output`**, because that text is the REPL's own echo — the planner printed a drafting
+call's return value and typed the evidence in as a literal. Since showing turns is the entire reason
+this drawer exists, the answer is **rendering, not filtering**: every string reaches the page through
+`el(tag, className, text)`, which sets `textContent`. The REPL block says so on screen too ("verbatim
+REPL echo — may repeat a drafted body or the evidence behind it; rendered as text, never markup").
+Never read the drawer's safety off those leak tests.
+
+*Rebuilt, not ported.* Every sibling's `trajectory.js` assembles its panes by assigning `innerHTML`,
+seven sites each. That is forbidden here absolutely (§7's first Don't), so this file was rebuilt
+against `el()`/`clear()`, and `tests/static-contract.test.js` now scans **every `static/*.js`** for
+the sinks — widened in the same pass, because a scan that read only `app.js` would have waved the one
+new file through.
+
+*Not built, each for a stated reason:* no `replay-core.js`, no ▶/⏸/speed transport, no progress bar,
+no expand-to-full, no in-drawer search, no `run-core.js`, and nothing implying a live run. A
+transport's payoff scales with tool-call count and this project's runs make a handful of calls;
+`app.js` has never even used the server's existing `?delay=` pacing. The `←`/`→` stop-walk survives as
+~12 inlined lines (`buildStops` / stop index / step target) — vendoring `replay-core.js` to use a
+quarter of it would mean carrying a replay engine for a keyboard shortcut. No icon set either: pane
+labels are text, matching §5.3's badge decision.
+
 ## 6. Depth / motion
 2px geometry (`--radius:2px` on buttons, inputs, panels — chips are pills at `999px`; the candidate frame's left edge is
 3px so state reads at a glance). Depth via surface steps + 1px hairlines only — no glassmorphism, no
 drop-shadow stacks, no marketing gradient anywhere. The header is `color-mix`-translucent over `--bg`.
 Motion is almost absent by design: one 160ms `rowin` fade-and-rise on a feed row entering, a
-focus ring (`box-shadow: 0 0 0 2px var(--signal-glow)`) on inputs, a hover ring on the Load button.
-**No spinner, no pulse, no alloy sweep** — a review console that animates while a human is deciding
-whether to delete their own history is working against the user.
+focus ring (`box-shadow: 0 0 0 2px var(--signal-glow)`) on inputs, a hover ring on the Load button,
+and — the one larger movement on the page — the §5.7 drawer's 260ms `translateY` slide with its
+backdrop fade. That one is a *sheet arriving*, not a review surface animating under a reader, which
+is the line: **no spinner, no pulse, no alloy sweep, and nothing that moves while a human is deciding
+whether to delete their own history.** A `prefers-reduced-motion: reduce` block turns all of it off,
+because a stated OS preference outranks a house style.
 
 **Responsive.** The three tracks total ~1000px, so below `1040px` they stack into one column and
 `.layout` releases its `calc(100vh - 56px)` pin — with one column, three independent scroll tracks
 inside a fixed viewport height would each be a few rows tall, so the PAGE scrolls instead and the
-feed is capped at `50vh` so it cannot push the plan off-screen. Two rules make the horizontal axis
-safe at any width and both are pinned by `tests/static-contract.test.js`: every model-supplied field
-(`key_fields`, a rubric value, a feed row's scalars) carries `word-break`, and the draft `<pre>`
-carries `overflow-wrap:anywhere` on top of `pre-wrap`, because `pre-wrap` breaks at whitespace only
-and a drafted body's token lengths are untrusted.
+feed is capped at `50vh` so it cannot push the plan off-screen. The §5.7 drawer's own three tracks
+(220 | 1fr | 260) hit the same wall and stack in the same breakpoint: the sheet grows to `86vh`, the
+nav and timeline are capped at `24vh` each so the detail pane — the reason the drawer exists — is
+never squeezed off the bottom. Three rules make the horizontal axis safe at any width and all are
+pinned by `tests/static-contract.test.js`: every model-supplied field (`key_fields`, a rubric value,
+a feed row's scalars) carries `word-break`; the draft `<pre>` carries `overflow-wrap:anywhere` on top
+of `pre-wrap`, because `pre-wrap` breaks at whitespace only and a drafted body's token lengths are
+untrusted; and `.traj-well` carries the same pair, because a turn's REPL echo is the same class of
+untrusted text.
 
 ## 7. Do / Don't
 **Do:** key the frame on state `assemble()` DERIVED from the trace (§2), never on the plan's own
 claim · keep `applyBlocker()` a faithful mirror of the refusals a trace can decide, so "red" means
 "the writer will refuse this" — and never let it imply the converse ·
-flag a broken candidate, never drop it · render every draft through `el.textContent` · keep the
-Rubric module labelled FACTS · distinguish 404 from 502 from a dropped stream · say "replay" when it
-is a replay · `word-break` on every field that can carry a model-supplied path or token.
+flag a broken candidate, never drop it · render every draft **and every turn's REPL text** through
+`el.textContent` · keep the Rubric module labelled FACTS · distinguish 404 from 502 from a dropped
+stream · say "replay" when it is a replay · render `timing_note` verbatim · say in words that a
+timeline `duration_s` is a gap (planner-think + tool-exec) · `word-break` on every field that can
+carry a model-supplied path or token.
 
-**Don't:** no `innerHTML`, anywhere, for any reason · no model-role chips (`/v1/config` has no model
-to report) · no vendored font, and never block on one · no primary POST button, no run-id preview, no
-`live`/`subscription` studio extra (there is no live path to gate) · don't describe a Trajectory
-drawer that does not exist · don't claim the feed is live · don't draw causality between feed rows
-(`main_step` flushes post-hoc — the ordering is not causal) · don't invent response fields a run
-lacks (hide, don't fake) · don't turn `rubric_facts` into a score, a bar, or a grade · don't key
-anything on `candidate.artifact_id` alone, which is the plan's CLAIM and the exact thing this design
-exists to distrust.
+**Don't:** no `innerHTML`, anywhere, in any `static/*.js`, for any reason · no model-role chips in
+the header (`/v1/config` has no model to report; §5.7's Init pane reads a past run's own
+`run_start.meta` instead, as `kv` rows) · no vendored font, and never block on one · no inline SVG
+icon set · no primary POST button, no run-id preview, no `live`/`subscription` studio extra (there is
+no live path to gate) · in the Trajectory drawer specifically, no `replay-core.js`, no ▶/⏸/speed
+transport, no progress bar, no expand-to-full, no `run-core.js` and nothing implying a live run ·
+don't make the tool timeline depend on `turn_index`, which is absent whenever `per_turn_timing` is
+false · don't FILTER a turn's REPL text in place of rendering it as text, and don't cite Pass 3's
+leak tests as evidence that it is clean — they cover `timeline` and `initial` only · don't claim the
+feed is live · don't draw causality between feed rows (`main_step` flushes post-hoc — the ordering is
+not causal) · don't invent response fields a run lacks (hide, don't fake) · don't turn `rubric_facts`
+into a score, a bar, or a grade · don't key anything on `candidate.artifact_id` alone, which is the
+plan's CLAIM and the exact thing this design exists to distrust.
 
 ## 8. Acceptance (in a browser)
 1. First screen is unmistakably this product: `▣ ctx-distillery studio` in mono, a single `TRACES`
    chip showing a real directory, and a Load box — no hero, no marketing.
 2. Loading a run id from the `<datalist>` fills the **Replay feed** bottom-up, the status goes
-   `replaying…` → `done`, and the PLAN renders only after `done`.
-3. A `promote_to_memory` candidate whose drafting call succeeded shows a `--signal` left edge, a
+   `replaying…` → `done`, the PLAN renders only after `done`, and the `◫ Trajectory` handle appears
+   at the bottom right (it was hidden before any run was loaded).
+3. **The drawer (§5.7).** Opening it shows `Init` + one nav entry per turn; selecting a turn renders
+   that turn's reasoning as prose and its `code`/`output` in the REPL block; `←`/`→` walk Init ↔
+   turns and `Esc` closes. On a trace whose note reads *"Per-turn timing isn't available…"* — i.e.
+   any offline-harness trace — **the tool timeline is still fully populated**, one entry per
+   `tool_call`/`sub_call`, and each says `gap`, not "took". On a live-timed trace, selecting a turn
+   also outlines its linked timeline entries.
+4. A `promote_to_memory` candidate whose drafting call succeeded shows a `--signal` left edge, a
    `draft ok` chip, and its **verbatim drafted markdown+frontmatter** in the `<pre>` beside its
    `action`/`key_fields` — the money shot, side by side.
-4. A candidate whose `artifact_id` matches no drafting call shows the full `--bad` frame, its
-   `problems` lines, and the `⚠` refusal marker — and it is still ON SCREEN, not dropped.
-5. A promotion with an EMPTY assembled draft is ALSO red and marked, even though it carries no
-   `problems` and may report `draft_ok = true`. (This is the case §2 exists for; check it explicitly.)
+5. A candidate the apply step would refuse shows the full `--bad` frame, its `problems` lines and the
+   `⚠` marker, and stays ON SCREEN. Check **both** shapes: (a) an `artifact_id` matching no drafting
+   call, and (b) a promotion whose assembled draft is EMPTY though it carries no `problems` and may
+   report `draft_ok = true` — the case §2 exists for.
 6. A draft containing `<img src=x onerror=alert(1)>` and a 5000-character unbroken token renders as
-   literal text and wraps — no script runs, and the page does not scroll sideways.
+   literal text and wraps — no script runs, and the page does not scroll sideways. **Same check
+   inside the drawer**: a turn whose `output` echoes that draft renders it as text in `.traj-well`.
 7. Requesting a run id with no trace file shows `HTTP 404`; a corrupted trace file shows `HTTP 502`,
-   never a 500 and never a blank stage.
+   never a 500 and never a blank stage. Clicking `◫ Trajectory` for a run whose `/iterations` fetch
+   fails writes one red `trajectory` row into the feed and does **not** open an empty drawer.
 8. The theme toggle flips light/dark and survives a reload; at 375px nothing overflows horizontally
    — below `1040px` the three tracks STACK into one column, the viewport-height pin is released so
-   the page scrolls instead of the panels being crushed, and the `<pre>` still scrolls inside its own
-   260px box.
+   the page scrolls instead of the panels being crushed, the `<pre>` still scrolls inside its own
+   260px box, and the drawer's own three panes stack with the detail pane still reachable.

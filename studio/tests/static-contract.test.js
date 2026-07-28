@@ -8,8 +8,11 @@
    The other two assert selectors this studio does not have — there is no inline SVG anywhere in
    `index.html` (so no `.empty-stage .es-glyph svg` sizing rule) and no `.meta-col`/`.prose`/`.tchip`
    (our analogue is the generic `.panel { overflow-y:auto }`). Asserting them would pin a UI that
-   does not exist. Three assertions below are OURS and have no sibling precedent: the draft `<pre>`'s
-   `overflow-wrap`, the §2 derived-state frame classes, and the responsive stack.
+   does not exist. The remaining assertions are OURS and have no sibling precedent: the draft
+   `<pre>`'s `overflow-wrap`, the §2 derived-state frame classes, the responsive stack, the
+   Trajectory drawer's `.traj-well` (a turn's REPL echo is the same class of untrusted text as a
+   draft), and the no-markup scan — which reads EVERY `static/*.js`, plus a guard asserting the scan
+   really found the files it exists to police.
 
    See `../DESIGN.md` for what each rule is defending visually. */
 "use strict";
@@ -17,8 +20,14 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
-const css = fs.readFileSync(path.join(__dirname, "..", "static", "style.css"), "utf8");
-const js = fs.readFileSync(path.join(__dirname, "..", "static", "app.js"), "utf8");
+const STATIC_DIR = path.join(__dirname, "..", "static");
+const css = fs.readFileSync(path.join(STATIC_DIR, "style.css"), "utf8");
+// EVERY script under static/, not just app.js. The scan used to read app.js alone, which meant a
+// second frontend file — `trajectory.js`, the drawer whose whole content is untrusted REPL echo —
+// would have sailed straight past the no-markup assertion below. A scan that cannot see the file
+// most likely to violate the rule is worse than no scan, because it reports "ok".
+const JS_FILES = fs.readdirSync(STATIC_DIR).filter((f) => f.endsWith(".js")).sort();
+const JS_SOURCES = JS_FILES.map((f) => [f, fs.readFileSync(path.join(STATIC_DIR, f), "utf8")]);
 
 let failed = 0;
 function test(name, fn) {
@@ -94,26 +103,53 @@ test("the three-track grid stacks below its own total width", () => {
     "the stacked layout must release the calc(100vh - 56px) pin");
 });
 
-// -- 3. the absolute rule, asserted against app.js itself ---------------------------------------
+test("the drawer's REPL wells break unbroken tokens and scroll inside their own box", () => {
+  // `.traj-well` renders a turn's `code`/`output` — the REPL's VERBATIM echo, which really does
+  // carry drafted bodies and evidence (DESIGN.md §5.7). Same class of untrusted text as
+  // `.candidate-draft`, so it needs the same two defenses: `pre-wrap` breaks at whitespace only.
+  const rule = css.match(/(^|\n)\.traj-well\s*\{([^}]*)\}/);
+  assert.ok(rule, ".traj-well rule is missing");
+  assert.match(rule[2], /overflow-wrap\s*:\s*(anywhere|break-word)/,
+    ".traj-well must break unbroken tokens (pre-wrap breaks at whitespace only)");
+  assert.match(rule[2], /max-height\s*:/, ".traj-well must cap its height");
+  assert.match(rule[2], /overflow-y\s*:\s*auto/, ".traj-well must scroll inside its own box");
+});
 
-test("app.js writes no markup: no innerHTML assignment, no HTML-parsing sink", () => {
-  // CLAUDE.md invariant 10 and DESIGN.md §7: a drafted memory/skill body is untrusted model output,
-  // never markup to render. A CSS file cannot defend this one, and it is the single rule here whose
-  // violation would be a real vulnerability rather than a layout bug.
+// -- 3. the absolute rule, asserted against EVERY script under static/ ---------------------------
+
+test("the no-markup scan actually reads every static/*.js (a scan that reads nothing reports ok)", () => {
+  // The guard on the guard. This assertion exists because the previous version of the scan below
+  // read `app.js` and only `app.js`, so `trajectory.js` — added later, and the file with the
+  // strongest reason to reach for markup — was never examined at all. Naming both files here means
+  // a rename or a move breaks the test loudly instead of silently emptying its input.
+  assert.ok(JS_FILES.includes("app.js"), "static/app.js not found by the scan");
+  assert.ok(JS_FILES.includes("trajectory.js"), "static/trajectory.js not found by the scan");
+  assert.strictEqual(JS_SOURCES.length, JS_FILES.length, "every discovered script must be read");
+  for (const [name, src] of JS_SOURCES) assert.ok(src.length > 0, name + " read as empty");
+});
+
+test("no static/*.js writes markup: no innerHTML assignment, no HTML-parsing sink", () => {
+  // CLAUDE.md invariant 10 and DESIGN.md §7: a drafted memory/skill body — and, in the drawer, a
+  // turn's REPL echo — is untrusted model output, never markup to render. A CSS file cannot defend
+  // this one, and it is the single rule here whose violation would be a real vulnerability rather
+  // than a layout bug.
   //
   // Matched on CODE SHAPE (an assignment / a call), not on the bare identifier, and that is
-  // deliberate: `app.js` NAMES `innerHTML` twice — once in its header comment ("Never `innerHTML`,
-  // ever, anywhere in this file") and once inline at the one site that most needs the reminder. A
-  // bare substring scan would flag the documentation OF the rule as a violation of it. That is the
-  // same failure mode `studio/tests/test_boundary.py` already hit on the Python side, where the fix
-  // was to stop scanning text and start reading syntax; matching a sink's real shape is this
-  // file's equivalent, without pulling a JS parser into a zero-dependency runner.
-  for (const sink of [/\.innerHTML\s*=/, /\.outerHTML\s*=/, /insertAdjacentHTML\s*\(/,
-                      /document\.write\s*\(/, /\.srcdoc\s*=/]) {
-    assert.ok(!sink.test(js), "app.js must build every node with textContent — found " + sink);
+  // deliberate: both files NAME `innerHTML` in prose — `app.js`'s header ("Never `innerHTML`, ever,
+  // anywhere in this file") and again inline at the one site that most needs the reminder,
+  // `trajectory.js`'s header at length, because the siblings it was rebuilt from use it seven times
+  // each. A bare substring scan would flag the documentation OF the rule as a violation of it. That
+  // is the same failure mode `studio/tests/test_boundary.py` already hit on the Python side, where
+  // the fix was to stop scanning text and start reading syntax; matching a sink's real shape is
+  // this file's equivalent, without pulling a JS parser into a zero-dependency runner.
+  for (const [name, src] of JS_SOURCES) {
+    for (const sink of [/\.innerHTML\s*=/, /\.outerHTML\s*=/, /insertAdjacentHTML\s*\(/,
+                        /document\.write\s*\(/, /\.srcdoc\s*=/]) {
+      assert.ok(!sink.test(src), name + " must build every node with textContent — found " + sink);
+    }
+    // And the rule is actually written down in each file, not merely accidentally true.
+    assert.match(src, /never\s+`?innerHTML/i, name + " must state the textContent-only rule");
   }
-  // And the rule is actually written down, not merely accidentally true.
-  assert.match(js, /never\s+`?innerHTML/i, "app.js must state the textContent-only rule");
 });
 
 console.log(failed ? "\n" + failed + " test(s) FAILED" : "\nall passing");
