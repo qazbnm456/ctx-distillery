@@ -9,9 +9,14 @@ reusable Skill. It is a judgement engine, nothing more.
 **Status: the planner is wired and offline-tested; the apply step exists; storage is auto-discovered.**
 The five read-only planning tools, the Claude Code adapter, the assemble-on-read convention, the
 human-gated `apply_plan`, and auto-discovery of Claude Code's real on-disk storage (transcripts +
-both skill scopes) are implemented. Still missing: a CLI, subagent-transcript distillation, and any
-harness other than Claude Code. See `docs/DESIGN.md` for the full design and `CLAUDE.md` for the
-invariants.
+both skill scopes) are implemented. Two sibling `uv` workspace members round it out: **`eval/`**
+(`ctx-distillery-eval`) — an offline, reward-free LLM-as-judge scoring the assembled plan against
+its transcript(s) — and **`studio/`** (`ctx-distillery-studio`) — a replay-only FastAPI +
+zero-build-vanilla-JS console previewing each candidate's drafted text next to its plan entry,
+purely from a finished run's trace file. Both reward-free/read-only by construction; see their own
+`eval/README.md`/`studio/README.md`. Still missing: a CLI, subagent-transcript distillation, and
+any harness other than Claude Code. See `docs/DESIGN.md` for the full design and `CLAUDE.md` for
+the invariants.
 
 ## Point it at a project
 
@@ -136,6 +141,8 @@ write-safety guarantees `apply_plan` enforces:
 - [Why it may write when nothing else in the package may](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#why-it-may-write-when-nothing-else-in-the-package-may) — the unreachability guarantee, test-enforced
 - [Layout](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#layout) — the module-by-module tree
 
+For the ATLAS rubric facts, the eval member, and the Studio (Phase 1/2 of the rubric/eval/studio
+initiative), see [`eval/README.md`](eval/README.md) and [`studio/README.md`](studio/README.md).
 For the full design and rationale, see [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Relationship to rlm-kit

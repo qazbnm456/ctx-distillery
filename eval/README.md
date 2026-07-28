@@ -61,7 +61,7 @@ From the repo root (a `uv` workspace member — see the root `pyproject.toml`'s
 
 ```sh
 uv sync
-uv run --directory eval --package ctx-distillery-eval pytest
+uv run --directory eval --package ctx-distillery-eval --extra dev pytest
 ```
 
 (`--package` alone only selects which workspace member's *environment* to use — it does not

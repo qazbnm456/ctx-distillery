@@ -62,6 +62,17 @@ never applies anything itself.
   `dependencies` resolve, not whether the shared venv already has pytest from the root's dev
   group. So `--extra dev` was never load-bearing for either job; it is added anyway because it is
   more explicit/self-contained and does not hurt, not because anything was broken.
+- **Fixed a real 500 in the Studio, found by the same adversarial review**: `rlm_kit.trace.load_events`
+  does no shape validation, so a JSONL line that is syntactically valid JSON but NOT an object
+  (`42`, `null`, `[1,2,3]`, `"x"`) parsed fine and reached `plan_from_events`/`trace_facts`/
+  `mapper.to_event`'s `.get(...)` calls as-is — a raw `AttributeError`, i.e. a genuine 500,
+  reproduced against a running instance on both `GET /v1/runs/{run_id}` and
+  `GET /v1/runs/{run_id}/events`. `studio/ctx_distillery_studio/app.py`'s `_load_trace` — the ONE
+  entry point every endpoint's events pass through — now filters to dict-shaped entries only,
+  immediately after `load_events`, delivering on `docs/DESIGN.md`'s own "never 500 on a malformed
+  trace" requirement for real. The same underlying gap pre-exists in `ctx_distillery.rubric`/
+  `ctx_distillery.session` for a locally-invoked caller (e.g. `eval/cli.py`'s real-trace-file path)
+  — stated explicitly as separate, tracked future work, not silently rolled into this fix.
 - **Fixed three real bugs an adversarial review found in the rubric/eval pass**, before merge: (1)
   the `eval-test` CI job never actually ran `eval/tests/` — `--package` only selects which
   workspace member's ENVIRONMENT to use, not pytest's cwd/`testpaths` resolution, so it silently

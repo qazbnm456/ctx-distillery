@@ -170,7 +170,15 @@ project reasons about (pruning/deleting a user's own history) is irreversible.
     before it ever becomes a path component, and the PLAN panel renders a candidate's `draft` via
     `el.textContent` **only** — never `innerHTML` — because a drafted memory/skill body is
     untrusted model output, not markup to render. Root `pyproject.toml`'s `[tool.uv.workspace]
-    members` includes `"studio"` alongside `"eval"`.
+    members` includes `"studio"` alongside `"eval"`. **`_load_trace` filters to dict-shaped events
+    ONLY, immediately after `load_events`, before anything downstream sees them** — found by an
+    adversarial review post-merge: `rlm_kit.trace.load_events` does NO shape validation, so a
+    JSON-valid non-dict line (`42`, `null`, `[1,2,3]`) used to reach `plan_from_events`/
+    `trace_facts`/`mapper.to_event`'s `.get(...)` calls and raise a raw `AttributeError` — a genuine
+    500, not the "never raise on a malformed trace" guarantee this invariant (and `docs/DESIGN.md`)
+    claim. Don't remove this filter thinking it's redundant with `plan_from_events`'s own
+    `ValidationError` handling — that catches a DIFFERENT failure mode (a well-formed dict with the
+    wrong shape), not a non-dict line at all.
 11. **`rubric.plan_from_events` is the ONE public plan-from-trace reconstruction — `eval/` (and
     `studio/`) call it, neither keeps its own copy.** It used to be private
     (`rubric._plan_from_events`) with a duplicate local copy in `eval/ctx_distillery_eval/score.py`
