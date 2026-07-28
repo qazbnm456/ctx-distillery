@@ -152,7 +152,12 @@ class AssembledCandidate:
     key_fields: dict = field(default_factory=dict)
     #: The verbatim drafted text, for a promotion whose artifact_id matched a tool_call event.
     draft: str | None = None
-    #: That drafting call's own deterministic validation verdict.
+    #: That drafting call's recorded `ok` — "did this call yield a usable draft", NOT "did the
+    #: validator approve it". `make_model_tool` reports `ok=False` for three different causes (a
+    #: validator decline, an endpoint failure after retries, a breaker short-circuit that never
+    #: called the model); the FIELD deliberately collapses them, because every consumer of it —
+    #: `apply._blocking_problem`, the studio's `applyBlocker` — needs the same answer either way.
+    #: `_not_ok_problem` is where the three are told apart, in the `problems` line beside it.
     draft_ok: bool | None = None
     problems: list[str] = field(default_factory=list)
 
@@ -182,6 +187,57 @@ def _draft_calls(events: Sequence[dict], tool: str) -> dict[str, dict]:
         if isinstance(artifact_id, str) and artifact_id:
             found[artifact_id] = payload
     return found
+
+
+def _not_ok_problem(artifact_id: str | None, payload: dict) -> str:
+    """The problem line for a drafting call that came back `ok=False` — naming the REAL cause.
+
+    `rlm_kit.tools.model.make_model_tool` sets `ok=False` for THREE distinct reasons, and its
+    `ModelToolResult` field comments say so on ADJACENT lines (`endpoint_error: Optional[str]`
+    then `circuit_broken: bool`):
+
+    * `circuit_broken=True` — the breaker short-circuited and the model was NEVER CALLED (`raw=""`).
+    * `endpoint_error` set — the model call failed after its transient retries. The validator never
+      ran either; `drafting._errors_with_infra` then puts the ENDPOINT's message into `errors`.
+    * neither set — the deterministic host-side validator actually looked at the text and declined.
+
+    FIXED per adversarial review: this used to render all three as "failed its format check: <the
+    errors>", so a bare connection failure read as ``artifact 'a1' failed its format check:
+    Connection refused`` — blaming the model for an infrastructure fault, in the exact string
+    `studio/`'s PLAN panel puts in front of a human deciding what to apply (and, via
+    `apply._blocking_problem`, in the refusal reason too). The vocabulary here is deliberately the
+    one `rubric.py`'s TA criterion already established ("tripped the circuit breaker"), so the two
+    surfaces describe the same event the same way.
+
+    Only the payload's own recorded fields are consulted — no guessing from the error text.
+    `circuit_broken` is checked first because it is the strongest claim (no model call happened at
+    all); `make_model_tool` never sets both, and `test_circuit_break_outranks_endpoint_error_...`
+    pins that ORDER against a payload that (impossibly) sets both, so the precedence cannot be
+    swapped by a future tidy-up without going red.
+
+    `endpoint_error` is tested with `is not None`, NOT for truthiness. rlm-kit declares it
+    `Optional[str]` and fills it with `str(exc)`, which is the EMPTY STRING for a whole family of
+    real failures — `httpx.ConnectTimeout` / `ReadTimeout` / `ConnectError`, `TimeoutError`,
+    `OSError`, `http.client.RemoteDisconnected` all stringify to `''`. Under a truthiness test each
+    of those fell through to the validator branch and was reported as ``failed its format check: no
+    detail recorded``, which is precisely the blame-the-model-for-an-infrastructure-fault sentence
+    invariant 12 exists to prevent. Reachable only through a caller-supplied `chat_fn` today (the
+    shipped CLI uses the OpenAI SDK, which always supplies a message), which bounds the severity —
+    not the correctness.
+    """
+    detail = "; ".join(str(e) for e in (payload.get("errors") or [])) or "no detail recorded"
+    if payload.get("circuit_broken"):
+        return (
+            f"artifact {artifact_id!r} was never drafted: the drafting call tripped the circuit "
+            f"breaker (too many consecutive invalid drafts), so the model was never called — "
+            f"{detail}"
+        )
+    if payload.get("endpoint_error") is not None:
+        return (
+            f"artifact {artifact_id!r} was never drafted: the drafting model endpoint failed after "
+            f"its retries, so no draft was produced and no format check ever ran — {detail}"
+        )
+    return f"artifact {artifact_id!r} failed its format check: {detail}"
 
 
 def assemble(events: Sequence[dict], plan: DistillPlan) -> AssembledPlan:
@@ -260,10 +316,6 @@ def assemble(events: Sequence[dict], plan: DistillPlan) -> AssembledPlan:
         if not (out.draft or "").strip():
             out.problems.append(f"artifact {candidate.artifact_id!r} recorded an empty draft")
         if not out.draft_ok:
-            errors = payload.get("errors") or []
-            out.problems.append(
-                f"artifact {candidate.artifact_id!r} failed its format check: "
-                f"{'; '.join(str(e) for e in errors) or 'no detail recorded'}"
-            )
+            out.problems.append(_not_ok_problem(candidate.artifact_id, payload))
         assembled.candidates.append(out)
     return assembled

@@ -248,11 +248,22 @@ def _spec_for_skill(procedure: str, scope: str, evidence: str) -> str:
 
 
 def _errors_with_infra(result) -> list[str]:
+    """`errors`, with an INFRASTRUCTURE failure's own message substituted when it recorded none.
+
+    `endpoint_error` is tested with `is not None` for the reason `schema._not_ok_problem` spells
+    out: rlm-kit sets it to `str(exc)`, which is `''` for `httpx.ConnectTimeout`/`ReadTimeout`/
+    `ConnectError`, `TimeoutError`, `OSError` and `RemoteDisconnected`. Truthiness silently
+    reclassified every one of those as a validator decline. The `or` fallback still needs the same
+    care — an empty `endpoint_error` names the failure no better than nothing does, so an empty
+    string gets a description rather than being echoed as one.
+    """
     errors = list(result.errors)
     if result.circuit_broken:
         return errors or ["circuit breaker: too many consecutive invalid drafts"]
-    if result.endpoint_error:
-        return errors or [result.endpoint_error]
+    if result.endpoint_error is not None:
+        return errors or [
+            result.endpoint_error or "the drafting model endpoint failed and recorded no message"
+        ]
     return errors
 
 

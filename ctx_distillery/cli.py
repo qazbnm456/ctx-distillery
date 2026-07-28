@@ -83,14 +83,27 @@ here.
 """
 
 
+#: Cap on a slugged run id, matching `apply._SLUG_MAX` and the two workspace members' own sluggers
+#: (`studio`'s `app._RUN_ID_MAX`, `eval`'s `cli._TASK_ID_MAX`). A slug becomes ONE filename
+#: component and most filesystems cap one at 255 BYTES.
+_RUN_ID_MAX = 120
+
+
 def _slug(raw: str) -> str:
     """A filesystem-safe id token: keep `[A-Za-z0-9._-]`, fold the rest to `-`, strip leading and
     trailing `.`/`-` so it can never become a traversal segment (`..`, an absolute path, a nested
-    directory). The run id becomes a FILENAME, and `--run-id` is user input; the same reasoning (and
-    the same character class) as `studio`'s `_slug_id`.
+    directory), and cap at `_RUN_ID_MAX` characters — re-stripping after the cut so a truncation
+    landing on a `-`/`.` never leaves a trailing separator. The run id becomes a FILENAME, and
+    `--run-id` is user input; the same reasoning (and the same character class) as `studio`'s
+    `_slug_id`.
+
+    The cap was the LAST of the four to be applied, and it is the WRITE side: `_cmd_distill` builds
+    `<slug>.jsonl` and hands it to `TraceRecorder`, so `--run-id <300 x's>` raised a raw `OSError`
+    (ENAMETOOLONG) out of a real run instead of simply running. `eval`'s slugger already cited this
+    function as "same reasoning" while this one had no cap at all — that cross-reference is true now.
     """
     token = re.sub(r"[^A-Za-z0-9._-]+", "-", raw or "").strip("-.")
-    return token
+    return token[:_RUN_ID_MAX].rstrip("-.")
 
 
 def default_run_id(project_dir: Path) -> str:

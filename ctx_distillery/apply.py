@@ -125,6 +125,15 @@ STATUS_NOOP = "noop"
 _SLUG_SEPARATORS = re.compile(r"[\s_]+")
 _SLUG_DISALLOWED = re.compile(r"[^a-z0-9-]+")
 
+#: Cap on a slugged frontmatter name, matching `cli._slug`'s `_RUN_ID_MAX` plus the two workspace
+#: members' own sluggers (`studio`'s `app._RUN_ID_MAX`, `eval`'s `cli._TASK_ID_MAX`) — all four
+#: sluggers in this workspace now agree. A slug becomes ONE path component (`<slug>/SKILL.md` or
+#: `<slug>.md`) and most filesystems cap a component at 255 BYTES, so an uncapped one raises
+#: `OSError` (ENAMETOOLONG, errno 63 on macOS / 36 on Linux) from the first `stat` that touches it.
+#: Reproduced at just 300 characters, and the input is `frontmatter["name"]` — untrusted MODEL
+#: output, which makes this reachable from a real plan rather than only from a hand-built one.
+_SLUG_MAX = 120
+
 
 @dataclass(frozen=True)
 class ApplyOutcome:
@@ -147,10 +156,25 @@ class ApplyOutcome:
 def slugify(name: str) -> str:
     """Derive the filename stem from a drafted frontmatter `name` (gap #3).
 
-    Lowercase, `[\\s_]+` runs to a hyphen, then everything outside `[a-z0-9-]` dropped. Nothing is
-    invented: an empty result means the caller must refuse, not fall back to a made-up name — and
-    the character class is what makes the result incapable of carrying a path separator or a `..`
-    segment in the first place (the containment check below is still enforced, belt and braces).
+    Lowercase, `[\\s_]+` runs to a hyphen, then everything outside `[a-z0-9-]` dropped, then capped
+    Lowercase, `[\\s_]+` runs to a hyphen, then everything outside `[a-z0-9-]` dropped. **It does
+    NOT truncate**, and that is the point: nothing is invented here. An empty result, or one longer
+    than `_SLUG_MAX`, means the CALLER must refuse — not fall back to a made-up name. The character
+    class is also what makes the result incapable of carrying a path separator or a `..` segment in
+    the first place (the containment check below is still enforced, belt and braces).
+
+    **Why an over-long name is REFUSED rather than truncated, unlike the three run-id sluggers**
+    (`cli._slug`, `studio.app._slug_id`, `eval.cli._slug`), which all cap at 120 on purpose. A run id
+    is machine bookkeeping: it names a trace file nobody approved, so shortening it loses nothing a
+    human was relying on. A promotion slug is the opposite — `CLAUDE.md` invariant 9 states that for
+    a project skill the DIRECTORY NAME is the real identifier (the slash command comes from it, and
+    the frontmatter `name` is cosmetic). The operator approved the candidate they read in the plan;
+    silently installing it under a different, truncated identity substitutes a name they never saw.
+    That is the same failure the empty-slug branch already refuses, one degree less obvious.
+
+    A raised `OSError` is NOT how this is enforced — `_skill_target` catches path errors and refuses
+    rather than letting one escape mid-batch. This check exists so the refusal carries a reason a
+    human can act on, instead of an errno from three frames down.
     """
     lowered = (name or "").strip().lower()
     return _SLUG_DISALLOWED.sub("", _SLUG_SEPARATORS.sub("-", lowered))
@@ -305,6 +329,15 @@ def _promote(
             f"frontmatter name {name!r} slugifies to nothing — refusing rather than inventing a "
             f"fallback filename",
         )
+    if len(slug) > _SLUG_MAX:
+        return _outcome(
+            index,
+            candidate,
+            STATUS_REFUSED,
+            f"frontmatter name slugifies to {len(slug)} characters, over the {_SLUG_MAX} limit — "
+            f"refusing rather than installing under a truncated filename the operator never "
+            f"approved (see `slugify`); shorten the drafted `name` and re-run",
+        )
     filename = f"{slug}.md"
     if filename.casefold() == INDEX_FILENAME.casefold():
         return _outcome(
@@ -453,6 +486,15 @@ def _promote_skill(
             f"frontmatter name {name!r} slugifies to nothing — refusing rather than inventing a "
             f"fallback skill directory name",
         )
+    if len(slug) > _SLUG_MAX:
+        return _outcome(
+            index,
+            candidate,
+            STATUS_REFUSED,
+            f"frontmatter name slugifies to {len(slug)} characters, over the {_SLUG_MAX} limit — "
+            f"refusing rather than installing under a truncated directory name the operator never "
+            f"approved (see `slugify`); shorten the drafted `name` and re-run",
+        )
     if scope == "project" and name.strip().lower() in global_skill_names:
         return _outcome(
             index,
@@ -536,6 +578,15 @@ def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | Non
     4. `<root>/<slug>` does not already exist as something else. A NON-directory there is refused
        outright (`overwrite` means "replace this draft's file", never "replace a file with a
        directory"); an existing skill directory is a collision the caller may explicitly overwrite.
+
+    EVERY filesystem call here is inside a `try`, checks 2/3 and 4 alike. That is the whole contract
+    of this function and it used to hold only for the first two: check 4's `is_symlink()`/`exists()`/
+    `is_dir()` sat OUTSIDE, and `_ignore_error` swallows only ENOENT/ENOTDIR/EBADF/ELOOP — so an
+    over-long slug (ENAMETOOLONG, reproduced at just 300 characters, not only at 5000) raised a raw
+    `OSError` out of `apply_plan` mid-batch, leaving an `--approve 0,3` run half-applied under a
+    stack trace. `slugify` now caps its output as well, which stops that particular input reaching
+    here at all; both fixes stay, because this function's job is to be the wall for ANY caller that
+    derives a slug some other way.
     """
     if not slug.strip():
         return None, (
@@ -570,13 +621,18 @@ def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | Non
         return None, (
             f"refusing to write outside {resolved_dir}: {SKILL_FILENAME} there resolves to {resolved}"
         )
-    if skill_dir.is_symlink() or (skill_dir.exists() and not skill_dir.is_dir()):
+    try:
+        is_wrong_kind = skill_dir.is_symlink() or (skill_dir.exists() and not skill_dir.is_dir())
+        is_existing_dir = skill_dir.is_dir()
+    except (OSError, ValueError) as exc:
+        return None, f"could not stat {skill_dir}: {exc}"
+    if is_wrong_kind:
         return None, (
             f"{skill_dir} already exists and is not a skill directory — refusing to replace it "
             f"(overwrite only ever replaces a drafted {SKILL_FILENAME}, never a different kind of "
             f"file)"
         )
-    if skill_dir.is_dir() and not overwrite:
+    if is_existing_dir and not overwrite:
         return None, (
             f"name collision: the skill directory {skill_dir} already exists. Rename the draft, or "
             f"approve this ONE candidate for overwrite explicitly."

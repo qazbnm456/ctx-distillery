@@ -155,3 +155,21 @@ def test_ctx_distillery_never_imports_ctx_distillery_studio():
         if "ctx_distillery_studio" in path.read_text(encoding="utf-8")
     ]
     assert offenders == [], f"ctx_distillery must never import ctx_distillery_studio, found in: {offenders}"
+
+
+def test_this_suite_never_inherits_a_developers_private_redaction_rules():
+    """Hermeticity, and it needs its own test because no fixture could provide it.
+
+    `ctx_distillery.redact` resolves `CD_REDACTIONS` at MODULE IMPORT, which for this member happens
+    during COLLECTION (`app.py` -> `ctx_distillery.schema`/`rubric`) — before any fixture runs. The
+    guarantee therefore comes from `studio/tests/conftest.py` popping the variable at its own import
+    time, and asserting the RESOLVED tier is the only way to state it. An adversarial review found
+    this member running against a developer's private rule file while `CHANGELOG.md` claimed "the
+    suite can never inherit" one; that was true of the root suite alone.
+    """
+    import os
+
+    from ctx_distillery import redact
+
+    assert "CD_REDACTIONS" not in os.environ
+    assert redact._TIER3 == ()

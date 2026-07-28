@@ -1,0 +1,539 @@
+{
+ "1password-secret-key": {
+  "fps_over_redacted": [
+   "A3-XXXXXX-XXXXXXXXXXX-XXXXX-XXXXX-XXXXX"
+  ],
+  "fps_rejected": [
+   "A3-xXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+  ]
+ },
+ "1password-service-account-token": {
+  "fps_over_redacted": [
+   "ops_eyJxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "fps_rejected": [
+   "        login:\n          serviceAccountToken:\n            fn::secret: ops_eyJzaWduSW5B..[Redacted]",
+   ": To start using this service account, run the following command:\n:\n: export OP_SERVICE_ACCOUNT_TOKEN=ops_eyJzaWduSW5BZGRyZXNzIjoiaHR0cHM6..."
+  ],
+  "tps": [
+   "### 1Password System Vault Name\nexport OP_SERVICE_ACCOUNT_TOKEN=ops_eyJzaWduSW5BZGRyZXNzIjoibXkuMXBhc3N3b3JkLmNvbSIsInVzZXJBdXRoIjp7Im1ldGhvZCI6IlNSUGctNDA5NiIsImFsZyI6IlBCRVMyZy1IUzI1NiIsIml0ZXJhdGlvbnMiOjY1MdAwMCwic2FsdCI6InE2dE0tYzNtRDhiNUp2OHh1YVzsUmcifSwiZW1haWwiOiJ5Z3hmcm0zb21oY3NtQDFwYXNzd29yZHNlcnZpY2VhY2NvdW50cy5jb20iLCJzcnBYIjoiM2E5NDdhZmZhMDQ5NTAxZjkxYzk5MGFiY2JiYWRlZjFjMjM5Y2Q3YTMxYmI1MmQyZjUzOTA2Y2UxOTA1OTYwYiIsIm11ayI6eyJhbGciOiJBMjU2R0NNIiwiZXh0Ijp0cnVlLCJrIjoiVVpleERsLVgyUWxpa0VqRjVUUjRoODhOd29ZcHRqSHptQmFTdlNrWGZmZyIsImtleV9vcHMiOlsiZW5jcnlwdCIsImRlY3J5cHQiXSwia3R5Ijoib2N0Iiwia2lkIjoibXAifSwic2VjcmV0S2V5IjoiQTMtNDZGUUVNLUVZS1hTQS1NUU0yUy04U0JSUS01QjZGUC1HS1k2ViIsInRocm90dGxlU2VjcmV0Ijp7InNlZWQiOiJjZmU2ZTU0NGUxZTlmY2NmZjJlYjBhYWZmYTEzNjZlMmE2ZmUwZDVlZGI2ZTUzOTVkZTljZmY0NDY3NDUxOGUxIiwidXVpZCI6IjNVMjRMNVdCNkpFQ0pEQlhJNFZOSTRCUzNRIn0sImRldmljZVV1aWQiOiJqaGVlY3F4cm41YTV6ZzRpMnlkbjRqd3U3dSJ9\n",
+   "PYTEST_SVC_ACCT_TOKEN=ops_eyJzaWduSW5BZGRyZXNzIjoiemFjaC1hbmQtbGVhbm5lLjFwYXNzd29yZC5jb20iLCJ1c2VyQXV0aCI6eyJtZXRob2QiOiJTUlBnLTQwOTYiLCJhbGciOiJQQkVLMmctSFMyNTYiLCJpdGVyYXRpb25zIjo2NTAwMDAsInNhbHQiOiJlYUZRQmNVemJyTHhnM2d4bHFQLVVBIn0sImVtYWlsIjoiMm9iNGRpeDdiNTdrYUAxcGFzc3dvcmRzZXJ2aWNlYWNjb3VudHMuY29tIiwic3JwWCI6ImVmZDY4YjNhZTkwMmRjZjRiMzEzYjE5MjYwZmY0OGUzMjU2ZDlhOGNkM2JmMmY3YzI2YzU1ZWJkNjZlZGU4NWEiLCJtdWsiOnsiYWxnIjoiQTI1NkdDTSIsImV4dCI6dHJ1ZSwiayI6IlMwaGE0SDhqbEhRblJCWmxvYnBmR1BneERmbS1pRGNkZWY0bFdYU0VSbmMiLCJrZXlfb3BzIjpbImRlY3J5cHQiLCJlbmNyeXB0Il0sImt0eSI6Im9jdCIsImtpZCI6Im1wIn0sInNlY3JldEtleSI6IkEzLUdHOUVRNi1LUzQ0QVctQU5QVkYtUkdQTDktQlNKUTMtR1NHR0giLCJ0aHJvdHRsZVNlY3JldCI6eyJzZWVkIjoiN2I0OTMxMmJiOTlkZTFiNjU5ODZkYzIzOWU4YWNmZWMxMTU0M2E2OGQxYmYwMjZmZTgzMjg3NWYxNmJlOWY2NiIsInV1aWQiOiJDV1RHQ0hMNlNWRkdSTlg0SzNENUJVSDZDSSJ9LCJkZXZpY2VVdWlkIjoiMnFld3JpaGtqbmt1Zmh6ZGdmZ2hnNmM1cGUifQ",
+   "    \"sourceContent\": \"ops_eyJlbWFpbCI6ImVqd2U2NHFtbHhocmlAMXBhc3N3b3Jkc2VydmljZWFjY291bnRzLmxjbCIsIm11ayI6eyJhbGciOiJBMjU2R0NNIiwiZXh0Ijp0cnVlLCJrIjoiTThWUGZJYzhWRWZUaGNNWExhS0NLRjhzTWg1Sk1ac1BBdHU5MmZRTmItbyIsImtleV9vcHMiOlsiZW5jcnlwdCIsImRlY3J5cHQiXSwia3R5Ijoib2N0Iiwia2lkIjoibXAifSwic2VjcmV0S2V5IjoiQTMtQzRaSk1OLVBRVFpUTC1IR0w4NC1HNjRNNy1LVlpSTi00WlZQNiIsInNycFgiOiI4NzBkNjdhOWU2MjY2MjVkOWUzNjg1MDc4MDRjOWMzMmU2NjFjNTdlN2U1NTg3NzgyOTFiZjI5ZDVhMjc5YWUxIiwic2lnbkluQWRkcmVzcyI6ImdvdGhhbS5iNWxvY2FsLmNvbTo0MDAwIiwidXNlckF1dGgiOnsibWV0aG9kIjoiU1JQZy00MDk2IiwiYWxnIjoiUEJFUzJnLUhTMjU2IiwiaXRlcmF0aW9ucyI6MTAwMDAwLCJzYWx0IjoiRk1SVVBpeXJONFhmXzhIb2g2WVJYUSJ9fQ\\n\\nops_token is secret.\\n\","
+  ]
+ },
+ "anthropic-admin-api-key": {
+  "fps_rejected": [
+   "sk-ant-admin01-abc123xyz-456de-klMnopqrstuvwx-3456yza789bcde-1234fghijklmnopAA",
+   "sk-ant-admin01-abc123xyz-456def789ghij-klmnopqrstuvwx-3456yza789bcde-1234fghijklmnopby56aaaogaopaaaabc123xyzBB",
+   "sk-ant-api03-abc123xyz-456def789ghij-klmnopqrstuvwx-3456yza789bcde-1234fghijklmnopby56aaaogaopaaaabc123xyzAA"
+  ],
+  "tps": [
+   "sk-ant-admin01-abc12fake-456def789ghij-klmnopqrstuvwx-3456yza789bcde-12fakehijklmnopby56aaaogaopaaaabc123xyzAA"
+  ]
+ },
+ "anthropic-api-key": {
+  "fps_rejected": [
+   "sk-ant-api03-abc123xyz-456de-klMnopqrstuvwx-3456yza789bcde-1234fghijklmnopAA",
+   "sk-ant-api03-abc123xyz-456def789ghij-klmnopqrstuvwx-3456yza789bcde-1234fghijklmnopby56aaaogaopaaaabc123xyzBB",
+   "sk-ant-admin01-abc123xyz-456def789ghij-klmnopqrstuvwx-3456yza789bcde-1234fghijklmnopby56aaaogaopaaaabc123xyzAA"
+  ],
+  "tps": [
+   "sk-ant-api03-abc123xyz-456def789ghij-klmnopqrstuvwx-3456yza789bcde-1234fghijklmnopby56aaaogaopaaaabc123xyzAA"
+  ]
+ },
+ "artifactory-api-key": {
+  "fps_over_redacted": [
+   "lowEntropy := AKCpXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  ]
+ },
+ "artifactory-reference-token": {
+  "fps_over_redacted": [
+   "lowEntropy := cmVmdXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  ]
+ },
+ "aws-access-token": {
+  "fps_over_redacted": [
+   "key = AKIAXXXXXXXXXXXXXXXX",
+   "aws_access_key: AKIAIOSFODNN7EXAMPLE"
+  ],
+  "fps_rejected": [
+   "msgstr \"N\u00e4yt\u00e4 asiakirjamallikansio.\"",
+   "TODAYINASIAASACKOFRICEFELLOVER",
+   "CTTCATAGGGTTCACGCTGTGTAAT-ACG--CCTGAGGC-CACA-AGGGGACTTCAGCAACCGTCGGG-GATTC-ATTGCCA-A--TGGAAGCAATC-TA-TGGGTTA-TCGCGGAGTCCGCAAAGACGGCCAGTATG-AAGCAGATTTCGCAC-CAATGTGACTGCATTTCGTG-ATCGGGGTAAGTA-TC-GCCGATTC-GC--CCGTCCA-AGT-CGAAG-TA--GGCAATATAAAGCTGC-CATTGCCGAAGCTATCTCGCTA-TACTTGAT-AATCGGCGG-TAG-CACAG-GTCGCAGTATCG-AC-T--AGG-CCTCTCAAAAGTT-GGGTCCCGGCCTCTGGGAAAAACACCTCT-A-AGCGTCAATCAGCTCGGTTTCGCATATTA-TGATATCCCCCGTTGACCAATTGA--TAGTACCCGAGCTTACCGTCGG-ATTCTGGAGTCTT-ATGAGGTTACCGACGA-CGCAGTACCATAAGT-GCGCAATTTGACTGTTCCCGTCGAGTAACCA-AGCTTTGCTCA-CCGGGATGCGCGCCGATGTGACCAGGGGGCGCATGTTACATTGAC-A-GCTGGATCATGTTATGAC-GTGGGTC-ATGCTAAAAGCCTAAAGGACGGT-GCATTAGTAT-TACCGGGACCTCATATCAATGCGCTCGCTAGTTCCTCTTCTCTTGATAACGTATATGCGTCAGGCGCCCGTCCGCCTCCAATACGTG-ACAACGTC-AGTACTGAGCCTC--AA-ACATCGTCTTGTTCG-CC-TACAAAGGATCGGTAGAAAACTCAATATTCGGGTATAAGGTCGTAGGAAGTGTGTCGCCCAGGGCCG-CTAGA-AGCGCACACAAGCG-CTCCTGTCAAGGAGTTG-GTGAAAA-ATGAAC--GACT-ATTGCGTCAC--CTACCTCT-AAGTTTTT-GACAATTTCATGGACGAATTGA-AGCGTCCACAAGCATCTGCCGTAGATATGCGGTAGGTTTTTACATATG-TCACTGCAGAGTCACGGACA-CACATCGCTGTCAAAATGCTCGTACCTAGT-GT-TTGCGATCCCCC-GCGGCATTA-TCTTTTGAACCCTCGTCCCTGTGG-CTCTGATGATTGAG-GTCTGTA-TTCCCTCGTTGTGGGGGGATTGGACCTT-TGTATAGGTTCTTTAACCG-ATGGGGGGCCG--ATCGA-A-TA-TGCTCCTGTTTGCCCCGAACCTT-ACCTCGG-TCCAGACA-CTAAGAAAAACCCC-C-ACTGTAAGGTGCTGAGCCTTTGGATAGCC-CGCGAATGAT-CC-TAGTTGACAA-CTGAACGCGCTCGAACA-TGCCC-GCCCTCTGA--CTGCTGTCTG-GCACCTTTAGACACGCGTCGAC-CATATATT-AGCGCTGTCTGTGG-AGGT-TGTGTCTTGTTGCTCA-CT-CATTATCTGT-AACTGGCTCC-CTC-CCAT-TGGCGTCTTTACACCAACCGCTAGGTTACAGTGCA-TCTAGCGCCTATTATCAGGGCGT-TTGCAGCGGCGCGGTGGCTATGT-GTTAGACATATC-CTTACACTGTATGCTAG-AGCAAGCCAC-TCTGAATGGGTTGC-CGATGAATGA-TCTTGATC-GAGCTCGCA-AC---TACATGGAGTCCGAAGTGAACCTACGGATGATCGTATTCCAACACGAGGATC-TATACGTATAGG-A-GGCG-TAATCCACAATTTAGTAACTCTTGACGC---GGATGAAAAT-GTCGTTACACCTTCCAGAGGCTCGG-GTATATATATGACCT--TGTGATTGAGGACGATCTAGAATAA-CT-GT-G-CT-AAAGTACAGTAGTTTCTATGT-GGTAGGTGGAGAATACAGAGTAG-ATGATTC-GTGGGCCACA-C--T-ACTTTCAT-TAGAGCAGAGA-C-GTGAGTGAGTTTTACACTAGCCAGATGGACCG-GTGA-AGTCTAACAGCCACCGCTT-GTGAGGTCGTTTCCCAGTC-ACCCTACTACAGGCAAAAACTCAGTGT-CC-GTGA-GTGCGTTAGTGATATTCCCTAACGGTTAGGTAACT-CATGAATTCA-AT-TAAGCGTGTCC-CGGT-CACGCCCCCATGGGGGCCTTCTTGGGAGG--AGCATCTTAT--AT-GCTCACGTGGTT-GATAGG-A-T-AATACACTTTTAGTCAGTCCATCAATAAC-AAAGGAAC---CAGGTGGTCGCAGATA-TCCCGCTGATATAGCACTGTGTAAACTCAGGTGATA-CTAAGC--GCTCTAAT-ACG-CTTAATGGCAATGCCCAGTTC--ACGACTAGCTTATGAGGCCCAGCTATGGACTGCGGC-GGCATGTCGGC-GATGGTTGCCCTCGCCCTAAATTATGTACGA-T-ACCGCCT-CTTGTTCT-CCGCCCATAGGGT-C--AGCAGGCGATAGACTCCCAGAAATTTCCTCGTCGT-CCGAATAAGACTAACACGACTA-TT-CCTCTAC-GT-G-AA-CTTATCA-CAAATG-GCT-TACC-TAGGTGGTGGCAGATCACTTTCCGGTG-TATTACGAATTGACGCATACCGAC-A-CGC-GCTTGTTGGATAATCGACTCTAACCTCCTCTCTGGCACATGT-GCTGGATTACCTC-TATTTT-TCTCGCTTAG--GGAACG-T-CCTCTGTCGCGTGAG-GTACGTTTCACGGGAG-CGGCTTGTTCATGCCACGTCCATTATCGA-AGTG-C-GTAAGG-A-GAGCCCTA--GACTCTACACGGAAA-TC-AAC-GTAGAAGGCTC-A-CT"
+  ]
+ },
+ "aws-amazon-bedrock-api-key-long-lived": {
+  "fps_rejected": [
+   "ABSKQmVkcm9ja0FQSUtleS1EXAMPLE",
+   "ABSKQmVkcm9ja0FQSUtleS1EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE=",
+   "AXSKQmVkcm9ja0FQSUtleS1EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXM="
+  ],
+  "tps": [
+   "ABSKQmVkcm9ja0FQSUtleS1EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXM="
+  ]
+ },
+ "aws-amazon-bedrock-api-key-short-lived": {
+  "fps_rejected": [
+   "bedrock-api-key-",
+   "bedrock-api-key-YmVkcm9jay5hbWF6b25hd3MuY29x"
+  ]
+ },
+ "azure-ad-client-secret": {
+  "fps_over_redacted": [
+   "client_secret=bP88Q~xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "fps_rejected": [
+   "![\u56fe\u6e90\uff1a\u300a\u6df1\u5165\u62c6\u89e3Tomcat & Jetty\u300b](https://p3-juejin.byteimg.com/tos-cn-i-k3u1fbpfcp/6a9e704af49b4380bb686f0c96d33b81~tplv-k3u1fbpfcp-watermark.image)",
+   "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+   "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+   ".ui.visible.right.sidebar~.ui.visible.left.sidebar~.pusher{transform:translate3d(0,0,0)}",
+   "buf.WriteString(\"~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\\n\\n::\\n\\n\")",
+   "'url': 'http://www.2doc.nl/speel~VARA_101375237~mh17-het-verdriet-van-nederland~.html',",
+   "@ar = split(\"~\", \"965f1453~47~09414c93e4cef985416f472549220827da3ba6fed8ad28e29ef6ad170ad53a69051e9b06f439ef6da5df8670181f7eb2481650\");",
+   "'#!/registries/5/portainer.demo~2Fportainerregistrytesting~2Falpine',",
+   "// CloudFront-Signature: Ixn4bF1LLrLcB8XG-t5bZbIB0vfwSF2s4gkef~PcNBdx73MVvZD3v8DZ5GzcqNrybMiqdYJY5KqK6vTsf5JXDgwFFz-h98wdsbV-izcuonPdzMHp4Ay4qyXM6Ed5jB9dUWYGwMkA6rsWXpftfX8xmk4tG1LwFuJV6nAsx4cfpuKwo4vU2Hyr2-fkA7MZG8AHkpDdVUnjm1q-Re9HdG0nCq-2lnBAdOchBpJt37narOj-Zg6cbx~6rzQLVQd8XIv-Bn7VTc1tkBAJVtGOHb0Q~PLzSRmtNGYTnpL0z~gp3tq8lhZc2HuvJW5-tZaYP9yufeIzk5bqsT6DT4iDuclKKw__, , , false"
+  ],
+  "tps": [
+   "client_secret=bP88Q~rcBcYjzzOhg1Hnn76Wm3jGgakZiZ.8vMgR",
+   "client_secret=bP88Q~rcBcYjzzOhg1Hnn76Wm3jGgakZiZ.8vMgR\n",
+   "client_secret: .IQ8Q~79R7TOWOspFnWcEG-dYt4KXqFqxK16cxr",
+   "AUTH_CLIENTSECRET = _V28Q~IC8qxmlWNpHuDm34JlbKv9LXV5MvUR3a-P",
+   "<value xsi:type=\"xsd:string\">~Gg8Q~nVhlLi2vpg_nXBGqFsbGK-t~Hus1JmTa0y</value>",
+   "\"CLIENT_SECRET\": \"YYz7Q~Sudoqwap1PnzEBA3zqBK~i5uesDIv.C\"",
+   "Set-PSUAuthenticationMethod -Type 'OpenIDConnect' -CallbackPath '/auth/oidc' -ClientId 'fake' -ClientSecret '2Vq7Q~q5VgKljZ7cb3.0sp0Apz.vOjRIPyeTr'",
+   "client-secret: \"t028Q~-aLbmQuinnZtzbgtlEAYstnBWEmGPAoBm\"",
+   "\"cas.authn.azure-active-directory.client-secret=qHF8Q~PCM5HhMoyTFc5TYEomnzR6Kim9UJhe8a.P\",",
+   "\"line\": \"client_srt = \\\"qpF8Q~PCM5MhMoyTFc5TYEomnYRUKim9UJhe8a2P\\\";\",",
+   "\"client_secret\":       acctest.Representation{RepType: acctest.Required, Create: 'dO29Q~F5-VwnW.lZdd11xFF_t5NAXCaGwDl9NbT1'},",
+   "Example= GN.7Q~4AkLZBNEbz4Jxlm~O5G6SsyFxYg6zMR",
+   "\"the_value\": \"QtT8Q~9C-_Ij~RouHVpD2Tuf3oHWGh.DQ3kcjbAn\"",
+   "QtT8Q~9C-_Ij~RouHVpD2Tuf3oHWGh.DQ3kcjbAn",
+   "(use the client secret: QtT8Q~9C-_Ij~RouHVpD2Tuf3oHWGh.DQ3kcjbAn)",
+   "(QtT8Q~9C-_Ij~RouHVpD2Tuf3oHWGh.DQ3kcjbAn)"
+  ]
+ },
+ "clickhouse-cloud-api-secret-key": {
+  "fps_over_redacted": [
+   "key = 4b1dXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  ],
+  "fps_rejected": [
+   "key = adf4b1dbRdW3rOcB7xLthrM4BTBGK1qPLkHigpN1bXD6z"
+  ]
+ },
+ "curl-auth-header": {
+  "fps_over_redacted": [
+   "curl https://example.com/micropub -d h=entry -d \"content=Hello World\" -H \"Authorization: Bearer XXXXXXXXXXXX\""
+  ],
+  "fps_rejected": [
+   "curl -X POST https://accounts.spotify.com/api/token -d grant_type=client_credentials --header \"Authorization: Basic ...\"",
+   "curl \\\n  -H \"Authorization: Bearer <Openverse API token>\" \\\n  \"https://api.openverse.org/v1/audio/?q=test\"",
+   "curl -v -v -v -X POST https://domain/api/v1/authentication/sso/login-url/ \\\n  -H 'Content-Type: application/json' \\\n  -H \"Authorization: Token **********\" \\\n  -d '{\"username\": \"test\", \"next\": \"/luna/\"}'",
+   "curl -XPOST http://localhost:8080/api/token -H \"Authorization: basic {base64(email:password[\\n])}\" => token",
+   "curl -X GET \\\n     -H \"apikey: $API_KEY\" \\\n     -H \"Accept: $FORMAT\" \\\n\"$API_URL/rest/v1/stats_derniere_labellisation\"",
+   "$ curl -X POST \"http://localhost:8000/v1/chat/completions\" \\\n    -H \"Content-Type: application/json\" \\\n    -H \"Authorization: Bearer $API_KEY\" \\\n    -d '{\n        \"model\": \"chatglm3-6b-32k\",\n        \"messages\": [{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"}, {\"role\": \"user\", \"content\": \"Hello!\"}]\n    }'",
+   "curl -X GET -H \"Content-Type: application/json\" -H \"Authorization: Bearer $(gcloud auth print-access-token)\" https://workflowexecutions.googleapis.com/v1/projects/244283331594/locations/us-central1/workflows/sample-workflow/executions/43c925aa-514a-44c1-a0a4-a9f8f26fd2cb/callbacks/1705791f-d446-4e92-a6d0-a13622422e80_31864a51-8c13-4b03-ad4d-945cdc8d0631",
+   "curl -X POST -H \"Content-Type: application/json\" -H \"Authorization: Basic eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjb25maWRlbmNlIjowLjh9.kvRPfjAhLhtRTczoRgctVGp7KY1QVH3UBZM-gM0x8ec\" \\"
+  ],
+  "tps": [
+   "curl --header  'Authorization:  5eb4223e-5008-46e5-be67-c7b8f2732305'",
+   "curl -H 'Authorization: Basic YnJvd3Nlcjo=' \\",
+   "curl -k -X POST --header \"Authorization: Basic djJlNEpYa0NJUHZ5a2FWT0VRXzRqZmZUdDkwYTp2emNBZGFzZWpmlWZiUDc2VUJjNDNNVDExclVh\" \"https://api-qa.example.com:8243/token\" -d \"grant_type=client_credentials\"",
+   "curl -X POST -H \"Content-Type: application/json\" \\\n -H \"Authorization: Basic MzUzYjMwMmM0NDU3NGY1NjUwNDU2ODdlNTM0ZTdkNmE6Mjg2OTI0Njk3ZTYxNWE2NzJhNjQ2YTQ5MzU0NTY0NmM=\" \\\n  -d '{\"user\":{\"emailAddress\":\"test@example.com\"}, \"password\":\"password\"}' \\\n  'http://localhost:8080/oauth2-provider/v1.0/users'",
+   "#curl -X POST \\\n#  https://api.mailgun.net/v3/sandbox7dbcabccd4314c123e8b23599d35f5b6.mailgun.org/messages \\\n#  -H 'Authorization: Basic YXBpOmtleS1hN2MzNDJ3MzNhNWQxLTU2M2U3MjlwLTZhYjI3YzYzNzM0Ng==' \\\n#  -F from='Excited User <mailgun@sandbox7dbc123bccd4314c0aae8b23599d35f5b6.mailgun.org>' \\\n#  -F to='joe@example.com' \\\n#  -F subject='Hello' \\\n#  -F text='Testing some Mailgun awesomness!'",
+   "# curl -X GET \"http://localhost:3000/api/cron/status\" -H \"Authorization: Bearer cfcabd11c7ed9a41b1a3e063c32d5114\"",
+   "curl https://api.openai.com/v1/chat/completions \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Authorization: Bearer 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\" \\",
+   "curl -X GET \"https://api.cloudflare.com/client/v4/user/tokens/verify\" \\\n     -H \"Authorization: Bearer _FXNljbSRYMWx3TWrd7lgKhLtVZX6iskC8Wcbb4b\" \\\n     -H \"Content-Type:application/json\"",
+   "curl -H \"Authorization: Bearer sha256~bRLFnzd59Z3XpZH5_seJPHALOuvbWiKwbFKSsoALkgp\"",
+   "curl -H \"Authorization: Api-Token 22cb987851bc5659l29114c62e60c79abd0d2c08\" --request PUT https://appsecclass.report/api/use/635",
+   "curl -H \"Authorization: Token 22cb987851bc5659229114c62e60c79abd0d2c08\" --request PUT https://appsecclass.report/api/use/635",
+   "curl -L -H \"Authorization:eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjb25maWRlbmNlIjowLjh9.kvRPfjAhLhtRTczoRgctVGp7KY1QVH3UBZM-gM0x8ec\" service1.local -> correct jwt ",
+   "curl -X GET \\\n     -H \"apikey: c4ed6c21-9dd5-4a05-8e3f-c56d1151cce8\" \\\n     -H \"Accept: application/json\" \\",
+   "curl -X POST --header \"Api-Token: Sk94HG7f6KB\"",
+   "curl -XPOST http://localhost:8080/api/tasks -H \"Content-Type: application/x-www-form-urlencoded; charset=UTF-8\" -H \"Token: 3fea6af1349166ea\" -d \"content=hello-curl\"",
+   "curl -X GET https://octopus.corp.net/\n     -H \"X-Octopus-ApiKey: 3a16750d-d363-41a4-8ebd-035408f7730f\" \\"
+  ]
+ },
+ "curl-auth-user": {
+  "fps_over_redacted": [
+   "curl -i -u 'test:test'",
+   "curl -u username:token",
+   "curl -u \"${_username}:${_password}\"",
+   "curl -u \"${username}\":\"${password}\"",
+   "curl -k -X POST -I -u \"SRVC_JENKINS:${APPID}\"",
+   "curl -sw '%{http_code}' -X POST --user '$USERNAME:$PASSWORD' $GItHUB_API_URL/$GIT_COMMIT --data",
+   "curl --user \"xxx:yyy\"",
+   "           curl -sL --user \"$GITHUB_USERNAME:$GITHUB_PASSWORD\" \"$GITHUB_URL\" > \"$TESTS_PATH\"",
+   "curl --silent --fail {{- if and $.Values.username $.Values.password }} --user \"{{ $.Values.username }}:{{ $.Values.password }}\"",
+   "curl -XGET -i -u \"${{ env.ELK_ID }}:${{ build.env.ELK_PASS }}\"",
+   "curl -XGET -i -u \"${{needs.vault.outputs.account_id}}:${{needs.vault.outputs.account_password}}\"",
+   "curl -XGET -i -u \"${{ steps.vault.outputs.account_id }}:${{ steps.vault.outputs.account_password }}\"",
+   "curl -X POST --user \"$(cat ./login.txt):$(cat ./password.txt)\"",
+   "curl http://127.0.0.1:5000/file --user user:pass --digest        # digest auth",
+   "   curl -X GET --insecure --user \"username:password\" \\"
+  ],
+  "fps_rejected": [
+   "   curl -sL --user \"$1:$2\" \"$3\" > \"$4\"",
+   "curl -u <user:password> https://test.com/endpoint",
+   "curl --user neo4j:[PASSWORD] http://[IP]:7474/db/data/",
+   "curl -u \"myusername\" http://localhost:15130/api/check_user/",
+   "curl -u \":\" https://localhost:9200",
+   "curl --silent --insecure --user ${f5user}:${f5pass} \\",
+   "curl --insecure --ssl-reqd \"smtps://smtp.gmail.com\" --mail-from \"src@gmail.com\" --mail-rcpt \"dst@gmail.com\" --user \"src@gmail.com\" --upload-file out.txt",
+   "#HTTP command line test\ncurl -X POST -H \"Content-Type: application/json\" -d '{\"id\":12345,\"geo\":{\"latitude\":28.50,\"longitude\":-81.14}}' http://<ip>:8080/serve\n\n#UDP command line test\necho -n '{\"type\":\"serve\",\"channel\":\"/\",\"data\":{\"site_id\":8,\"post_id\":12345,\"geo\":{\"lat\":28.50,\"long\":-81.14}}}' >/dev/udp/127.0.0.1/41234\n\n#UDP Listener (for confirmation)\nnc -u -l 41234"
+  ],
+  "tps": [
+   "curl --cacert ca.crt -u elastic:P@ssw0rd$1 https://localhost:9200",
+   "sh-5.0$ curl -k -X POST https://infinispan:11222/rest/v2/caches/default/hello \\\n  -H 'Content-type: text/plain' \\\n  -d 'world' \\\n  -u developer:yqDVtkqPECriaLRi",
+   "curl -u \":d2LkV78zLx!t\" https://localhost:9200",
+   "curl -u \"d2LkV78zLx!t:\" https://localhost:9200",
+   "curl -sw '%{http_code}' -X POST --user  'johns:h0pk1ns~21s' $GItHUB_API_URL/$GIT_COMMIT --data",
+   "curl --user roger23@gmail.com:pQ9wTxu4Fg https://www.dropbox.com/cli_link?host_id=abcdefg -v",
+   "curl -s --user 'api:d2LkV78zLx!t' \\\n    https://api.mailgun.net/v2/sandbox91d3515882ecfaa1c65be642.mailgun.org/messages",
+   "curl -s -v --user \"j.smith:dB2yF6@qL9vZm1P#4J\" \"https://api.contoso.org/user/me\"",
+   "curl -X POST --user \"{acd3c08b-74e8-4f44-a2d0-80694le24f46}\":\"{ZqL5kVrX1n8tA2}\" --header \"Accept: application/json\" --data \"{\\\"text\\\":\\\"Hello, world\\\",\\\"source\\\":\\\"en\\\",\\\"target\\\":\\\"es\\\"}\" https://gateway.watsonplatform.net/language-translator/api",
+   "curl --user kevin:'pRf7vG2h1L8nQkW9' -iX PATCH -H \"Content-Type: application/json\" -d",
+   "$ curl https://api.dropbox.com/oauth2/token \\\n  --user c28wlsosanujy2z:qgsnai0xokrw4j1 --data grant_type=authorization_code"
+  ]
+ },
+ "databricks-api-token": {
+  "fps_rejected": [
+   "DATABRICKS_TOKEN=dapi123456789012345678a9bc01234defg5"
+  ]
+ },
+ "facebook-access-token": {
+  "tps": [
+   "{\"facebook access_token\":\"911602140448729|AY-lRJZq9BoDLobvAiP25L7RcMg\",\"token_type\":\"bearer\"}",
+   "facebook 1308742762612587|rhoK1cbv0DOU_RTX_87O4MkX7AI",
+   "facebook 1477036645700765|wRPf2v3mt2JfMqCLK8n7oltrEmc"
+  ]
+ },
+ "facebook-page-access-token": {
+  "fps_over_redacted": [
+   "\"strict-uri-encode@npm:^2.0.0\":\n  version: 2.0.0\n  resolution: \"strict-uri-encode@npm:2.0.0\"\n  checksum: eaac4cf978b6fbd480f1092cab8b233c9b949bcabfc9b598dd79a758f7243c28765ef7639c876fa72940dac687181b35486ea01ff7df3e65ce3848c64822c581\n  languageName: node\n  linkType: hard"
+  ],
+  "fps_rejected": [
+   "eaaaC0b75a9329fded2ffa9a02b47e0117831b82"
+  ],
+  "tps": [
+   "EAAM9GOnCB9kBO2frzOAWGN2zMnZClQshlWydZCrBNdodesbwimx1mfVJgqZBP5RSpMfUzWhtjTTXHG5I1UlvlwRZCgjm3ZBVGeTYiqAAoxyED6HaUdhpGVNoPUwAuAWWFsi9OvyYBQt22DGLqMIgD7VktuCTTZCWKasz81Q822FPhMTB9VFFyClNzQ0NLZClt9zxpsMMrUZCo1VU1rL3CKavir5QTfBjfCEzHNlWAUDUV2YZD",
+   "EAAM9GOnCB9kBO2zXpAtRBmCrsPPjdA3KeBl4tqsEpcYd09cpjm9MZCBIklZBjIQBKGIJgFwm8IE17G5pipsfRBRBEHMWxvJsL7iHLUouiprxKRQfAagw8BEEDucceqxTiDhVW2IZAQNNbf0d1JhcapAGntx5S1Csm4j0GgZB3DuUfI2HJ9aViTtdfH2vjBy0wtpXm2iamevohGfoF4NgyRHusDLjqy91uYMkfrkc",
+   "- name: FACEBOOK_TOKEN\n\t\tvalue: \"EAACEdEose0cBA1bad3afsf286JZCOV1XmV4NobAXqUXZA7U9F1UaaOdQZABvz73030MJoC3gGoQrE8IEoMl4gFA6MmQadlJQBqtRsgIcIhtelIJOJaew\""
+  ]
+ },
+ "flyio-access-token": {
+  "fps_over_redacted": [
+   "resource \"doppler_integration_flyio\" \"prod\" {\n  name    = \"TF Fly.io\"\n  api_key = \"fo1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n}"
+  ],
+  "fps_rejected": [
+   "pub const MINIDUMP_SYSMEMINFO1_PERF_CCTOTALDIRTYPAGES_CCDIRTYPAGETHRESHOLD: u32 = 4u32;",
+   "<input type=\"hidden\" name=\"authenticity_token\" value=\"7SWa-Fo1_hsC6oovfBsJFLGPUl2EhkSWPbJhWANwgaJWBDl1vxd9VNqXTNAefsJqzIRYaZEfYZLffa31rw8zJA\" autocomplete=\"off\" />",
+   "signature\":\"I7l2ZXhw9ajjIE2w9tjHNvYjcHg7E2qldMMhoQKjborcWIj8c40rMj83venoy6gXsg6V6B7dlBWxUmzYJR3lJKGECtCSM5BqBvWhL6wX2CN2lZlvwNCyPjG4PCt5MAK1yV1Xv4fqfz8EfT_U49vOzfM1a_nfhXOzrvdg9XgLkAotWBI31vPKjMBrvPqiLcZ12MDNTSK7ubRpVaehSNxiGYHpLhWTkun9qm_APYYXJBjhJYkej50Qcp7Ou8fs3kH02prYIJt4JbWelr5vUDkgMH3AwEx1eYu5NI_8sESlqosl1nhSDx7zq3X1FV1iJlAYCNwGWzW1tjo8PCaJrIHVZZnhBPMN-6ahmOpKb8GViqd4fCQuNe4VUSOeJg8i97kMuk-4r7hwIubR0XfCGzxr7uGDQBdFANi3c4dLlzBAJNifa6b_hT4Xzqja6RCFSv6Cnalyx3hbSkjbyThnXFavJIiR7cvgTcdECg9VxkaxqqRhfAkLAS3hpXQAIYL_bw61M3LN37WHwdgxN_6yZhbSbOsYPmTxiWvdlDaCP_iaCgXgJNfdQ6kep_I89slynE9gdDZ6NSjFJH2Soml4pR6HnQKPjA3OpoTwPSmZjxXY5I78xvrRqRkjdnVzeufqG8LyA-sAEtC0G_312JOxV4GZINquPGk1qFx8WN59Rxw28Tg\",",
+   "<p><span class=\"emoji\">\ud83d\udde3\ufe0f</span> Adobe illustrator\u8f6f\u4ef6\u57fa\u7840\u7cbe\u8bb2\u8bfe\u7a0b<br><br><span class=\"emoji\">\ud83c\udff7\ufe0f</span> <a href=\"https://t.me/abskoop/8565?q=%23%E8%AE%BE%E8%AE%A1%E5%B8%88\">#\u8bbe\u8ba1\u5e08</a> <a href=\"https://t.me/abskoop/8565?q=%23%E8%B5%84%E6%BA%90\">#\u8d44\u6e90</a> <a href=\"https://t.me/abskoop/8565?q=%23%E5%A4%B8%E5%85%8B%E7%BD%91%E7%9B%98\">#\u5938\u514b\u7f51\u76d8</a><br><br><span class=\"emoji\">\ud83d\udc49</span> <a href=\"https://www.ahhhhfs.com/62409/\" target=\"_blank\" rel=\"noopener\">https://www.ahhhhfs.com/62409/</a></p><img src=\"https://cdn5.cdn-telegram.org/file/uGoDMy0VXMbL1nki9OT0VbJYtfURvDNLurptsQVuhuzF45tNfm2_z5wgR7CnL7lTZ4bbotjXZtiLWvolNQqWBRFWkcidtzSyhWvta9yPB3E2uyvfJvGpditkaLVIiCCXt9BhFBEdgkXa8ODaM7geHK3pW0tmO_IViHBnG8VZqVfDpaQW0W9IRAUwGv2mPZWVRysPJyDSIuY9b-_3ElUml-Xlpm1r8EDcm9Q2WCTCOYur7Gmef4imQ5D-DLTviqmoONgQDLA10WVS3CApXBK4ADSjoIUeMck62owtjElSXnEYMaSGI_OE3B21QplsspPbPlXVUBScLfLOFb9tn-34tw.jpg\" width=\"800\" height=\"533\" referrerpolicy=\"no-referrer\">"
+  ]
+ },
+ "gcp-api-key": {
+  "fps_over_redacted": [
+   "apiKey: \"AIzaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+   "AIzaSyabcdefghijklmnopqrstuvwxyz1234567",
+   "AIzaSyAnLA7NfeLquW1tJFpx_eQCxoX-oo6YyIs",
+   "AIzaSyCkEhVjf3pduRDt6d1yKOMitrUEke8agEM",
+   "AIzaSyDMAScliyLx7F0NPDEJi1QmyCgHIAODrlU",
+   "AIzaSyD3asb-2pEZVqMkmL6M9N6nHZRR_znhrh0",
+   "AIzayDNSXIbFmlXbIE6mCzDLQAqITYefhixbX4A",
+   "AIzaSyAdOS2zB6NCsk1pCdZ4-P6GBdi_UUPwX7c",
+   "AIzaSyASWm6HmTMdYWpgMnjRBjxcQ9CKctWmLd4",
+   "AIzaSyANUvH9H9BsUccjsu2pCmEkOPjjaXeDQgY",
+   "AIzaSyA5_iVawFQ8ABuTZNUdcwERLJv_a_p4wtM",
+   "AIzaSyA4UrcGxgwQFTfaI3no3t7Lt1sjmdnP5sQ",
+   "AIzaSyDSb51JiIcB6OJpwwMicseKRhhrOq1cS7g",
+   "AIzaSyBF2RrAIm4a0mO64EShQfqfd2AFnzAvvuU",
+   "AIzaSyBcE-OOIbhjyR83gm4r2MFCu4MJmprNXsw",
+   "AIzaSyB8qGxt4ec15vitgn44duC5ucxaOi4FmqE",
+   "AIzaSyA8vmApnrHNFE0bApF4hoZ11srVL_n0nvY"
+  ],
+  "fps_rejected": [
+   "GWw4hjABFzZCGiRpmlDyDdo87Jn9BN9THUA47muVRNunLxsa82tMAdvmrhOqNkRKiYMEAFbTJAIzaTesb6Tscfcni8vIpWZqNCXFDFslJtVSvFDq",
+   "AIzaTesb6Tscfcni8vIpWZqNCXFDFslJtVSvFDqabcd123",
+   "AIZASYCO2CXRMC9ELSKLHLHRMBSWDEVEDZTLO2O"
+  ]
+ },
+ "github-app-token": {
+  "fps_over_redacted": [
+   "ghu_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ]
+ },
+ "github-fine-grained-pat": {
+  "fps_over_redacted": [
+   "github_pat_xxxxxxxxxxxxxxxxxxxxxx_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ]
+ },
+ "github-oauth": {
+  "fps_over_redacted": [
+   "gho_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ]
+ },
+ "github-pat": {
+  "fps_over_redacted": [
+   "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ]
+ },
+ "github-refresh-token": {
+  "fps_over_redacted": [
+   "ghr_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ]
+ },
+ "gitlab-pat": {
+  "fps_over_redacted": [
+   "glpat-XXXXXXXXXXX-XXXXXXXX"
+  ]
+ },
+ "gitlab-pat-routable": {
+  "fps_over_redacted": [
+   "glpat-xxxxxxxx-xxxxxxxxxxxxxxxxxx.xxxxxxxxx"
+  ]
+ },
+ "gitlab-ptt": {
+  "fps_rejected": [
+   "glptt-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ]
+ },
+ "gitlab-rrt": {
+  "fps_over_redacted": [
+   "GR134894112312312312312312312",
+   "GR1348941XXXXXXXXXXXXXXXXXXXX"
+  ]
+ },
+ "gitlab-runner-authentication-token-routable": {
+  "fps_rejected": [
+   "glrt-tx_xxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxx"
+  ]
+ },
+ "grafana-cloud-api-token": {
+  "fps_over_redacted": [
+   "glc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "   API_KEY=\"glc_111111111111111111111111111111111111111111=\""
+  ],
+  "fps_rejected": [
+   "static void GLC_CreateLightmapTextureArray(void);\nstatic void GLC_CreateLightmapTexturesIndividual(void);\n\nvoid GLC_UploadLightmap(int textureUnit, int lightmapnum);",
+   "// Alias models\nvoid GLC_StateBeginUnderwaterAliasModelCaustics(texture_ref base_texture, texture_ref caustics_texture)\n{"
+  ]
+ },
+ "grafana-service-account-token": {
+  "fps_over_redacted": [
+   "glsa_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX_AAAAAAAA"
+  ]
+ },
+ "hashicorp-tf-api-token": {
+  "fps_over_redacted": [
+   "token        = \"xxxxxxxxxxxxxx.atlasv1.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""
+  ]
+ },
+ "huggingface-access-token": {
+  "fps_over_redacted": [
+   "        os.environ.get(\"HF_AUTH_TOKEN\",\n\t\t\"hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"),"
+  ],
+  "fps_rejected": [
+   "- (id)hf_requiredCharacteristicTypesForDisplayMetadata;",
+   "amazon.de#@#div[data-cel-widget=\"desktop-rhf_SponsoredProductsRemoteRHFSearchEXPSubsK2ClickPagination\"]",
+   "                            _kHMSymptomhf_generatedByHomeAppForDebuggingPurposesKey,",
+   "    #define OSCHF_DebugGetExpectedAverageCrystalAmplitude NOROM_OSCHF_DebugGetExpectedAverageCrystalAmplitude",
+   "  M_UINT       (ServingCellPriorityParametersDescription_t,  H_PRIO,  2, &hf_servingcellpriorityparametersdescription_h_prio),",
+   "y{}x|~|}\u007f\u007f{~}}~|\u007f\u007f~}||\ufffd~|\ufffd\u007f{\ufffd\ufffd|\u007f\u007f{}\u007f{|~z{}{{|{||{|}|{}{~|y}vjoePbUBJ7&;\"\u001a;  <\u001f\u001f;\u001f :\u001f\u001f;\u001f\u001e?!!;\u001e\u001e<\u001f\u001f7%$IACa_ecghbfbaebejhahfbhf_ddbficghbgfbhhcghdghfhigiifhhehhdggcgfchf_fgcei^[[.40&54\"56\u001f66 6",
+   "                    change_dir(cwd)\n\t\tsubdirs = glob.glob('HF_CAASIMULIAComputeServicesBuildTime.HF*.Linux64')\n\t\tif len(subdirs) == 1:",
+   "# HuggingFace API Token https://huggingface.co/settings/tokens\n\t\tHUGGINGFACE_API_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx,"
+  ]
+ },
+ "huggingface-organization-api-token": {
+  "fps_rejected": [
+   "public static final String API_ORG_EXIST = \"APIOrganizationExist\";",
+   "const api_org_controller = require('../../controllers/api/index').organizations;",
+   "API_ORG_CREATE(\"https://qyapi.weixin.qq.com/cgi-bin/department/create?access_token=ACCESS_TOKEN\"),",
+   "def test_internal_api_org_inclusion_with_href(api_name, href, expected, monkeypatch, called_with):\n\t\tmonkeypatch.setattr(\"requests.sessions.Session.request\", called_with)",
+   "    def _api_org_96726c78_4ae3_402f_b08b_7a78c6903d2a(self, method, url, body, headers):\n        body = self.fixtures.load(\"api_org_96726c78_4ae3_402f_b08b_7a78c6903d2a.xml\")\n        return httplib.OK, body, headers, httplib.responses[httplib.OK]",
+   "<p>You should see a token <code>hf_xxxxx</code> (old tokens are <code>api_XXXXXXXX</code> or <code>api_org_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX</code>).</p>",
+   "  From Hugging Face docs:\n\t\tYou should see a token hf_xxxxx (old tokens are api_XXXXXXXX or api_org_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx).\n\t\tIf you do not submit your API token when sending requests to the API, you will not be able to run inference on your private models."
+  ]
+ },
+ "infracost-api-token": {
+  "fps_over_redacted": [
+   "ico-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+  ],
+  "fps_rejected": [
+   "http://assets.r7.com/assets/media_box_tv_tres_colunas/video_box.ico-7a388b69018576d24b59331fd60aab0c.png",
+   "https://explosivelab.notion.site/Pianificazione-Nerdz-Ng-pubblico-1bc826ecc0994dd8915be97fc3489cde?pvs=74",
+   "http://ece252-2.uwaterloo.ca:2540/image?q=gAAAAABdHkoqb9ZaJ3q4dlzEvTgG9WYwKcD9Aw7OUXeFicO-5M5IdNDjHBpKw7KBK3nCVqtuga4yzUaFEpJn8BqA1LzZprIJBw=="
+  ]
+ },
+ "intra42-client-secret": {
+  "tps": [
+   "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",
+   "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"
+  ]
+ },
+ "notion-api-token": {
+  "fps_rejected": [
+   "ntn_12345678901",
+   "ntn_123456789012345678901234567890123456789012345678901234567890",
+   "ntn_12345678901abc"
+  ],
+  "tps": [
+   "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",
+   "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",
+   "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"
+  ]
+ },
+ "octopus-deploy-api-key": {
+  "fps_rejected": [
+   "msgstr \"GSSAPI-VIRHEKAPSELOINTIMERKKIJONO.\"",
+   "https://sonarcloud.io/api/project_badges/measure?project=Garden-Coin_API-CalculadoraDeInvestimentos&metric=alert_status",
+   "https://fog-ringer-f42.notion.site/API-BD80F56CDC1441E6BF6011AB6D852875",
+   "<iframe src=\"./archive/gifs/api-c99e353f761d318322c853c03e.gif\"> </iframe>"
+  ],
+  "tps": [
+   "set apikey=\"API-ZNRMR7SL6L3ATMOIK7GKJDKLPY\""
+  ]
+ },
+ "openshift-user-token": {
+  "fps_over_redacted": [
+   "--set kraken.kubeconfig.token.token=\"sha256~XXXXXXXXXX_PUT_YOUR_TOKEN_HERE_XXXXXXXXXXXX\" \\",
+   "oc login --token=sha256~_xxxxxx_xxxxxxxxxxxxxxxxxxxxxx-xxxxxxxxxx-X \\\n    --server=https://api.${zone}.appuio.cloud:6443"
+  ]
+ },
+ "perplexity-api-key": {
+  "fps_over_redacted": [
+   "PERPLEXITY_API_KEY=pplx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ]
+ },
+ "prefect-api-token": {
+  "fps_over_redacted": [
+   "PREFECT_API_KEY = \"pnu_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\""
+  ]
+ },
+ "private-key": {
+  "fps_rejected": [
+   "-----BEGIN PRIVATE KEY-----\nanything\n-----END PRIVATE KEY-----",
+   "-----BEGIN OPENSSH PRIVATE KEY----------END OPENSSH PRIVATE KEY-----"
+  ],
+  "tps": [
+   "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDAC4AWkdwKYSd8\nKs14IReLcYgADhoXk56ZzXI=\n-----END PRIVATE KEY-----"
+  ]
+ },
+ "pulumi-api-token": {
+  "fps_rejected": [
+   "                        <img src=\"./assets/vipul-f0eb1acf0da84c06a50c5b2c59932001997786b176dec02bd16128ee9ea83628.png\" alt=\"\" class=\"w-16 h-16 rounded-full\">"
+  ]
+ },
+ "readme-api-token": {
+  "fps_rejected": [
+   "const API_KEY = 'rdme_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';"
+  ]
+ },
+ "sidekiq-sensitive-url": {
+  "tps": [
+   "https://cafebabe:deadbeef@gems.contribsys.com/",
+   "https://cafebabe:deadbeef@gems.contribsys.com",
+   "https://cafeb4b3:d3adb33f@enterprise.contribsys.com/",
+   "https://cafeb4b3:d3adb33f@enterprise.contribsys.com",
+   "http://cafebabe:deadbeef@gems.contribsys.com/",
+   "http://cafebabe:deadbeef@gems.contribsys.com",
+   "http://cafeb4b3:d3adb33f@enterprise.contribsys.com/",
+   "http://cafeb4b3:d3adb33f@enterprise.contribsys.com",
+   "http://cafeb4b3:d3adb33f@enterprise.contribsys.com#heading1",
+   "http://cafeb4b3:d3adb33f@enterprise.contribsys.com?param1=true&param2=false",
+   "http://cafeb4b3:d3adb33f@enterprise.contribsys.com:80",
+   "http://cafeb4b3:d3adb33f@enterprise.contribsys.com:80/path?param1=true&param2=false#heading1"
+  ]
+ },
+ "slack-bot-token": {
+  "fps_rejected": [
+   "xoxb-xxxxxxxxx-xxxxxxxxxx-xxxxxxxxxxxx",
+   "xoxb-xxx",
+   "xoxb-12345-abcd234",
+   "xoxb-xoxb-my-bot-token"
+  ]
+ },
+ "slack-config-access-token": {
+  "fps_rejected": [
+   "xoxe.xoxp-1-SlackAppConfigurationAccessTokenHere",
+   "xoxe.xoxp-1-RANDOMSTRINGHERE",
+   "xoxe.xoxp-1-initial"
+  ]
+ },
+ "slack-legacy-bot-token": {
+  "fps_rejected": [
+   "xoxb-xxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx",
+   "xoxb-Slack_BOT_TOKEN",
+   "xoxb-abcdef-abcdef"
+  ]
+ },
+ "slack-legacy-token": {
+  "fps_rejected": [
+   "https://indieweb.org/images/3/35/2018-250-xoxo-indieweb-1.jpg",
+   "https://lh3.googleusercontent.com/-tWXjX3LUD6w/Ua4La_N5E2I/AAAAAAAAACg/qcm19xbEYa4/s640/EXO-XOXO-teaser-exo-k-34521098-720-516.jpg"
+  ]
+ },
+ "slack-legacy-workspace-token": {
+  "fps_rejected": [
+   "https://github.com/xoxa-nyc/xoxa-nyc.github.io/blob/master/README.md"
+  ]
+ },
+ "slack-user-token": {
+  "fps_rejected": [
+   "https://docs.google.com/document/d/1W7KCxOxP-1Fy5EyF2lbJGE2WuKmu5v0suYqoHas1jRM",
+   "\"token1\": \"xoxp-1234567890\"",
+   "\"token2\": \"xoxp-XXXXXXXXXX-XXXXXXXXXX-XXXXXXXXXXX-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\"",
+   "\"token3\": \"xoxp-1234-1234-1234-4ddbc191d40ee098cbaae6f3523ada2d\"",
+   "\"token4\": \"xoxp-572370529330-573807301142-572331691188-####################\""
+  ]
+ },
+ "slack-webhook-url": {
+  "tps": [
+   "http://hooks.slack.com/services/T024TTTTT/BBB72BBL/AZAAA9u0pA4ad666eMgbi555",
+   "https://hooks.slack.com/services/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",
+   "https://hooks.slack.com/workflows/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",
+   "http://hooks.slack.com/workflows/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"
+  ]
+ },
+ "sourcegraph-access-token": {
+  "fps_over_redacted": [
+   "sgp_5555555dAAAAA7777777CcccCFaaaaaaaaaaaaaa",
+   "BcAeb6640ad7DAD46AD73687946Ce85047d5C9Bb"
+  ],
+  "fps_rejected": [
+   "sgp_local_d45b6G86aBb0F2Cee943902dbaDBCFCFDD1dA089",
+   "sgp_652d9a2e48FC7E!FcDbEA1BC2E2A6CE23cFe7F7D",
+   "sgp_78Ad84a5B6e8A2fE5B_4085FB0ccaDDd29DB66Fd7FE9bA2C1cdCE8400CD"
+  ],
+  "tps": [
+   "sgp_AaD80dc6E02eCAE1_d3cba16CC0F18fA14A2EFB61CbDFceEBf9fAD16b",
+   "sourcegraph: 6d2FabeB6ADd229Bc199FabA28fD3efb57dF0bD3",
+   "sgp_0D697F54cb24238EefB29af05Abf1b505E90950F",
+   "sgp_local_d7dfFD43cF2503B1da673EB560aAa3e80f16FA42",
+   "sgp_local_bcD1DA18de0d6476Be0f3BD7Ef9Da4f09b479aE5"
+  ]
+ },
+ "square-access-token": {
+  "fps_rejected": [
+   "aws-cli@sha256:eaaa7b11777babe28e6133a8b19ff71cea687e0d7f05158dee95a71f76ce3d00"
+  ]
+ },
+ "vault-service-token": {
+  "fps_over_redacted": [
+   "s.xxxxxxxxxxxxxxxxxxxxxxxx",
+   "s.THISSTRINGISALLUPPERCASE",
+   "s.thisstringisalllowercase",
+   "s.AcceptanceTimeoutSeconds ",
+   "s.makeKubeConfigController = args",
+   "hvs.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "fps_rejected": [
+   "  credentials: new AWS.SharedIniFileCredentials({ profile: '<YOUR_PROFILE>' })",
+   "INFO 4 --- [           main] o.s.b.f.s.DefaultListableBeanFactory     : Overriding bean definition for bean"
+  ],
+  "tps": [
+   "token: s.ZC9Ecf4M5g9o34Q6RkzGsj0z",
+   "-vaultToken hvs.CAESIP2jTxc9S2K7Z6CtcFWQv7-044m_oSsxnPE1H3nF89l3GiYKHGh2cy5sQmlIZVNyTWJNcDRsYWJpQjlhYjVlb1cQh6PL8wEYAg\""
+  ]
+ }
+}

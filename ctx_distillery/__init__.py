@@ -51,7 +51,7 @@ from .adapters.claude_code import (
     transcript_files,
 )
 from .config import PINNED_INTERPRETER, SUBSCRIPTION_PREFIX, DistillConfig, make_chat_fn, setup
-from .redact import redact_all, redact_transcript
+from .redact import REDACTIONS_ENV_VAR, load_operator_rules, redact_all, redact_transcript
 from .render import plan_as_dict, render_plan
 from .rl_export import (
     DRAFTING_TOOLS,
@@ -136,6 +136,8 @@ __all__ = [  # noqa: RUF022
     # redaction / rendering / trace reading
     "redact_transcript",
     "redact_all",
+    "REDACTIONS_ENV_VAR",
+    "load_operator_rules",
     "render_plan",
     "plan_as_dict",
     "load_trace",

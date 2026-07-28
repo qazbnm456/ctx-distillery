@@ -114,13 +114,31 @@ def _load_tasks(spec: str, *, root: Path) -> list[EvalTask]:
     return demo_taskset(root / "demo") if spec == "demo" else load_taskset(spec)
 
 
+#: Cap on a slugged task id, matching `ctx_distillery_studio.app._RUN_ID_MAX`. A slug becomes ONE
+#: filename component (plus a `-<stamp>.jsonl` suffix), and most filesystems cap one at 255 BYTES.
+_TASK_ID_MAX = 120
+
+
 def _slug(raw: str) -> str:
     """A filesystem-safe token: keep `[A-Za-z0-9._-]`, fold the rest to `-`, strip leading/trailing
-    `.`/`-` so it can never become a traversal segment. A task id comes out of a hand-edited JSON
-    file and becomes a FILENAME here; same character class and same reasoning as
-    `ctx_distillery.cli._slug` and `ctx_distillery_studio.app._slug_id`.
+    `.`/`-` so it can never become a traversal segment, and cap at `_TASK_ID_MAX` chars —
+    re-stripped after the cut so a truncation landing on a `-`/`.` never leaves a trailing
+    separator. A task id comes out of a hand-edited JSON file and becomes a FILENAME here; same
+    character class and same reasoning as `ctx_distillery.cli._slug` and
+    `ctx_distillery_studio.app._slug_id`.
+
+    The cap was added with the studio's, per the same review: this is the same class of exposure and
+    the WRITE side of it. `_run_command` builds `<slug>-<stamp>.jsonl` and hands it to
+    `TraceRecorder`, so an over-long task id turned into an `OSError` (ENAMETOOLONG) mid-batch
+    rather than a task that simply runs. Unlike the studio's, this one may still return "" for a
+    fully-degenerate id — its caller's `or 'task'` is the fallback, and that predates the cap.
+
+    The `ctx_distillery.cli._slug` cross-reference above was ASPIRATIONAL when it was written: that
+    function had no cap at all, and a third review found it (plus `ctx_distillery.apply.slugify`,
+    which takes untrusted model output) still uncapped while this docstring claimed "same reasoning".
+    All four sluggers in the workspace now cap at 120, so the claim is true rather than intended.
     """
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", raw or "").strip("-.")
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", raw or "").strip("-.")[:_TASK_ID_MAX].rstrip("-.")
 
 
 def _pick_judge(force_stub: bool) -> tuple[Judge, str, str]:

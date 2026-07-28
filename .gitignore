@@ -22,6 +22,10 @@ output/
 # Secrets / local env (only .env.example is tracked)
 .env
 
+# The operator's own redaction rules (only redactions.example.json is tracked — copy it and edit).
+# A real one names your org's internal credential SHAPES; that is not something to publish.
+redactions.json
+
 # macOS
 .DS_Store
 

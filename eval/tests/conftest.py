@@ -26,24 +26,40 @@ path too, not just the judge path.
 
 from __future__ import annotations
 
+import os
+
+# HERMETICITY, and it has to happen HERE, at conftest IMPORT time — not in the autouse fixture
+# below. `ctx_distillery.redact` resolves `CD_REDACTIONS` when the MODULE is imported (fail-closed:
+# a broken operator file must stop the process, never leave a silently weaker redactor running), and
+# this package imports `ctx_distillery` during COLLECTION, long before any fixture runs. A developer
+# with that variable exported would otherwise run this suite against their own private rule file:
+# a broken one turns the whole member into an INTERNALERROR at collection, a valid one just makes it
+# quietly non-hermetic. `tests/conftest.py` in the root member does the same thing for the same
+# reason; an adversarial review found this member (and `studio/`) had been left out of that fix.
+os.environ.pop("CD_REDACTIONS", None)
+
+# NB: this import deliberately follows the pop above — the ordering is the guarantee, not style.
 import pytest
 
 #: The complete `CDEVAL_*` surface `judge.EvalJudgeConfig.from_env` reads. Keep this in sync with it
 #: — a variable missing here is a variable that can leak a live judge into the suite.
 CDEVAL_VARS = ("CDEVAL_MODEL", "CDEVAL_BASE_URL", "CDEVAL_API_KEY", "CDEVAL_TIMEOUT")
 
-#: The root package's `CD_*` surface (`ctx_distillery.config.DistillConfig.from_env`). Keep in sync
-#: with it — a variable missing here is one that can leak a live DISTILLATION into the suite.
+#: The root package's `CD_*` surface (`ctx_distillery.config.DistillConfig.from_env`, plus
+#: `ctx_distillery.redact`'s `CD_REDACTIONS`). Keep in sync with them — a variable missing here is
+#: one that can leak a live DISTILLATION, or a developer's private redaction rules, into the suite.
+#: `CD_REDACTIONS` is ALSO popped at import time above, because scrubbing it in a fixture is too
+#: late to matter; it is listed here so the drift test covers it and so a reader sees one full list.
 CD_VARS = (
     "CD_ROOT_LM", "CD_SUB_LM", "CD_DRAFT_LM", "CD_API_KEY", "CD_BASE_URL",
     "CD_DRAFT_API_KEY", "CD_DRAFT_BASE_URL", "CD_INTERPRETER",
     "CD_MAX_ITERATIONS", "CD_MAX_LLM_CALLS", "CD_PLANNER_MAX_TOKENS", "CD_ADAPTER",
-    "CD_MAX_OUTPUT_CHARS",
+    "CD_MAX_OUTPUT_CHARS", "CD_REDACTIONS",
 )
 
 
 def _cd_vars_actually_read() -> set[str]:
-    """Every `CD_*` name `ctx_distillery.config` really reads, scraped from its source.
+    """Every `CD_*` name the root package really reads, scraped from the modules that read them.
 
     The "keep in sync" comment above is not enough on its own and this project has the receipts: the
     tuple was already out of date the day it was written, missing `CD_PLANNER_MAX_TOKENS` and
@@ -51,17 +67,26 @@ def _cd_vars_actually_read() -> set[str]:
     another module's surface rots by default; `test_the_scrub_list_covers_every_CD_var` below turns
     that rot into a failing test instead of a silent hole in an offline guarantee.
 
-    Source-scraped rather than imported because importing `ctx_distillery.config` here is fine but
-    reading its RESOLVED values is not — `from_env` is exactly what we are protecting the suite from
+    `redact` is scraped alongside `config` because it rotted the same way one layer out: it owns
+    `CD_REDACTIONS`, the scrape only ever looked at `config.py`, and so the drift test could not have
+    caught the missing name even in principle. A second module reading `CD_*` is exactly the case the
+    single-module scrape was blind to.
+
+    Source-scraped rather than imported because importing these modules here is fine but reading
+    their RESOLVED values is not — `from_env` is exactly what we are protecting the suite from
     calling with a live key present.
     """
     import re
     from pathlib import Path
 
     import ctx_distillery.config as config_module
+    import ctx_distillery.redact as redact_module
 
-    source = Path(config_module.__file__).read_text(encoding="utf-8")
-    return set(re.findall(r'["\'](CD_[A-Z_]+)["\']', source))
+    found: set[str] = set()
+    for module in (config_module, redact_module):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        found |= set(re.findall(r'["\'](CD_[A-Z_]+)["\']', source))
+    return found
 
 
 @pytest.fixture(autouse=True)

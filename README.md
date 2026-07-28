@@ -119,6 +119,101 @@ wrong:
    has. There is no "auto-apply" flag and never will be: the apply step is a separate module a
    human calls by hand, and nothing the planner can reach imports it.
 
+## Secrets are stripped before the model sees a word
+
+Transcripts are your own history, so they contain your own credentials. `ctx_distillery/redact.py`
+runs host-side on every transcript immediately after ingestion — never as a judgement call handed to
+the planner — and the redacted text is the only text threaded into the run. It works in three tiers:
+
+1. **7 hand-written patterns**, which own the shapes a vendor corpus structurally cannot: an
+   `Authorization:` header value (matched with a lookbehind, which RE2 cannot express), a
+   `key = value` assignment where only the value is replaced, and — measured on a real 426 KB
+   transcript — a **private-proxy API key**, which is nobody's published format and which no vendor
+   rule matched.
+2. **120 rules ported from [gitleaks](https://github.com/gitleaks/gitleaks) v8.30.1**, covering the
+   anchored, provider-specific shapes (`sk-ant-…`, `ghp_…`, `AKIA…`, Slack, Stripe, npm, PyPI,
+   Databricks, JWTs, and ~110 more). Vendored under MIT, mechanically ported by a checked-in script,
+   and graded against gitleaks' own true/false-positive corpus.
+3. **Your own rules**, for the shapes only you know about. Optional, off unless configured — see
+   below.
+
+Five of the seven hand-written patterns are *also* covered by a gitleaks rule today — including the
+`BEGIN/END PRIVATE KEY` block, which the vendored `private-key` rule does match in full, body and
+all. That redundancy is deliberate and pinned by a test: tier two is regenerated from a moving
+upstream, so a refresh that renamed or dropped `github-pat` would otherwise reduce coverage silently.
+Tier one is the floor that survives a refresh.
+
+Matches become labelled placeholders (`[REDACTED:github_token]`), not deletions, so a plan can still
+say a credential appeared somewhere without carrying it. No network call is involved at any point.
+It is best-effort pattern matching, not a completeness claim — eyeball a transcript before sharing a
+plan widely. Licence, the exact pin, what was deliberately left out, and the **refresh command** are
+in [`VENDOR.md`](VENDOR.md). Cost, measured on a 500 KB rendered transcript: ~135 ms for the two
+built-in tiers, +6 ms for one operator rule.
+
+### Adding your own redaction rules (`CD_REDACTIONS`)
+
+A ready-to-run example ships in the repo. Copy it and point at your copy (`redactions.json` is
+git-ignored, like `.env`):
+
+```bash
+cp redactions.example.json redactions.json     # then set CD_REDACTIONS=./redactions.json
+```
+
+`redactions.example.json` is a real working file, not a skeleton: it is the seven built-in patterns
+expressed in this schema — the dogfood, and the reason the schema has the shape it does — plus one
+illustrative `corp-internal-token` entry showing what you would actually add. A test loads it through
+the real loader, so it cannot rot.
+
+```json
+[
+  {
+    "label": "corp-internal-token",
+    "regex": "\\bcorp_[A-Za-z0-9]{32}\\b",
+    "description": "An internal service token. Known NOT to catch: a `corp_` prefixed variable name (too short).",
+    "sample": "corp_abc123def456ghi789jkl012mno345pq",
+    "replace_group": null
+  }
+]
+```
+
+**`CD_REDACTIONS` can only ADD.** This is a deliberate divergence from the `TS_TOOLSPACE` convention
+it otherwise mirrors, and it is worth stating plainly so nobody "fixes" it back into symmetry: in
+[toolscout](https://github.com/qazbnm456/toolscout), `TS_TOOLSPACE` *replaces* the built-in catalog,
+which is safe there because the worst case is fewer tools. Here the worst case is a leaked
+credential. So there is no key that disables a built-in tier, no label shadowing and no ordering
+knob — your rules run last, on top of a floor you cannot lower.
+
+Four things happen at **load**, and each turns a silent failure into a startup error naming the
+offending label:
+
+- **The schema is CLOSED and the regex compiles strictly.** An unknown key is refused rather than
+  ignored, because a mistyped `replace_group` would quietly mean "replace the whole match" with no
+  error anywhere; and compilation runs with warnings promoted to errors, because an unported POSIX
+  class like `[[:alnum:]]` compiles in Python with only a `FutureWarning` and then means something
+  else entirely — in a *redactor*, that is a live credential flowing onward with nothing to see.
+- **`sample` is mandatory and executed.** Your rule's own regex must redact your own sample string. A
+  regex that compiles but never matches is the worst outcome here — you believe a shape is covered,
+  nothing is removed, and nothing anywhere says so. **Use a synthetic value.** `sample` is the one
+  field the schema requires to be credential-*shaped*, and a load failure echoes it to stderr, where
+  it lands in scrollback, a CI log or a crash report — so invent a token of the right shape rather
+  than pasting a real one. (The echo is capped at 64 characters; that is a mitigation, not a licence.)
+- **Catastrophic backtracking is refused.** Python's `re` has no timeout and redaction is on the core
+  path, so no dependency can be added to buy one. Instead every rule is *calibrated* against
+  synthetic adversarial probes, on two gates. The first is **growth**: cost that multiplies with
+  probe length is exponential backtracking, and it is visible long before any single probe is
+  expensive — that is what catches `(\w+\s?)+$`, and `CORPSECRETPREFIX-(\w+\s?)+$`, and
+  `(a?a?a?a?a?a?a?a?a?a?)+$`, each within ~200 ms. The second is an absolute **20 ms per-probe
+  budget**, which catches gentler polynomial blow-up (`a*a*a*a*a*a*b`) that grows too slowly to trip
+  the first. The probe grid is built from your own pattern's literal characters *and* from concrete
+  prefixes walked out of its own parse tree, because a rule that starts with a marker
+  (`X-Internal-Auth:`, `ORG-[0-9]{4}-`) is never reached by a probe made of one repeated character.
+  Both of those derived families are capped, so calibration itself stays bounded no matter how large
+  your pattern is.
+- **`replace_group` is checked against your own named groups.** Set it to the name of a group in your
+  regex and only that group is replaced, keeping the rest of the match — that is how `password = "…"`
+  stays legible as `password = "[REDACTED:secret_assignment]"`, and how you redact the value after
+  `X-Internal-Auth:` without losing the header name.
+
 ## Applying a plan (the human-gated step)
 
 From the shell this is `ctx-distillery-apply` (above). The Python API it wraps is the same shape,
