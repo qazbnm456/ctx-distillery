@@ -4,3 +4,9 @@ __pycache__/
 .env
 traces/
 output/
+
+# Session-scoped working documents (design blueprint / implementation plan) — not a
+# convention this project family publishes; see CHANGELOG.md "Removed" and
+# .claude/rules/handoff.md. Kept on disk locally, untracked.
+docs/DESIGN.md
+docs/IMPL_PLAN.md
