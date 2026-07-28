@@ -29,6 +29,8 @@ from rlm_kit.rubric import rubric_from_meta as _kit_rubric_from_meta
 from rlm_kit.rubric import validate_rubric as _kit_validate_rubric
 from rlm_kit.trace import EVENT_RESULT, EVENT_TOOL_CALL
 
+from .trace_io import dict_events
+
 CRITERION_CATEGORIES = ("TF", "TA", "TG", "PA")
 
 CATEGORY_MEANING = {
@@ -93,8 +95,14 @@ def default_rubric(task: str = "") -> RubricCriteria:
 
 
 def rubric_from_meta(events: list[dict]) -> RubricCriteria:
-    """Recover the rubric this run's `run_start` meta actually carried (empty if none recorded)."""
-    return _kit_rubric_from_meta(events, categories=CRITERION_CATEGORIES)
+    """Recover the rubric this run's `run_start` meta actually carried (empty if none recorded).
+
+    `dict_events` first (see `trace_io.py`): rlm-kit's own `rubric_from_meta` IS tolerant of a
+    malformed CRITERION entry inside `meta["rubric"]`, but its top-level `for e in events: if
+    e.get("type")` loop is not — a non-dict trace line raised a raw `AttributeError` there, which
+    took `criteria_facts` down with it. Two different tolerances; only one of them was rlm-kit's.
+    """
+    return _kit_rubric_from_meta(dict_events(events), categories=CRITERION_CATEGORIES)
 
 
 def plan_from_events(events: list[dict]):
@@ -112,12 +120,20 @@ def plan_from_events(events: list[dict]):
     "output isn't a dict" and let a well-formed-but-wrong-shaped dict (e.g. missing a required field)
     raise uncaught — reproduced end-to-end via the eval CLI, where ONE malformed trace in a glob took
     the entire scoring run down with it.
+
+    ALSO FIXED, a second and distinct failure mode: a non-dict trace LINE (`42`, `null`, `"x"`,
+    `[1,2,3]` — `rlm_kit.trace.load_events` does no shape validation) raised a raw `AttributeError`
+    here, ORDER-DEPENDENTLY, which is why it hid for so long: `reversed()` returns at the first
+    `result` event, so a bad line BEFORE the last result was never visited and the bug looked
+    absent, while a bad line AFTER it — trailing garbage, a truncated tail, a concatenated file —
+    or a trace with no result event at all, crashed. `dict_events` (`trace_io.py`) drops them once,
+    at the top; the `ValidationError` catch below is a different shape problem entirely.
     """
     from pydantic import ValidationError
 
     from .task import DistillPlan  # local import: keep rubric.py's top light, mirror trace_facts style
 
-    for event in reversed(events):
+    for event in reversed(dict_events(events)):
         if event.get("type") == EVENT_RESULT:
             output = (event.get("payload") or {}).get("output")
             if isinstance(output, dict):
@@ -134,9 +150,14 @@ def trace_facts(events: list[dict]) -> dict:
     Sources candidate-level facts from `session.assemble()`'s output (never re-derived from raw
     events, so they can't drift from what `assemble` already established); sources ordering/breaker
     facts directly from the trace's own `tool_call` events, since `assemble` doesn't surface those.
+
+    Filters non-dict trace lines ONCE up front (`trace_io.dict_events`) so the `e.get("type")`
+    comprehensions below are safe; `assemble` re-filters, which is idempotent and O(n), because it
+    is public in its own right and cannot assume its caller went through here.
     """
     from .session import assemble
 
+    events = dict_events(events)
     plan = plan_from_events(events)
     a = assemble(events, plan)
     read_steps = [

@@ -142,6 +142,22 @@ def test_no_plan_at_all_is_a_run_level_problem():
     assert out.candidates == [] and out.problems
 
 
+@pytest.mark.parametrize("action", ["keep", "promote_to_memory"])
+def test_assemble_ignores_non_dict_trace_lines(action):
+    """`assemble`'s "none of them raise" was literally false for a malformed trace: `_draft_calls`
+    scans EVERY event before the candidate loop, so a line that is valid JSON but not an object
+    (`rlm_kit.trace.load_events` does no shape validation) raised a raw `AttributeError` for ANY
+    non-`None` plan — including an all-`keep` plan with no artifact to assemble at all, which is why
+    `keep` is parametrized here and not just the promotion. Only `assemble(events, None)` escaped,
+    and only because it returns before touching `events`.
+    """
+    artifact_id = "abc123" if action == "promote_to_memory" else None
+    events = [42, _tool_call("draft_memory_file", "abc123"), None, "x", [1, 2, 3]]
+    out = assemble(events, _plan({"action": action, "artifact_id": artifact_id}))
+    assert out.problems == [] and out.candidates[0].problems == []
+    assert out.candidates[0].draft == (_DRAFT if action == "promote_to_memory" else None)
+
+
 def test_non_tool_call_events_are_ignored():
     events = [{"type": "main_step", "payload": {"tool": "draft_memory_file", "artifact_id": "x"}}]
     out = assemble(events, _plan({"action": "promote_to_memory", "artifact_id": "x"}))

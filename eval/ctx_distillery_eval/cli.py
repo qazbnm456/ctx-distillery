@@ -19,7 +19,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from rlm_kit.trace import load_events
+from ctx_distillery.trace_io import load_trace
 
 from .schema import EvalReport
 from .score import aggregate, score_run
@@ -71,11 +71,15 @@ def _score_command(args: argparse.Namespace) -> int:
         print(f"no runs found matching {args.trace_glob!r}", file=sys.stderr)
         return 1
     transcript_texts = _read_transcripts(args.transcript_path)
+    # `load_trace`, never `load_events(..., run_id=...)`: rlm-kit's own run_id filter is an
+    # unguarded `event.get("run_id")`, so a non-dict trace line crashed INSIDE `load_events` — i.e.
+    # upstream of every `ctx_distillery` function, where no amount of hardening there could reach
+    # it. This call site is the only place that gap could be closed (see `trace_io.py`).
     rows = [
         score_run(
             task.run_id,
             task.trace_path,
-            load_events(task.trace_path, run_id=task.run_id),
+            load_trace(task.trace_path, run_id=task.run_id),
             transcript_texts,
         )
         for task in tasks

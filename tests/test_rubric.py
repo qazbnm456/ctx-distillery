@@ -124,6 +124,27 @@ def test_plan_from_events_is_none_with_a_malformed_result_output():
     assert plan_from_events([_result(malformed)]) is None
 
 
+def test_plan_from_events_ignores_a_non_dict_trace_line():
+    """A SECOND, distinct malformed-trace mode from the `ValidationError` case above: a line that is
+    valid JSON but not an object at all (`rlm_kit.trace.load_events` does no shape validation).
+
+    It raised ORDER-DEPENDENTLY, which is why it hid: `reversed()` returns at the first `result`
+    event, so a bad line BEFORE the last result was never visited and the bug looked absent, while
+    one AFTER it (trailing garbage, a truncated tail, a concatenated file) crashed. Both orderings
+    are asserted, or this test would pass against the unfixed code.
+    """
+    plan = _plan_dict({"action": "promote_to_memory", "artifact_id": "abc123"})
+    before = plan_from_events([42, None, "x", [1, 2, 3], _result(plan)])
+    after = plan_from_events([_result(plan), 42, None, "x", [1, 2, 3]])
+    assert isinstance(before, DistillPlan) and isinstance(after, DistillPlan)
+    assert before.candidates[0].artifact_id == after.candidates[0].artifact_id == "abc123"
+
+
+def test_plan_from_events_is_none_when_the_trace_is_only_non_dict_lines():
+    """No result event to find, and the scan must not raise on the way to saying so."""
+    assert plan_from_events([42, None, "x", [1, 2, 3]]) is None
+
+
 def test_plan_from_events_round_trips_through_a_real_recorder(tmp_path):
     """The one genuine round trip: a REAL `TraceRecorder.record_result` call, then re-read via
     `load_events` — confirms pydantic nested-model serialization actually survives the trip, which a
@@ -278,6 +299,36 @@ def test_min_read_and_draft_step_are_none_when_no_such_calls_exist():
     facts = trace_facts([_result(_plan_dict())])
     assert facts["min_read_step"] is None
     assert facts["min_draft_step"] is None
+
+
+# -- non-dict trace lines: every rubric entry point degrades instead of raising ----------------
+
+
+def test_trace_facts_ignores_non_dict_trace_lines():
+    """`trace_facts` raised via `session.assemble` (whose `_draft_calls` scans EVERY event) before
+    its own `e.get("type")` comprehensions were ever reached. The facts must come out identical to
+    the same trace with the junk lines removed — dropped, never allowed to shift a count."""
+    plan = _plan_dict({"action": "promote_to_memory", "artifact_id": "abc123"})
+    clean = [_tool_call("read_transcript_chunk", step_id=0), _tool_call("draft_memory_file", "abc123", step_id=1), _result(plan)]
+    dirty = [42, clean[0], None, clean[1], "x", clean[2], [1, 2, 3]]
+    assert trace_facts(dirty) == trace_facts(clean)
+    assert trace_facts(dirty)["n_backed_promotions"] == 1
+
+
+def test_rubric_from_meta_ignores_a_non_dict_trace_line():
+    """rlm-kit's own `rubric_from_meta` tolerates a malformed CRITERION entry inside
+    `meta["rubric"]`, but its top-level `for e in events` loop is an unguarded `.get` — a different
+    tolerance from the one it documents, and the one that took `criteria_facts` down."""
+    rubric = default_rubric()
+    events = [42, {"type": EVENT_RUN_START, "payload": {"meta": {"rubric": rubric_to_meta(rubric)}}}, None]
+    assert [c.name for c in rubric_from_meta(events).criteria] == [c.name for c in rubric.criteria]
+
+
+def test_criteria_facts_ignores_non_dict_trace_lines():
+    """The composite path: `criteria_facts` -> `rubric_from_meta` AND `trace_facts`, both of which
+    raised on a non-dict line, so this is the end-to-end degrade for the whole rubric surface."""
+    facts = criteria_facts([42, _result(_plan_dict({"action": "keep"})), None, "x", [1, 2, 3]])
+    assert [f.criterion for f in facts] == [c.name for c in default_rubric().criteria]
 
 
 # -- criteria_facts: the lens actually slices trace_facts per category ------------------------

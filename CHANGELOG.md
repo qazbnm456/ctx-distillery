@@ -12,6 +12,38 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **Closed the non-dict trace-line gap the Studio pass explicitly deferred — the shared library
+  functions are now hardened, with ONE implementation instead of three.** `rlm_kit.trace.load_events`
+  does no shape validation, so a JSONL line that is valid JSON but not an object (`42`, `null`,
+  `[1,2,3]`, `"x"`) reached every `.get(...)` consumer as-is. Reproduced end to end:
+  `ctx-distillery-eval score '<glob>' <transcript>` over one clean trace plus one carrying a single
+  `42` line scored **zero** runs — the clean one included — dying in `collect_tasks` before a run was
+  ever reached. Three separate crash points on that path, in order: `taskset.collect_tasks`'s
+  `e.get("run_id")`; `load_events` ITSELF, whose own `run_id` filter is an unguarded
+  `event.get("run_id")` (so no amount of hardening inside `ctx_distillery` could have saved
+  `cli.py`'s call — only the call site could); and `session.assemble`, whose "none of them raise"
+  docstring was literally false, since `_draft_calls` scans every event before the candidate loop and
+  so raised even for an all-`keep` plan. Two more the original report missed:
+  `rubric.plan_from_events` was ORDER-DEPENDENT (`reversed()` returns at the first `result` event, so
+  a bad line before it was never visited and the bug looked absent), and
+  `rubric.rubric_from_meta`/`criteria_facts` raised too. New `ctx_distillery/trace_io.py`
+  (`load_trace` / `dict_events`) is now the ONE place JSONL bytes become events; `rubric`, `session`,
+  `eval/taskset`, `eval/cli` and `studio/app._load_trace` all read through it, the last replacing its
+  own inline copy — a de-duplication, not a removal, with its non-dict regression test unchanged and
+  still green. `load_trace` re-implements the `run_id` filter rather than delegating `run_id=`, which
+  is load-bearing: delegating puts the crash upstream of the guard. Hardening `load_events` upstream
+  in `rlm-kit` remains a reasonable follow-up **there**, not a prerequisite here. New
+  `tests/test_trace_io.py`, `eval/tests/test_taskset.py` (that module had zero coverage, and it was
+  where the batch's first crash lived) and a batch-survival regression in `eval/tests/test_cli.py`
+  asserting BOTH runs still score, not merely that the command exits 0.
+- **`studio/tests/test_boundary.py` (new)** — invariant 10 has always required that `studio/` never
+  call `ctx_distillery.apply.apply_plan`, but nothing asserted it (`eval/` had its boundary test, the
+  root package had its RLM-path reachability test; the one member reachable over HTTP had neither).
+  A static `ast` scan over the studio package, plus the reverse direction (`ctx_distillery` never
+  imports `ctx_distillery_studio`) mirroring `eval/tests/test_boundary.py`. `ast` rather than a
+  textual scan for a concrete reason: `ctx_distillery_studio/__init__.py`'s docstring NAMES
+  `apply_plan` in the very sentence promising never to call it, and a text scan would flag the
+  statement of the invariant as a violation of it.
 - **`studio/` — a new `ctx-distillery-studio` workspace member (Phase 2 of the rubric/eval/studio
   initiative)** (root `pyproject.toml`'s `[tool.uv.workspace] members` now `["eval", "studio"]`): a
   REPLAY-ONLY FastAPI + zero-build vanilla-JS console over a finished `DistillSession` run's

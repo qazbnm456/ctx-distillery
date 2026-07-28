@@ -13,7 +13,7 @@ from __future__ import annotations
 import glob
 from dataclasses import dataclass
 
-from rlm_kit.trace import load_events
+from ctx_distillery.trace_io import load_trace
 
 
 @dataclass(frozen=True)
@@ -30,10 +30,16 @@ def collect_tasks(trace_glob: str) -> list[Task]:
     Sorted by path then by run_id, so a batch CLI invocation is deterministic across runs on the
     same filesystem. A matched file with no recorded events (or none carrying a `run_id`) contributes
     no tasks rather than raising — an empty/corrupt trace file degrades the batch, not the whole run.
+
+    FIXED per adversarial review: that last promise did NOT hold for a line that is valid JSON but
+    not an object — `e.get("run_id")` below raised a raw `AttributeError` and took the ENTIRE glob
+    down before a single run was scored, the clean traces included. Reads through
+    `ctx_distillery.trace_io.load_trace` (public, top-level — this package's established one-way
+    reader boundary, never an underscore-prefixed helper), which drops those lines at the read.
     """
     tasks: list[Task] = []
     for path in sorted(glob.glob(trace_glob)):
-        events = load_events(path)
+        events = load_trace(path)
         run_ids = sorted({e.get("run_id") for e in events if e.get("run_id")})
         for run_id in run_ids:
             tasks.append(Task(run_id=run_id, trace_path=path))

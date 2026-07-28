@@ -114,6 +114,17 @@ def test_get_run_never_500s_on_a_syntactically_valid_but_non_dict_jsonl_line(tmp
     assert events_resp.status_code == 200, events_resp.text
 
 
+def test_load_trace_delegates_the_dict_shape_filter_to_the_shared_helper():
+    """The filter above used to be an inline comprehension in `_load_trace`. It now lives in
+    `ctx_distillery.trace_io.load_trace`, because `eval/` turned out to need the identical guard and
+    a second copy is exactly what `CLAUDE.md` invariant 11 exists to prevent. Invariant 10's "don't
+    remove this filter" caution is satisfied by DELEGATING it, never by dropping it — the test above
+    still proves the behaviour end to end; this one proves there is only one implementation of it."""
+    from ctx_distillery import trace_io
+
+    assert appmod.load_trace is trace_io.load_trace
+
+
 def test_run_id_path_is_slug_sanitized_against_traversal(tmp_path, monkeypatch):
     # a run_id becomes a file path. A traversal attempt must fold to a harmless slug that resolves
     # INSIDE traces_dir (-> 404), never escape it.

@@ -170,18 +170,40 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     before it ever becomes a path component, and the PLAN panel renders a candidate's `draft` via
     `el.textContent` **only** — never `innerHTML` — because a drafted memory/skill body is
     untrusted model output, not markup to render. Root `pyproject.toml`'s `[tool.uv.workspace]
-    members` includes `"studio"` alongside `"eval"`. **`_load_trace` filters to dict-shaped events
-    ONLY, immediately after `load_events`, before anything downstream sees them** — found by an
-    adversarial review post-merge: `rlm_kit.trace.load_events` does NO shape validation, so a
-    JSON-valid non-dict line (`42`, `null`, `[1,2,3]`) used to reach `plan_from_events`/
-    `trace_facts`/`mapper.to_event`'s `.get(...)` calls and raise a raw `AttributeError` — a genuine
-    500, not the "never raise on a malformed trace" guarantee this invariant claims. Don't remove
-    this filter thinking it's redundant with `plan_from_events`'s own `ValidationError` handling —
-    that catches a DIFFERENT failure mode (a well-formed dict with the wrong shape), not a non-dict
-    line at all.
-11. **`rubric.plan_from_events` is the ONE public plan-from-trace reconstruction — `eval/` (and
-    `studio/`) call it, neither keeps its own copy.** It used to be private
-    (`rubric._plan_from_events`) with a duplicate local copy in `eval/ctx_distillery_eval/score.py`
+    members` includes `"studio"` alongside `"eval"`. **`_load_trace` reads through
+    `ctx_distillery.trace_io.load_trace`, which filters to dict-shaped events ONLY before anything
+    downstream sees them** — found by an adversarial review post-merge: `rlm_kit.trace.load_events`
+    does NO shape validation, so a JSON-valid non-dict line (`42`, `null`, `[1,2,3]`) used to reach
+    `plan_from_events`/`trace_facts`/`mapper.to_event`'s `.get(...)` calls and raise a raw
+    `AttributeError` — a genuine 500, not the "never raise on a malformed trace" guarantee this
+    invariant claims. The filter first lived INLINE here; it moved into `trace_io` when `eval/`
+    turned out to need the identical guard (see invariant 11) — a de-duplication, never a removal.
+    `_load_trace` is still the ONE entry point every endpoint's events pass through, which is what
+    lets `_step_key`/`mapper.to_event` stay unguarded. Don't remove this filter thinking it's
+    redundant with `plan_from_events`'s own `ValidationError` handling — that catches a DIFFERENT
+    failure mode (a well-formed dict with the wrong shape), not a non-dict line at all.
+    `studio/tests/test_boundary.py` pins the "never calls `apply_plan`" half of this invariant
+    (statically, via `ast`, so the `__init__` docstring that NAMES `apply_plan` while promising
+    never to call it isn't itself flagged).
+11. **Trace-reading logic has ONE implementation per job, shared across all three members — never a
+    per-member copy. Two functions are covered: `rubric.plan_from_events` (plan-from-trace
+    reconstruction) and `trace_io.load_trace`/`dict_events` (the non-dict shape guard).** Same
+    failure mode, found twice; the second one is `ctx_distillery/trace_io.py`, the ONE place JSONL
+    bytes become events. `rlm_kit.trace.load_events` does no shape validation, so a JSON-valid
+    non-dict line reaches every `.get(...)` consumer as-is; `studio/` fixed that member-locally
+    first, and **`eval/` needing the identical guard a THIRD time is what forced the shared module**
+    — exactly the situation that had already forced `plan_from_events` public. `rubric`, `session`,
+    `eval/taskset`, `eval/cli` and `studio/app._load_trace` all read through it. `load_trace`
+    re-implements the `run_id` filter instead of passing `run_id=` down to `load_events`, and that
+    is LOAD-BEARING: `load_events`'s own filter is an unguarded `event.get("run_id")`, so
+    delegating puts the crash UPSTREAM of the guard, where nothing in `ctx_distillery` can reach it
+    (this is why hardening only the consumers would NOT have fixed `eval/cli.py`). Hardening
+    `load_events` upstream in rlm-kit is a fine follow-up THERE; it is not a prerequisite here, and
+    `load_trace` stays correct either way.
+
+    The first of the two: **`rubric.plan_from_events` is the ONE public plan-from-trace
+    reconstruction — `eval/` (and `studio/`) call it, neither keeps its own copy.** It used to be
+    private (`rubric._plan_from_events`) with a duplicate local copy in `eval/ctx_distillery_eval/score.py`
     (kept separate only because `eval/`'s own convention is to never reach across the package
     boundary into an underscore-prefixed helper). `studio/` needing the SAME reconstruction a third
     time is what forced the actual fix: promote it to public on `rubric.py` (already public,

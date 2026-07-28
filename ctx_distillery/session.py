@@ -21,12 +21,13 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from rlm_kit.trace import EVENT_TOOL_CALL, TraceRecorder, load_events
+from rlm_kit.trace import EVENT_TOOL_CALL, TraceRecorder
 
 from .adapters.base import ArtifactRef, HarnessAdapter
 from .redact import redact_transcript
 from .rubric import default_rubric, rubric_to_meta
 from .task import DistillPlan, DistillSession
+from .trace_io import dict_events, load_trace
 
 #: Which drafting tool authors each promotion action's artifact.
 _DRAFT_TOOL_FOR_ACTION = {
@@ -82,11 +83,21 @@ def assemble(events: Sequence[dict], plan: DistillPlan) -> AssembledPlan:
 
     Structural checks only, and none of them raise: a broken candidate is reported so a human sees
     exactly which part of the plan is not backed by a real drafting call.
+
+    FIXED per adversarial review: "none of them raise" did NOT hold for a malformed trace.
+    `_draft_calls` scans EVERY event before the candidate loop, so a non-dict trace line (see
+    `trace_io.py`) raised a raw `AttributeError` for ANY non-`None` plan — including an all-`keep`
+    plan with no artifact to assemble at all. Only the `plan is None` path escaped, and only
+    because it returns before touching `events`.
     """
     assembled = AssembledPlan()
     if plan is None:
         assembled.problems.append("no plan was produced by this run")
         return assembled
+    # A non-dict trace line must never reach `_draft_calls`'s unconditional `.get`. Filtered ONCE
+    # here rather than inside `_draft_calls` (which runs once PER drafting tool), so the pass is
+    # O(events), not O(events x tools).
+    events = dict_events(events)
     by_tool = {tool: _draft_calls(events, tool) for tool in _DRAFT_TOOL_FOR_ACTION.values()}
 
     for candidate in plan.candidates:
@@ -205,4 +216,7 @@ async def run_distillation(
             transcripts=redacted_transcripts,
             memory_index=render_memory_index(memory_index),
         )
-    return assemble(load_events(trace_path, run_id=rid), plan)
+    # `load_trace`, not `load_events`: this trace is well-formed by construction (the recorder just
+    # wrote it), so this is consistency rather than a live bug — but it means no module in the
+    # workspace passes `run_id=` into `load_events`'s own unguarded filter any more (`trace_io.py`).
+    return assemble(load_trace(trace_path, run_id=rid), plan)

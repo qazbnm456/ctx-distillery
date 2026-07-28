@@ -28,10 +28,10 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from rlm_kit.trace import load_events
 
 from ctx_distillery.rubric import plan_from_events, trace_facts
 from ctx_distillery.session import assemble
+from ctx_distillery.trace_io import load_trace
 
 from .mapper import to_event
 
@@ -105,32 +105,31 @@ def _load_trace(run_id: str) -> list[dict]:
     external failure — an unreadable file or a corrupted JSONL line — mirroring `assemble`'s own
     "none of them raise" discipline all the way out to the HTTP layer.
 
-    FIXED per adversarial review: `rlm_kit.trace.load_events` does NO shape validation — a line
-    that is syntactically valid JSON but NOT an object (`42`, `"x"`, `[1,2,3]`, `null`) parses fine
-    (no `ValueError`) and lands in the returned list as-is. Every downstream consumer
-    (`plan_from_events`/`trace_facts`/`_step_key`/`mapper.to_event`) assumes dict shape and calls
-    `.get(...)` unconditionally, so such a line previously reached them and raised a raw
-    `AttributeError` — a genuine 500, reproduced concretely by an adversarial review, and exactly
-    what this function's own docstring already claimed (incompletely) not to allow. Filtering to
-    dict-shaped events HERE, once, at the trace's only entry point into this app, is what actually
-    delivers on that claim — `plan_from_events`/`assemble`/`trace_facts` themselves still don't
-    need to know about this; they only ever see well-shaped events from this app.
+    FIXED per adversarial review, then DE-DUPLICATED: `rlm_kit.trace.load_events` does NO shape
+    validation — a line that is syntactically valid JSON but NOT an object (`42`, `"x"`, `[1,2,3]`,
+    `null`) parses fine (no `ValueError`, so the 502 guard above never fires) and lands in the
+    returned list as-is. Every downstream consumer (`plan_from_events`/`trace_facts`/`_step_key`/
+    `mapper.to_event`) assumes dict shape and calls `.get(...)` unconditionally, so such a line
+    reached them and raised a raw `AttributeError` — a genuine 500, and exactly what this
+    function's own docstring already claimed (incompletely) not to allow.
 
-    NOTE, stated rather than silently left for someone else to rediscover: the SAME underlying gap
-    (`load_events` returning a non-dict entry unfiltered) also pre-exists in
-    `ctx_distillery.rubric`/`ctx_distillery.session` for a locally-invoked caller (e.g.
-    `eval/ctx_distillery_eval/cli.py`'s real-trace-file path) — this fix closes it for the studio's
-    newly network-reachable surface specifically; hardening the shared library functions themselves
-    is tracked as separate, future work, not silently rolled into this pass.
+    The filter that fixed it first lived inline HERE; it now lives in
+    `ctx_distillery.trace_io.load_trace`, which this function calls, because `eval/` turned out to
+    need the identical guard (its batch scoring died on the same input, in `collect_tasks` and
+    again inside `load_events`'s own unguarded `run_id` filter) and a second copy is precisely what
+    `CLAUDE.md` invariant 11 exists to prevent. That is a de-duplication, NOT a removal: this is
+    still the ONE entry point every endpoint's events pass through, `_step_key`/`mapper.to_event`
+    still never see a non-dict entry, and
+    `test_get_run_never_500s_on_a_syntactically_valid_but_non_dict_jsonl_line` still pins the whole
+    guarantee end to end.
     """
     path = _trace_path(run_id)
     if not path.exists():
         raise HTTPException(404, f"no trace for run {run_id!r}")
     try:
-        events = load_events(str(path))
+        return load_trace(str(path))
     except (OSError, ValueError) as exc:  # a half-written / corrupted trace file, not a code bug
         raise HTTPException(502, f"trace file for run {run_id!r} is unreadable: {exc}") from exc
-    return [e for e in events if isinstance(e, dict)]
 
 
 @app.get("/v1/config")
