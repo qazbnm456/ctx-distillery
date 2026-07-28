@@ -1,6 +1,23 @@
+# Python
 __pycache__/
-.venv/
+*.py[cod]
 *.egg-info/
-.env
-traces/
+.pytest_cache/
+.ruff_cache/
+
+# uv / virtualenv
+.venv/
+
+# Run artifacts (traces the CLI writes; this project produces no responses/ artifact)
 output/
+/traces/
+*.jsonl
+
+# Secrets / local env (only .env.example is tracked)
+.env
+
+# macOS
+.DS_Store
+
+# Claude Code local overrides (never commit)
+.claude/settings.local.json
