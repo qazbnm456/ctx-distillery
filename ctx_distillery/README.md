@@ -153,9 +153,10 @@ CONFIRMED by a dedicated control experiment: that Claude Code reads a project-re
 `<project>/.claude/skills/` at all — a scratch directory seeded with a probe skill was read by a
 fresh session launched inside it (listed, and invokable), while a sibling control directory without
 one was not. Two caveats came with it: a global skill of the same name SHADOWS a project one, and a
-project's very first skills directory needs a restart to be discovered. INHERITED but not
-re-verified: the `memory/` sub-path — that convention predates this research and no `memory/`
-directory existed on the machine it ran on.
+project's very first skills directory needs a restart to be discovered. The `memory/` sub-path
+was INHERITED — the convention predates this research, and no `memory/` directory existed on the
+machine it originally ran on — but it is CONFIRMED now: 12 of 24 project storage directories
+carry one, each a direct child, holding 51 `.md` files and 9 `MEMORY.md` indexes.
 
 `render_transcript_events` / `render_transcript_file` turn raw JSONL into the `list[str]` the pipeline
 expects. Deliberately lossy, and the rules are pinned by tests rather than left implicit: filter to

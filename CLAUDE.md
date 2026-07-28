@@ -305,7 +305,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    PARENT is still `memory_dir` itself. Exact-match-on-request and containment-at-enumeration are
    two separate checks; neither substitutes for the other. `apply.py` mirrors the second one on the
    WRITE side with the identical test (`resolved.parent == memory_dir`), before any write.
-6. **Storage discovery is CONFIRMED for most paths and INHERITED for one — keep the
+6. **Storage discovery is CONFIRMED throughout, but the EVIDENCE behind each part differs — keep the
    distinction visible.** `ClaudeCodeAdapter.for_project(project_dir)` locates the real storage, and
    the evidence behind each part is NOT equal. Say so wherever it is described, and never upgrade one
    to sound like another:
@@ -313,10 +313,18 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
      transformed) giving `~/.claude/projects/<sanitized>/`; transcripts as one `<session-id>.jsonl`
      per past conversation, sibling to `memory/`; global skills at `~/.claude/skills/<name>/SKILL.md`
      (each skill is a DIRECTORY, not a flat file).
-   - **INHERITED, not re-verified**: the `memory/` sub-path inside the project storage directory. No
-     `memory/` directory existed on the machine the research ran on; the convention is this project's
-     pre-existing assumption, carried forward honestly. Auto-discovery only needs the sanitization
-     rule to be right.
+   - **CONFIRMED by later observation — this was the INHERITED one, and the label is now stale
+     history rather than a caveat**: the `memory/` sub-path inside the project storage directory. It
+     began as this project's pre-existing assumption, carried forward honestly because no `memory/`
+     directory existed on the machine the original research ran on. It exists now: **12 of 24 project
+     storage directories carry one, all at exactly the expected depth (a DIRECT child of the project
+     storage directory), holding 51 `.md` files and 9 `MEMORY.md` indexes** — the assumed layout,
+     unchanged. Auto-discovery only ever needed the sanitization rule to be right, and that was
+     always confirmed. This bullet said "INHERITED, not re-verified — no `memory/` directory existed"
+     for a long time after that stopped being true; the bullet below records the same failure for the
+     project-skills path. **A stale CONFIRMED/UNCONFIRMED label is the bug this invariant exists to
+     prevent, and it has now caught this invariant itself twice.** Re-check the labels when you touch
+     them, and prefer citing the observation to repeating the adjective.
    - **CONFIRMED by a dedicated control experiment** (it was an UNCONFIRMED hypothesis for one pass;
      this bullet used to still say so long after the experiment closed it — if you find another place
      that still calls it unverified, that place is the stale one): Claude Code DOES read a
