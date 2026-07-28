@@ -12,6 +12,134 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The studio's Trajectory drawer — the frontend half, REBUILT against `el()`/`clear()` rather than
+  ported.** `studio/DESIGN.md` used to carry this as an explicit deferral ("*Not copied:* a §5.7
+  Trajectory drawer … describing one would be fabrication"); the data layer
+  (`studio/ctx_distillery_studio/iterations.py` + `GET /v1/runs/{run_id}/iterations`) landed first,
+  and this closes it with a real §5.7, `static/trajectory.js`, drawer markup/CSS, and
+  `studio/tests/trajectory.test.js`.
+  **Why it could not be a port.** Every sibling studio's `trajectory.js` assigns `innerHTML` in
+  **seven** places. This project forbids that absolutely (`app.js`'s header rule, `DESIGN.md` §7's
+  first Don't, `CLAUDE.md` invariant 10), so the drawer was rebuilt node-by-node on the two helpers
+  `app.js` actually has. **And here that rule IS the mitigation, not hygiene.** Pass 3's leak audit
+  on a REAL live trace proved `timeline` and `initial` clean of paths, drafted bodies and evidence —
+  and proved the opposite about turn text: **4 of 6 drafted bodies and all 6 evidence blobs appear in
+  `iterations[*].code` / `iterations[*].output`**, because that text is the REPL's own echo (the
+  planner printed a drafting call's return value and typed the evidence in as a literal). Surfacing
+  turns is the drawer's entire reason to exist — `mapper.to_event` gives the feed `has_code: bool`
+  and drops `output` outright — so the answer is RENDERING, not filtering. Said out loud in the
+  module header, in §5.7, in §7's Don'ts and on screen in the REPL block's own caption, so nobody
+  later reads Pass 3's leak tests as a promise that turn text is scrubbed.
+  **The injected-deps roster is honest, not copied.** The siblings inject ten
+  (`$`, `esc`, `ICONS`, `tint`, `fmtBytes`, `_linkify`, `formatElapsed`, `feedError`, `getRunId`,
+  `isBusy`); `app.js` has exactly `el()` and `clear()` and no `esc` at all — nothing is escaped
+  because nothing becomes markup — so the roster is `{ el, clear, getRunId, onError }`. `getRunId`
+  stays a **getter, never a construction-time snapshot** (this page can load a second run without a
+  reload), and because nothing else in the drawer touches a dep before the handle is clicked, the
+  four are validated at CONSTRUCTION with an explicit `TypeError` — the siblings get that for free
+  from calling an injected `$` while building their element map, and we would not have.
+  **The timeline is FLAT and unconditional; `turn_index` is only an enrichment.** Forced by the two
+  measured numbers `iterations.py` records: a real live run spans 20.4s → `per_turn_timing = true`,
+  the offline scripted harness spans 0.0019s → `false`, and `turn_index` back-mapping runs only when
+  it is true. So on EVERY trace this workspace's tests can produce, no timeline entry has one at all
+  — a drawer reaching tool calls only through turn grouping would render an empty pane exactly there
+  (an audit caught precisely that in an earlier design). Nothing about whether an entry renders reads
+  `turn_index`; only the `.related` cross-highlight does, and it simply switches off. Pinned by
+  `trajectory.test.js`'s offline-shaped fixture. Timing is stated rather than dressed up too:
+  `timing_note` renders VERBATIM (`per_turn_timing` picks the tag and nothing else), an untimed turn
+  says so instead of showing a zero, and every timeline entry carries the caveat in words — a
+  `duration_s` is the **gap since the previous recorded event, planner-think + tool-exec**, because
+  this project has no per-call instrumentation and calling it a tool latency would be a fabricated
+  measurement.
+  **Not built, each for a stated reason:** no `replay-core.js`, no ▶/⏸/speed transport, no progress
+  bar, no expand-to-full, no in-drawer search, no `run-core.js`, no icon set, no vendored font, no
+  model-role chips. A transport's payoff scales with tool-call count and this project's runs make a
+  handful of calls; `app.js` has never even used the server's existing `?delay=` pacing. The ←/→
+  stop-walk survives as ~12 INLINED lines (`buildStops` / stop index / step target) — vendoring
+  `replay-core.js` to use a quarter of it would mean carrying a replay engine for a keyboard
+  shortcut. One nuance recorded rather than glossed: §5.7's Init pane DOES show `planner`/`drafter`,
+  which is not a breach of the "no model-role chips" Don't — those are recorded facts about one past
+  run read from its own `run_start.meta`, rendered as `kv` rows, where the header chip would have
+  fabricated a field `/v1/config` does not return.
+  **The enforcement hole was closed in the same pass, which is the real lesson here.**
+  `studio/tests/static-contract.test.js` read `static/app.js` and only `app.js`, so a brand-new
+  `trajectory.js` — the file with by far the strongest pull toward markup — would have sailed past
+  the no-`innerHTML` assertion reporting "ok". The scan now walks every `static/*.js`, still matching
+  on CODE SHAPE rather than the bare identifier (both files NAME `innerHTML` in prose while promising
+  never to use it), and a companion assertion pins that the scan actually FOUND `app.js` and
+  `trajectory.js` — the same "a scan that reads nothing reports no offences" failure mode
+  `tests/test_no_write_capability.py` was already hardened against on the Python side. Mutation-tested
+  by planting `x.innerHTML = y` into `trajectory.js`: red, exit 1, restored byte-exactly. Two CSS
+  contracts joined it — `.traj-well` needs the same `overflow-wrap:anywhere` + height cap + own
+  scroll as `.candidate-draft`, since a turn's REPL echo is the same class of untrusted text.
+  **`studio/tests/trajectory.test.js`** is the factory's DI contract on the siblings' harness shape
+  (plain `node <file>`, CommonJS, `require("assert")`, no npm): facade `{ open, reset, showHandle }`,
+  a missing dep refused per-name, the `getRunId` getter re-consulted (mutated between construction
+  and call, and again between construction and `open()`, asserting the fetched URL), the full
+  offline-trace timeline, the verbatim note, a hostile drafted body surviving as text through the
+  REPL well, both fetch-failure paths reporting through `onError` without opening an empty drawer,
+  and an empty envelope rendering rather than throwing. Its two adaptations are recorded in its
+  header: the memoization the siblings put in an injected `$` moved into the stub `document`
+  (`app.js` has no `$`), and there is no `ReplayCore` stub or `refreshTransport` entry to assert.
+- **`ctx-distillery-eval run` + a real taskset — the eval member's three recorded blockers, closed
+  additively.** All three fixes are ADDITIONS beside what shipped, not replacements of it.
+  - **`session.run_distillation_artifacts` + `DistillArtifacts`.** The driver's `redacted_transcripts`,
+    resolved `run_id`, and just-loaded `events` used to die as locals. They are now returned, and
+    `run_distillation` is a one-line wrapper whose signature AND return type are unchanged — verified
+    to need zero call-site edits (`cli.py`, `tests/test_session.py`, `tests/test_cli.py`'s
+    monkeypatch double, `studio/`, `tests/test_public_api.py` all unmodified by it). The redacted
+    transcripts are the load-bearing field: re-`ingest()`ing and re-`redact()`ing would score against
+    a DIFFERENT redaction than the run saw, and reading them back from the trace is permanently ruled
+    out on this repo's own record (`tools/transcript_reader.py` records offset/length and "never the
+    text itself — that is the audit point"), so a trace-sourced substitute would be EMPTY, not
+    lossier. These fields deliberately do NOT go on `AssembledPlan`: `render.plan_as_dict` is
+    `dataclasses.asdict`, so transcript bodies would have landed in `ctx-distillery show --json`.
+  - **`taskset.EvalTask` / `load_taskset` / `demo_taskset`, beside the existing `Task`/`collect_tasks`.**
+    `project` is optional (a `{id, reference}`-only taskset is legal, and now useful); `run` refuses a
+    task without one loudly. `project.claude_home` is its own overridable field because invariant 6
+    forbids reading the machine's real `~/.claude`. **`demo_taskset(root)` MATERIALIZES**, alone in
+    the family: a Claude Code project's storage directory is named from its ABSOLUTE path, so no
+    static JSON constant can name it. The signature takes `root` for a lifetime reason — `mkdtemp`
+    would leak a tree per invocation and a `TemporaryDirectory` would delete the transcripts before
+    `run` read them — so the caller owns it (`run` passes `--out/demo`, tests pass `tmp_path`). Only the
+    LAYOUT is generated; the transcript CONTENT stays checked in as
+    `eval/ctx_distillery_eval/demo/*.jsonl`, keeping the demo taskset reviewable data. Its two tasks
+    are the two real failure modes: a session of durable conventions that must be promoted, and a
+    self-resolving debugging exchange that must not be over-promoted.
+  - **`judge.build_prompt` grew a third positional `reference`, and `PROMPT_VERSION` bumped to
+    `atlas-ctxd-eval-v2`** — the v1 docstring named this exact change as the reason the constant
+    exists, and `eval/tests/test_judge.py`'s pin was updated deliberately, with the reason recorded
+    in its docstring. **The `=== REFERENCE ===` section renders ONLY when there is one**, where all
+    three siblings render it unconditionally with a `"(no reference provided; …)"` fallback: theirs
+    always have a taskset, and this project's primary path (`score` without `--taskset`) does not, so
+    a no-reference run keeps rendering the byte-identical v1 prompt. When it IS rendered,
+    `REFERENCE_TRUST_RULE` is appended to `UNTRUSTED_DATA_RULE` — which enumerates exactly two
+    untrusted bodies and would otherwise be silent about a third — stating that a taskset reference
+    is TRUSTED input (a human wrote it into a checked-in file, unlike model output or somebody else's
+    session) while still never a licence to change the scale or the output format. `Judge`,
+    `StubJudge`, `make_eval_judge`'s inner judge and `score_run` all widened identically.
+  - **`score --taskset` is an OPTION, not a third positional.** Every sibling's `score` takes a
+    taskset positionally; ours cannot, because the shipped contract is `score <trace_glob>
+    <transcript_path>...` and those must not move. Without this the `reference` field would have been
+    dead on the only subcommand shipping today. Pairing is `Task.run_id == EvalTask.id` (verified:
+    `collect_tasks` reads the trace ENVELOPE's `run_id`, not the filename stem — which is what lets
+    `run` give a file a timestamped NAME while keeping the pairing). A run the taskset does not
+    describe is scored with an EMPTY reference, never skipped; a taskset FILE that cannot be parsed
+    is still a hard failure, because that is a typo to fix rather than a condition to degrade past.
+  - **Three sibling behaviours `run` deliberately does not copy**, each a real defect there: no
+    `os.remove` of a stale trace (forbidden in this project — the FILENAME carries a UTC stamp and is
+    unique per invocation, with no `--force` that deletes); everything under `--out` (cve-reverser
+    builds CWD-relative paths despite its docstring); and a failing task becoming an `unscored` ROW
+    with its reason rather than a `SystemExit` that kills the batch on task 1 of 50. `SystemExit` is
+    caught explicitly alongside `Exception` because it derives from `BaseException`;
+    `KeyboardInterrupt` still is not.
+  - **`eval/tests/test_boundary.py` gained an AST assertion that no eval module imports
+    `ctx_distillery.apply`.** `tests/test_no_write_capability.py` scans `ctx_distillery/` ONLY, which
+    was a complete guard until `cli._drive` started importing product code — an eval `run` is
+    automation over a batch of projects, exactly the shape invariant 8 forbids a writer in. AST, not
+    a textual scan: that file's own docstring names `apply_plan`. `eval/tests/conftest.py`'s autouse
+    offline fixture also now scrubs `CD_*` alongside `CDEVAL_*`, so a developer machine with
+    `CD_ROOT_LM` exported cannot start a live billed distillation from the suite.
 - **FIXED: the invariant-1/8 tripwire was structurally blind over most of two modules.** An
   adversarial review of this batch found `tests/test_no_write_capability.py::_code_lines` entered
   docstring-skip mode only when a stripped line STARTED with `"""`. Two modules assign a

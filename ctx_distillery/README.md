@@ -26,9 +26,11 @@ adapter.ingest()  ->  redact  ->  DistillSession (RLM)  ->  assemble()  ->  [a h
 - **`tools/`** — `list_memory_files` / `read_memory_file` (progressive disclosure over the store,
   allowlisted to exact snapshot paths), `read_transcript_chunk`, and the two drafting tools
   (`draft_memory_file` / `draft_skill_file`) that author text into the TRACE and never onto disk.
-- **`session.py`** — `run_distillation` (ingest once, redact once, run once) and `assemble`, which
-  re-sources each promotion's verbatim drafted bytes from its `tool_call` event by `artifact_id`,
-  reporting an unbacked candidate as a problem rather than trusting the plan's own claim.
+- **`session.py`** — `run_distillation_artifacts` (ingest once, redact once, run once; returns the
+  plan PLUS the redacted transcripts, resolved `run_id`, trace path, events and memory index),
+  its unchanged `run_distillation` wrapper, and `assemble`, which re-sources each promotion's
+  verbatim drafted bytes from its `tool_call` event by `artifact_id`, reporting an unbacked candidate
+  as a problem rather than trusting the plan's own claim.
 - **`apply.py`** — the human-gated writer. Everything above is inert; this is where disk changes.
 - **`cli.py` / `config.py` / `render.py`** — the shell in front of all of it. `cli.py` is
   `ctx-distillery` (`distill` runs the pipeline above; `show` re-reads a finished trace);
@@ -196,7 +198,8 @@ ctx_distillery/
                        #   the `claude-agent-sdk/` subscription sentinel + its drafter refusal
   schema.py            # the dspy-free plan shapes + assemble() (eval/ and studio/ read them)
   task.py              # DistillSession(RLMTask) — signature, output_model, instructions
-  session.py           # run_distillation (ingest once, redact once, run once) + assemble()
+  session.py           # run_distillation_artifacts (ingest once, redact once, run once) +
+                       #   its run_distillation wrapper + assemble()
   apply.py             # apply_plan — the human-gated writer, outside the RLM entirely,
                        #   plus `ctx-distillery-apply`'s own main() (see above)
   render.py            # render_plan / plan_as_dict — the ONE plan rendering (eval/ imports it)

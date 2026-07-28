@@ -95,7 +95,9 @@ _DEFAULT_MAX_ITERATIONS = 30
 def _meta(events: list[dict]) -> dict:
     for event in events:
         if event.get("type") == EVENT_RUN_START:
-            return (event.get("payload") or {}).get("meta") or {}
+            meta = (event.get("payload") or {}).get("meta")
+            # A truthy non-dict `meta` slips past `or {}` — see `trace_io.dict_events`.
+            return meta if isinstance(meta, dict) else {}
     return {}
 
 

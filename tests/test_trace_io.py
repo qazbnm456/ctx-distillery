@@ -109,3 +109,42 @@ def test_load_trace_of_a_file_of_only_non_dict_lines_is_empty(tmp_path):
     path.write_text("\n".join(NON_DICT_LINES) + "\n", encoding="utf-8")
     assert load_trace(str(path)) == []
     assert json.loads("42") == 42  # …and every one of those lines really was valid JSON
+
+
+def test_dict_events_coerces_a_non_dict_payload_instead_of_crashing_every_consumer():
+    """A well-formed JSON OBJECT with a non-dict `payload` used to 500 the studio. REGRESSION TEST.
+
+    The line filter above was only half the job. Every consumer in this workspace unwraps with
+    `(event.get("payload") or {}).get(...)`, which absorbs `None` but NOT a truthy non-dict —
+    `("oops" or {})` is `"oops"`, and `.get` on a `str` raises `AttributeError`. So an entry that
+    PASSES the dict-shape filter (it really is a JSON object) still crashed `rubric.trace_facts`,
+    `schema.assemble` and `GET /v1/runs/{id}/iterations`, and killed the SSE generator on its first
+    event so a replay returned an empty stream. Found by an adversarial review of the drawer pass.
+
+    Coerced, not dropped: the envelope (`type`/`step_id`/`ts`/`run_id`) is still true and still
+    orders the trace, and a payload-less event is a shape every consumer already handles.
+    """
+    events = dict_events(
+        [
+            {"type": "tool_call", "step_id": 1, "payload": "oops"},
+            {"type": "tool_call", "step_id": 2, "payload": [1, 2, 3]},
+            {"type": "tool_call", "step_id": 3, "payload": 7},
+            {"type": "tool_call", "step_id": 4, "payload": None},
+            {"type": "main_step", "step_id": 5},  # legitimately payload-less
+            {"type": "tool_call", "step_id": 6, "payload": {"tool": "real"}},
+        ]
+    )
+    assert len(events) == 6, "a bad payload must not drop the event — the envelope is still true"
+    assert events[0]["payload"] == {} and events[1]["payload"] == {} and events[2]["payload"] == {}
+    assert events[3]["payload"] == {}, "None was already absorbed by `or {}`, but normalize it too"
+    assert "payload" not in events[4], "an absent payload stays absent, not invented"
+    assert events[5]["payload"] == {"tool": "real"}, "a good payload is untouched"
+    # The envelope survives coercion — that is the whole reason not to drop the event.
+    assert [e["step_id"] for e in events] == [1, 2, 3, 4, 5, 6]
+
+
+def test_dict_events_does_not_mutate_the_caller_s_events():
+    """Coercion returns a new dict — a shared events list must not be rewritten under the caller."""
+    original = {"type": "tool_call", "step_id": 1, "payload": "oops"}
+    dict_events([original])
+    assert original["payload"] == "oops"

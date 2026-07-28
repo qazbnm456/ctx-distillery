@@ -46,6 +46,7 @@ def score_run(
     transcript_texts: list[str],
     *,
     judge: Judge | None = None,
+    reference: str = "",
 ) -> EvalRow:
     """Score one run: reconstruct its plan, render it, judge it against its transcript(s).
 
@@ -53,6 +54,12 @@ def score_run(
     trace-only fallback is not viable. `judge` defaults to `StubJudge()`, the offline, fully
     deterministic, tested default path; the LIVE judge (`judge.make_eval_judge`, behind the `judge`
     extra + `CDEVAL_MODEL`) is selected by `cli._pick_judge` and passed in explicitly.
+
+    `reference` is OPTIONAL judge-only ground truth from an `EvalTask`, and it is keyword-only with
+    an empty default because the path that has none is the primary one: `score` without `--taskset`
+    scores a glob of traces against no taskset at all, and `judge.build_prompt` then renders no
+    REFERENCE section whatsoever. It is passed POSITIONALLY to the judge, so a `Judge` implementation
+    must accept three arguments (the protocol says so, and every judge in this package does).
 
     Never raises on a failed judge. Parity pass 4 widened the `Judge` protocol to return a
     `JudgeVerdict` rather than a bare `EvalScore`, and this is where that pays off: `ok=False`
@@ -69,7 +76,7 @@ def score_run(
     plan = plan_from_events(events)
     assembled = assemble(events, plan)
     plan_text = render_plan(assembled)
-    verdict = judge(plan_text, transcript_texts)
+    verdict = judge(plan_text, transcript_texts, reference)
     if not verdict.ok or verdict.score is None:
         return EvalRow(
             run_id=run_id,

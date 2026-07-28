@@ -87,10 +87,13 @@ class EvalReport(BaseModel):
     else in the report would say so. `n` / `n_unscored` make the denominator explicit, so a batch
     where the judge failed on half the runs cannot be read as a clean mean over all of them.
 
-    No `taskset` field, unlike every sibling's report: this package has no taskset concept to name
-    (`taskset.py` enumerates runs from TRACES — see `eval/README.md`'s "Deferred: `run` + a real
-    taskset"), and inventing the field before the concept exists would be labelling a report with
-    something no caller could truthfully fill in.
+    Still NO `taskset` field, unlike every sibling's report — but the REASON changed and is worth
+    restating rather than leaving as inherited wording. It used to be "there is no taskset concept
+    here at all"; there is one now (`taskset.EvalTask` / `load_taskset` / `demo_taskset`). What holds
+    instead is that a taskset is OPTIONAL on both paths that produce a report: `score --taskset` may
+    be omitted entirely, and even `run` can be handed a `{id, reference}`-only file. A field that is
+    empty on the package's primary invocation is not provenance, it is a blank column — and
+    `prompt_version` already records the thing that actually changes a number.
     """
 
     n: int = Field(default=0, description="total runs considered (scored + unscored)")

@@ -18,17 +18,33 @@ braces over the source tree, not the main gate. It doesn't need either package's
 be wired up, so it can't be fooled by a lazy/deferred import — and its known cost is that any prose
 in the ROOT package which merely NAMES this package turns it red (`studio/tests/test_boundary.py`
 uses `ast` for that reason; this one stays textual to match its diff-sentry original).
+
+**The fourth test is this pass's own, and it closes a real hole rather than adding symmetry.**
+`tests/test_no_write_capability.py::test_apply_is_unreachable_from_the_planner_path` (root package)
+scans `ctx_distillery/` ONLY. Until now that was complete: nothing outside the root package imported
+product code at all. `cli._drive` now does — it imports `ctx_distillery.session`,
+`ctx_distillery.config` and `ctx_distillery.adapters.claude_code` to drive a real distillation — so
+`ctx_distillery_eval` is now a module set from which `ctx_distillery.apply` is REACHABLE and nothing
+would catch an import of it (CLAUDE.md invariant 8: applying stays human-called, outside any
+automated trajectory, and an eval harness driving a batch is exactly the kind of automation that
+must not gain a writer). It uses `ast`, not a textual scan, for the reason
+`studio/tests/test_boundary.py` already gives: a docstring that merely NAMES `apply_plan` — this
+file's own docstring does — must not trip it.
 """
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
 
+import ctx_distillery_eval
+
 import ctx_distillery
 
 ROOT_PACKAGE_DIR = Path(ctx_distillery.__file__).parent
+EVAL_PACKAGE_DIR = Path(ctx_distillery_eval.__file__).parent
 
 
 def _fresh(code: str) -> None:
@@ -89,3 +105,63 @@ def test_ctx_distillery_eval_can_import_ctx_distillery():
     import ctx_distillery.schema
     import ctx_distillery.session
     import ctx_distillery.task  # noqa: F401
+
+
+def _imported_modules(tree: ast.AST) -> set[str]:
+    """Every dotted module name this AST imports, at ANY nesting depth.
+
+    `ast.walk`, not `tree.body`: `cli._drive` imports its `ctx_distillery` dependencies INSIDE the
+    function (that laziness is what keeps `import ctx_distillery_eval.cli` dspy-free), so a
+    top-level-only scan would look at precisely the wrong place and pass vacuously.
+    """
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            found.add(module)
+            found.update(f"{module}.{alias.name}" for alias in node.names)
+    return found
+
+
+def test_the_eval_harness_never_imports_the_writer():
+    """`ctx_distillery.apply` must be unreachable from this package (CLAUDE.md invariant 8).
+
+    The root package's own tripwire scans `ctx_distillery/` only, and that was a complete guard
+    until `cli._drive` started importing product code to drive a real distillation. An eval `run`
+    is automation over a BATCH of projects; a writer reachable from it is exactly the shape
+    invariant 8 exists to forbid. AST rather than a textual scan, deliberately — this module's own
+    docstring names `apply_plan`, and so may any future one.
+    """
+    offenders = []
+    for path in sorted(EVAL_PACKAGE_DIR.rglob("*.py")):
+        imported = _imported_modules(ast.parse(path.read_text(encoding="utf-8")))
+        if any(name == "ctx_distillery.apply" or name.startswith("ctx_distillery.apply.")
+               for name in imported):
+            offenders.append(str(path))
+    assert offenders == [], (
+        f"the eval harness must never import ctx_distillery.apply — applying a plan is human-called, "
+        f"outside any automated trajectory (CLAUDE.md invariant 8). Found in: {offenders}"
+    )
+
+
+def test_the_scrub_list_covers_every_CD_var():
+    """`conftest.CD_VARS` must name every `CD_*` the root config reads — checked, not promised.
+
+    The autouse fixture scrubs `CD_VARS` so a developer machine with live credentials exported
+    cannot start a real, billed distillation from the test suite. That guarantee is only as good as
+    the list, and the list is a hand-maintained mirror of another module's surface — which rots by
+    default. It already had: `CD_PLANNER_MAX_TOKENS` and `CD_ADAPTER` were missing from birth,
+    added in the same batch as the "keep in sync" comment that was supposed to prevent exactly that.
+
+    A missing name is not automatically a live-call risk (`CD_ROOT_LM` is the gate, and it is
+    scrubbed), but "the gate happens to cover us" is not the property the fixture claims.
+    """
+    from .conftest import CD_VARS, _cd_vars_actually_read
+
+    missing = _cd_vars_actually_read() - set(CD_VARS)
+    assert not missing, (
+        f"ctx_distillery.config reads {sorted(missing)}, which conftest.CD_VARS does not scrub — "
+        f"add them there. This is the drift the 'keep in sync' comment could not prevent."
+    )

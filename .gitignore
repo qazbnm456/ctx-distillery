@@ -12,6 +12,12 @@ __pycache__/
 output/
 /traces/
 *.jsonl
+# ...but the eval demo TRANSCRIPTS are source, not a run artifact. `*.jsonl` above is carried from
+# the sibling template, where every .jsonl really is a trace; here it silently swallowed the two
+# fixtures `demo_taskset` copies at run time. A fresh clone then had no fixtures, so `run demo`
+# raised FileNotFoundError, five eval tests failed — including the one asserting these are checked-in
+# data — and CI's eval-test job went red, while four docs claimed they were tracked. Found by review.
+!eval/ctx_distillery_eval/demo/*.jsonl
 
 # Secrets / local env (only .env.example is tracked)
 .env

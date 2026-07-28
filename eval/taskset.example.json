@@ -1,0 +1,14 @@
+[
+  {
+    "id": "acme-widgets-2026-07",
+    "project": {
+      "project_dir": "/absolute/path/to/your/project",
+      "claude_home": "/absolute/path/to/a/claude/home"
+    },
+    "reference": "Expected plan (judge-only ground truth, written from the project's real sessions — NOT any single run's narrative): (1) PROMOTE the two standing conventions the sessions state and never retract — the merge freeze on main from the Friday before a release tag until the tag is cut, and the rule that releases are cut manually by the maintainer on record rather than from CI. Each should be a promote_to_memory candidate whose drafted body carries the rule AND its rationale, specific enough to act on without re-reading the transcript. (2) PROMOTE the pre-push routine (`ruff check .` + `pytest -q` before any push touching the package) as a skill, project-scoped — it is a reusable how-to, not a fact about the project. (3) PRUNE the two transcripts that are pure transient debugging: an import error caused by the wrong cwd and a stale shell hash, both of which the user explicitly calls a false alarm. Pruning them must state that reason. (4) KEEP the existing memory file on the release process, updated rather than duplicated — a second file restating the same freeze rule is a merge failure, not a promotion. Grade TF on whether all three durable items survived and neither debugging session was over-promoted, TA on whether the run read both transcripts before claiming cross-conversation overlap, TG on whether each rationale points at real transcript content rather than a plausible-sounding summary, and PA on whether the drafted files are correctly targeted (memory vs skill, global vs project)."
+  },
+  {
+    "id": "score-only-example",
+    "reference": "A {id, reference}-only entry: legal, and useful with `score --taskset` (which needs no project directory — it reads finished traces). `run` REFUSES this one loudly, as an unscored row naming the missing project.project_dir, and carries on with the rest of the taskset."
+  }
+]

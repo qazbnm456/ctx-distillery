@@ -43,6 +43,33 @@ _GOOD_SKILL = (
 )
 
 
+def _renamed(draft: str, old_name: str, new_name: str) -> str:
+    """`draft` with its frontmatter `name:` swapped — asserting the ANCHOR was actually there.
+
+    A bare `draft.replace("name: x", "name: y")` is a HOLLOW-GREEN GENERATOR, and the failure is
+    silent in exactly the tests that matter least loudly. If someone renames `_GOOD_SKILL`'s own
+    `name:` field, every `.replace()` keyed to the old value becomes a NO-OP: the vector never
+    reaches the thing under test. A test asserting `ok is False` then fails and you find out — but a
+    test asserting `ok is True` KEEPS PASSING while checking nothing at all. Two of the tests below
+    are that shape, and one of them
+    (`test_a_global_draft_is_never_flagged_as_shadowed_by_a_project_skill`) guards a real safety
+    rule: a project skill silently shadowed by a global one of the same name is unreachable forever.
+
+    So the anchor's existence is asserted, not assumed. A vanished anchor becomes a loud failure
+    naming the fixture, instead of a green test that stopped testing years earlier.
+    """
+    return _spliced(draft, f"name: {old_name}", f"name: {new_name}")
+
+
+def _spliced(text: str, anchor: str, replacement: str) -> str:
+    """`text` with `anchor` -> `replacement`, asserting the anchor existed. See `_renamed`."""
+    assert anchor in text, (
+        f"the fixture no longer contains {anchor!r} — this splice silently became a no-op, so the "
+        f"test below is asserting against UNMODIFIED text. Update the anchor, don't delete it."
+    )
+    return text.replace(anchor, replacement)
+
+
 def _payloads(path, tool):
     return [
         e["payload"]
@@ -85,7 +112,7 @@ def test_memory_validator_cross_checks_the_requested_memory_type(snapshot):
 
 
 def test_memory_validator_refuses_a_name_that_collides_with_an_existing_file(snapshot):
-    colliding = _GOOD_MEMORY.replace("name: merge-freeze", "name: Project-Conventions")
+    colliding = _renamed(_GOOD_MEMORY, "merge-freeze", "Project-Conventions")
     check = make_memory_validator(snapshot, lambda: "project")(colliding)
     assert check.ok is False
     assert any("collides with an existing memory file" in e for e in check.errors)
@@ -120,7 +147,8 @@ def test_when_to_use_and_dispatch_intent_are_OPTIONAL_never_required(snapshot):
     validate = make_skill_validator(snapshot)
     assert validate(_GOOD_SKILL).ok is True, "omitting the two optionals must never fail a draft"
 
-    with_extras = _GOOD_SKILL.replace(
+    with_extras = _spliced(
+        _GOOD_SKILL,
         "description: How to re-run only the flaky CI job.\n",
         "description: How to re-run only the flaky CI job.\n"
         "when_to_use: When CI fails on one job only.\n"
@@ -155,7 +183,7 @@ def test_a_global_skill_name_is_not_a_FILE_collision_for_a_project_scoped_draft(
     DIFFERENT reason a same-name global skill would shadow it (below); a name unique to neither store
     is the case that is actually clean."""
     validate = make_skill_validator(_skill_refs(), lambda: "project")
-    unique = _GOOD_SKILL.replace("name: rerun-flaky-ci", "name: totally-unique-name")
+    unique = _renamed(_GOOD_SKILL, "rerun-flaky-ci", "totally-unique-name")
     assert validate(unique).ok is True
 
 
@@ -167,7 +195,7 @@ def test_a_same_scope_name_still_collides():
 
 
 def test_the_project_scoped_namespace_is_checked_on_its_own_terms():
-    draft = _GOOD_SKILL.replace("name: rerun-flaky-ci", "name: This-Repo-Only")
+    draft = _renamed(_GOOD_SKILL, "rerun-flaky-ci", "This-Repo-Only")
     assert make_skill_validator(_skill_refs(), lambda: "global")(draft).ok is True
     project = make_skill_validator(_skill_refs(), lambda: "project")(draft)
     assert project.ok is False and any("project scope" in e for e in project.errors)
@@ -177,7 +205,7 @@ def test_no_stated_scope_falls_back_to_the_conservative_superset():
     """A caller with no scope to check against gets EVERY scope's names treated as taken — weaker for
     the drafter, never wrong for the store."""
     for name in ("rerun-flaky-ci", "this-repo-only"):
-        draft = _GOOD_SKILL.replace("name: rerun-flaky-ci", f"name: {name}")
+        draft = _renamed(_GOOD_SKILL, "rerun-flaky-ci", name)
         assert make_skill_validator(_skill_refs())(draft).ok is False
 
 
@@ -203,7 +231,7 @@ def test_a_project_draft_matching_an_existing_global_skill_name_is_refused_as_sh
 def test_a_global_draft_is_never_flagged_as_shadowed_by_a_project_skill():
     """Precedence runs one way only: nothing shadows a global skill, so a global-scoped draft is
     checked for same-scope collisions only, exactly as before."""
-    draft = _GOOD_SKILL.replace("name: rerun-flaky-ci", "name: this-repo-only")
+    draft = _renamed(_GOOD_SKILL, "rerun-flaky-ci", "this-repo-only")
     check = make_skill_validator(_skill_refs(), lambda: "global")(draft)
     assert check.ok is True
 
@@ -211,7 +239,7 @@ def test_a_global_draft_is_never_flagged_as_shadowed_by_a_project_skill():
 def test_a_memory_name_is_scope_filtered_without_changing_anything(snapshot):
     """A memory/index ref is inherently project-scoped, so scope filtering is a no-op for memory."""
     assert {ref.scope for ref in snapshot} == {"project"}
-    colliding = _GOOD_MEMORY.replace("name: merge-freeze", "name: project-conventions")
+    colliding = _renamed(_GOOD_MEMORY, "merge-freeze", "project-conventions")
     assert make_memory_validator(snapshot, lambda: "project")(colliding).ok is False
 
 

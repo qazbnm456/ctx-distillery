@@ -49,6 +49,43 @@
     </aside>
   </main>
 
+  <!-- Trajectory drawer (DESIGN.md §5.7): a bottom sheet over a FINISHED run's REPL turns, fetched
+       from GET /v1/runs/{run_id}/iterations. No transport controls, no progress bar, no expand
+       button and no icon set — see §5.7's "Not built" for why each one is absent rather than
+       missing. Every node inside these three containers is created by trajectory.js via el(), which
+       sets textContent: a turn's code/output is the REPL's verbatim echo and carries drafted bodies
+       and evidence, so rendering-as-text IS the mitigation. -->
+  <button id="traj-handle" class="traj-handle" hidden aria-expanded="false" aria-controls="traj-drawer">
+    <span class="th-ic">◫</span> Trajectory
+  </button>
+  <div id="traj-backdrop" class="traj-backdrop" hidden></div>
+  <section id="traj-drawer" class="traj-drawer" hidden aria-label="Trajectory — this run's REPL turns">
+    <header class="traj-head">
+      <div><span class="traj-tag">Trajectory</span><span class="traj-run" id="traj-run"></span></div>
+      <div class="traj-stat" id="traj-stat"></div>
+      <button id="traj-close" class="traj-close" title="Close (Esc)" aria-label="Close">✕</button>
+    </header>
+    <div class="traj-note" id="traj-note" hidden></div>
+    <div class="traj-main">
+      <nav class="traj-nav" aria-label="Turns">
+        <div class="traj-col-label">Turns</div>
+        <div class="traj-col-note">←/→ steps Init ↔ turns</div>
+        <div class="traj-steps" id="traj-steps"></div>
+      </nav>
+      <div class="traj-detail" id="traj-detail"></div>
+      <aside class="traj-side" aria-label="Tool timeline">
+        <div class="traj-col-label">Tool timeline</div>
+        <!-- ALWAYS populated: built from `timeline`, which never depends on `turn_index` — that is
+             absent from every entry whenever per_turn_timing is false, i.e. on every offline
+             trace. Grouping tools under turns only would show an empty pane in exactly that case. -->
+        <div class="traj-col-note">elapsed · gap (planner-think + tool-exec)</div>
+        <div class="traj-timeline" id="traj-timeline"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- trajectory.js first: app.js calls window.Trajectory(...) at top level. -->
+  <script src="/static/trajectory.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

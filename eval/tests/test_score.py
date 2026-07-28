@@ -34,15 +34,31 @@ def test_score_run_passes_a_custom_judge_through():
     events = [_result(_plan_dict())]
     seen = {}
 
-    def spy_judge(plan_text, transcript_texts):
+    def spy_judge(plan_text, transcript_texts, reference=""):
         seen["plan_text"] = plan_text
         seen["transcript_texts"] = transcript_texts
+        seen["reference"] = reference
         return JudgeVerdict(ok=True, score=EvalScore(TF=1, TA=2, TG=3, PA=4, notes="spy"))
 
     row = score_run("r0", "trace.jsonl", events, ["transcript A", "transcript B"], judge=spy_judge)
     assert row.score.notes == "spy"
     assert seen["transcript_texts"] == ["transcript A", "transcript B"]
     assert "no candidates" in seen["plan_text"]
+    assert seen["reference"] == ""  # no taskset -> no reference, and the v1 prompt is rendered
+
+
+def test_score_run_forwards_a_taskset_reference_to_the_judge():
+    """The judge-only ground truth reaches the judge and nothing else. It is passed POSITIONALLY, so
+    a `Judge` that only accepts two arguments is a broken `Judge` — the protocol says three."""
+    seen = {}
+
+    def spy_judge(plan_text, transcript_texts, reference=""):
+        seen["reference"] = reference
+        return JudgeVerdict(ok=True, score=EvalScore(TF=1, TA=2, TG=3, PA=4, notes="spy"))
+
+    score_run("r0", "t.jsonl", [_result(_plan_dict())], ["t"], judge=spy_judge,
+              reference="expected: promote the merge freeze")
+    assert seen["reference"] == "expected: promote the merge freeze"
 
 
 # -- the unscored path (parity pass 4) ------------------------------------------------------------
@@ -52,7 +68,7 @@ def test_score_run_records_an_unscored_row_when_the_judge_fails():
     """The point of widening `Judge` to return a `JudgeVerdict`: a live judge that fails (endpoint
     down, off-schema reply, tripped breaker) lands as a row with NO score and the verdict's reason —
     never a fake 0, and never an exception that kills the rest of the batch."""
-    def failing_judge(plan_text, transcript_texts):
+    def failing_judge(plan_text, transcript_texts, reference=""):
         return JudgeVerdict(ok=False, reason="judge endpoint error: connection refused")
 
     row = score_run("r0", "trace.jsonl", [_result(_plan_dict())], ["t"], judge=failing_judge)
@@ -64,14 +80,14 @@ def test_score_run_supplies_a_reason_for_a_judge_that_fails_without_one():
     """`EvalRow` REFUSES a blank unscored row, so a third-party `Judge` returning `ok=False` with an
     empty reason would raise a `ValidationError` here instead of degrading. Belt and braces."""
     row = score_run("r0", "trace.jsonl", [_result(_plan_dict())], ["t"],
-                    judge=lambda p, t: JudgeVerdict(ok=False))
+                    judge=lambda p, t, r="": JudgeVerdict(ok=False))
     assert row.score is None and row.unscored_reason == "judge returned no score"
 
 
 def test_score_run_treats_an_ok_verdict_with_no_score_as_unscored():
     """`ok=True` with `score=None` is not a score — the two conditions are checked together."""
     row = score_run("r0", "trace.jsonl", [_result(_plan_dict())], ["t"],
-                    judge=lambda p, t: JudgeVerdict(ok=True, score=None, reason="empty"))
+                    judge=lambda p, t, r="": JudgeVerdict(ok=True, score=None, reason="empty"))
     assert row.score is None and row.unscored_reason == "empty"
 
 
@@ -183,7 +199,7 @@ def test_aggregate_excludes_unscored_rows_from_the_mean_and_its_denominator():
     rows = [
         score_run("r1", "a.jsonl", [_result(_plan_dict())], ["t"], judge=StubJudge(tf=8, ta=8, tg=8, pa=8)),
         score_run("r2", "b.jsonl", [_result(_plan_dict())], ["t"],
-                  judge=lambda p, t: JudgeVerdict(ok=False, reason="judge endpoint error: boom")),
+                  judge=lambda p, t, r="": JudgeVerdict(ok=False, reason="judge endpoint error: boom")),
     ]
     report = aggregate(rows)
     assert report.means == {"TF": 8.0, "TA": 8.0, "TG": 8.0, "PA": 8.0}
@@ -193,7 +209,7 @@ def test_aggregate_excludes_unscored_rows_from_the_mean_and_its_denominator():
 
 def test_aggregate_of_only_unscored_rows_has_empty_means_not_zeros():
     rows = [score_run("r1", "a.jsonl", [_result(_plan_dict())], ["t"],
-                      judge=lambda p, t: JudgeVerdict(ok=False, reason="off-schema"))]
+                      judge=lambda p, t, r="": JudgeVerdict(ok=False, reason="off-schema"))]
     report = aggregate(rows)
     assert report.means == {} and report.n == 1 and report.n_unscored == 1
 
