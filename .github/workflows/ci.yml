@@ -89,6 +89,33 @@ jobs:
         # binary before landing this.
         run: uv run --python ${{ matrix.python-version }} --directory studio --package ctx-distillery-studio --extra dev python -m pytest
 
+  studio-static:
+    name: studio static contracts (node)
+    runs-on: ubuntu-latest
+    # DELIBERATELY ITS OWN JOB, diverging from all three sibling repos, which append this as a STEP
+    # to their single studio job. Theirs is one job; ours (`studio-test` above) is a 3-version Python
+    # matrix, so a step there would run these byte-identical assertions THREE times. They read
+    # `static/style.css` and `static/app.js` as TEXT — there is no Python in them at all, so nothing
+    # about the result can vary by interpreter version, and two of the three runs would be pure
+    # waste. A separate job also skips `uv sync` entirely (checkout + node, seconds) and names the
+    # failure precisely in the CI UI instead of hiding a CSS regression inside "studio (py3.12)".
+    # This matches how this repo already splits `test` / `eval-test` / `studio-test` / `lint` into
+    # separate jobs where the siblings use steps in one.
+    steps:
+      - uses: actions/checkout@v4
+      # No setup-node: the ubuntu runner ships node, and these tests are plain CommonJS with
+      # `require("assert")` — no npm, no package.json, no node_modules anywhere in this repo.
+      - name: Studio frontend static contracts
+        # toolscout's `nullglob` form, NOT the other two siblings' unguarded loop: with no
+        # `*.test.js` present, `for f in studio/tests/*.test.js` runs `node 'studio/tests/*.test.js'`
+        # literally and fails module-not-found. GitHub's default shell is `bash -e {0}`, non-POSIX,
+        # so `shopt` works as written.
+        run: |
+          shopt -s nullglob
+          files=(studio/tests/*.test.js)
+          if [ ${#files[@]} -eq 0 ]; then echo "no frontend tests"; exit 0; fi
+          for f in "${files[@]}"; do echo "▸ $f"; node "$f"; done
+
   lint:
     name: ruff
     runs-on: ubuntu-latest

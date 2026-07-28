@@ -8,6 +8,12 @@ gives for `rubric.plan_from_events` and `trace_io.load_trace`. `eval/`'s `score.
 here now and keeps no copy; that module's own `__all__` still re-exports it, so nothing downstream
 of `eval/` had to change.
 
+`AssembledPlan` comes from `schema.py`, NOT from `session.py` where it used to be defined: this
+module is imported by `eval/`'s `score.py`, and routing a plain dataclass import through the module
+that constructs an `RLMTask` is what made a fully-offline eval run pay for dspy. Same shape, same
+`from ctx_distillery.session import AssembledPlan` still working for anyone who wants it — just not
+via the heavy path (see `schema.py`'s docstring).
+
 Rendering only. Nothing here writes a file — `render_plan` returns a string and the CLI `print`s it,
 which is why `ctx-distillery show` deliberately has no `--out` flag (its sibling projects' `render`
 commands do). See `cli.py`'s module docstring: `CLAUDE.md` invariant 1's mutation scan covers every
@@ -19,7 +25,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from .session import AssembledPlan
+from .schema import AssembledPlan
 
 __all__ = ["plan_as_dict", "render_plan"]
 

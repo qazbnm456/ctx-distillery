@@ -7,7 +7,7 @@ Hand-rolled trace-event dicts, matching the shape `rlm_kit.trace` actually recor
 
 from __future__ import annotations
 
-from ctx_distillery_eval.judge import EvalScore, StubJudge
+from ctx_distillery_eval.judge import EvalScore, JudgeVerdict, StubJudge
 from ctx_distillery_eval.score import aggregate, render_plan, score_run
 from rlm_kit.trace import EVENT_RESULT
 
@@ -37,12 +37,42 @@ def test_score_run_passes_a_custom_judge_through():
     def spy_judge(plan_text, transcript_texts):
         seen["plan_text"] = plan_text
         seen["transcript_texts"] = transcript_texts
-        return EvalScore(TF=1, TA=2, TG=3, PA=4, notes="spy")
+        return JudgeVerdict(ok=True, score=EvalScore(TF=1, TA=2, TG=3, PA=4, notes="spy"))
 
     row = score_run("r0", "trace.jsonl", events, ["transcript A", "transcript B"], judge=spy_judge)
     assert row.score.notes == "spy"
     assert seen["transcript_texts"] == ["transcript A", "transcript B"]
     assert "no candidates" in seen["plan_text"]
+
+
+# -- the unscored path (parity pass 4) ------------------------------------------------------------
+
+
+def test_score_run_records_an_unscored_row_when_the_judge_fails():
+    """The point of widening `Judge` to return a `JudgeVerdict`: a live judge that fails (endpoint
+    down, off-schema reply, tripped breaker) lands as a row with NO score and the verdict's reason —
+    never a fake 0, and never an exception that kills the rest of the batch."""
+    def failing_judge(plan_text, transcript_texts):
+        return JudgeVerdict(ok=False, reason="judge endpoint error: connection refused")
+
+    row = score_run("r0", "trace.jsonl", [_result(_plan_dict())], ["t"], judge=failing_judge)
+    assert row.score is None and row.unscored is True
+    assert row.unscored_reason == "judge endpoint error: connection refused"
+
+
+def test_score_run_supplies_a_reason_for_a_judge_that_fails_without_one():
+    """`EvalRow` REFUSES a blank unscored row, so a third-party `Judge` returning `ok=False` with an
+    empty reason would raise a `ValidationError` here instead of degrading. Belt and braces."""
+    row = score_run("r0", "trace.jsonl", [_result(_plan_dict())], ["t"],
+                    judge=lambda p, t: JudgeVerdict(ok=False))
+    assert row.score is None and row.unscored_reason == "judge returned no score"
+
+
+def test_score_run_treats_an_ok_verdict_with_no_score_as_unscored():
+    """`ok=True` with `score=None` is not a score — the two conditions are checked together."""
+    row = score_run("r0", "trace.jsonl", [_result(_plan_dict())], ["t"],
+                    judge=lambda p, t: JudgeVerdict(ok=True, score=None, reason="empty"))
+    assert row.score is None and row.unscored_reason == "empty"
 
 
 def test_score_run_handles_a_missing_result_event_as_no_plan():
@@ -137,11 +167,43 @@ def test_aggregate_computes_means_reward_free():
     report = aggregate(rows)
     assert len(report.rows) == 2
     assert report.means == {"TF": 6.0, "TA": 6.0, "TG": 7.0, "PA": 7.0}
+    assert report.n == 2 and report.n_unscored == 0
 
 
 def test_aggregate_of_zero_rows_has_empty_means():
     report = aggregate([])
     assert report.rows == [] and report.means == {}
+    assert report.n == 0 and report.n_unscored == 0
+
+
+def test_aggregate_excludes_unscored_rows_from_the_mean_and_its_denominator():
+    """The arithmetic half of "unscored, never a fake 0": an excluded row must leave the DENOMINATOR
+    too. Counting it there is numerically identical to scoring it 0, which is the exact lie this
+    shape exists to prevent — here, one 8.0 and one failure means a mean of 8.0, not 4.0."""
+    rows = [
+        score_run("r1", "a.jsonl", [_result(_plan_dict())], ["t"], judge=StubJudge(tf=8, ta=8, tg=8, pa=8)),
+        score_run("r2", "b.jsonl", [_result(_plan_dict())], ["t"],
+                  judge=lambda p, t: JudgeVerdict(ok=False, reason="judge endpoint error: boom")),
+    ]
+    report = aggregate(rows)
+    assert report.means == {"TF": 8.0, "TA": 8.0, "TG": 8.0, "PA": 8.0}
+    assert report.n == 2 and report.n_unscored == 1
+    assert len(report.rows) == 2  # the failed run is REPORTED, not dropped from the listing
+
+
+def test_aggregate_of_only_unscored_rows_has_empty_means_not_zeros():
+    rows = [score_run("r1", "a.jsonl", [_result(_plan_dict())], ["t"],
+                      judge=lambda p, t: JudgeVerdict(ok=False, reason="off-schema"))]
+    report = aggregate(rows)
+    assert report.means == {} and report.n == 1 and report.n_unscored == 1
+
+
+def test_aggregate_records_the_judge_provenance_it_is_given():
+    """Without `prompt_version` a number is not attributable to the prompt that produced it — which
+    is the entire reason `judge.PROMPT_VERSION` exists."""
+    report = aggregate([], judge_model="judge-model-x", prompt_version="atlas-ctxd-eval-v1")
+    assert report.judge_model == "judge-model-x"
+    assert report.prompt_version == "atlas-ctxd-eval-v1"
 
 
 def test_ctx_distillery_eval_score_no_longer_defines_its_own_plan_from_events():

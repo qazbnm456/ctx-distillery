@@ -28,7 +28,10 @@
       </div>
 
       <div class="panel feed-panel">
-        <div class="panel-label">▾ Live feed <span class="dim" id="feed-status"></span></div>
+        <!-- "Replay feed", NOT "Live feed": this studio has no live-drive endpoint, so every row
+             here comes from a FINISHED trace re-streamed over SSE. The old label promised a
+             capability the backend does not have. -->
+        <div class="panel-label">▾ Replay feed <span class="dim" id="feed-status"></span></div>
         <div class="feed" id="feed" aria-live="polite"></div>
       </div>
     </section>

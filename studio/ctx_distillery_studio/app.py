@@ -1,6 +1,16 @@
-"""The SSE server: REPLAY-ONLY (no live-drive endpoint — see `CLAUDE.md` invariant 10's scope
-decision: `run_distillation` needs a caller-supplied `HarnessAdapter` + `chat_fn` already wired,
-unlike a self-contained one-shot driver a web request could reasonably own end-to-end).
+"""The SSE server: REPLAY-ONLY. No live-drive endpoint — `studio/README.md`'s "Scope: replay-only,
+v1" holds the full argument and `CLAUDE.md` invariant 10 the summary. The reason is NOT the one this
+docstring used to give ("`run_distillation` needs a caller-supplied `HarnessAdapter` + `chat_fn`
+already wired, unlike a self-contained driver a web request could own"): `ctx_distillery.cli`'s
+`_cmd_distill` IS that driver. Three reasons survive it — (a) no cancel seam anywhere in
+`run_distillation` or rlm-kit for a multi-minute, 30-turn sandboxed episode, so an HTTP-started run
+could only be hung or SIGKILLed into exactly the truncated trace `stream_run` below papers over;
+(b) the import-level `live`-extra valve every sibling has is unavailable, because replay itself
+calls `assemble`, which ships in the same distribution as the driver; and (c), the strongest, the
+live input would be a `project_dir` — an unauthenticated HTTP parameter selecting whose ENTIRE
+Claude Code history gets rendered and shipped to a remote model, with no `_slug_id` analogue to
+protect it. The positive case: `ctx-distillery distill` writes into `$CTXD_TRACES_DIR`, the same
+directory this server globs, so `distill` -> refresh -> Load already covers the use case.
 
 Unlike diff-sentry-studio (whose replay mode reads a durable `responses/{run_id}.json` PLUS a
 `traces/{run_id}.jsonl`), `ctx-distillery` writes NO artifact of its own — `run_distillation`
@@ -30,7 +40,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from ctx_distillery.rubric import plan_from_events, trace_facts
-from ctx_distillery.session import assemble
+from ctx_distillery.schema import assemble
 from ctx_distillery.trace_io import load_trace
 
 from .mapper import to_event

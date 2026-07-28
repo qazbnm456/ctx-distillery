@@ -117,8 +117,17 @@ button { font-family:var(--mono); cursor:pointer; }
 .plan-list { display:flex; flex-direction:column; gap:12px; }
 .candidate-row {
   border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; background:var(--surface-2);
+  border-left-width:3px; border-left-style:solid;
 }
-.candidate-row.has-problems { border-color:var(--bad); }
+/* The frame signature (DESIGN.md §2) — keyed to the state `assemble()` DERIVED from the trace, never
+   to the plan's own claim. `blocked` is exactly `apply.py::_blocking_problem`'s refusal set. */
+.candidate-row.state-blocked { border-color:var(--bad); }
+.candidate-row.state-backed  { border-left-color:var(--signal); }
+.candidate-row.state-inert   { border-left-color:var(--border-strong); }
+.candidate-blocked {
+  margin-top:8px; padding:6px 8px; font-size:.76rem; color:var(--bad);
+  border:1px solid var(--bad); border-radius:var(--radius); word-break:break-word;
+}
 .candidate-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .candidate-index { color:var(--text-faint); font-size:.75rem; }
 .candidate-action {
@@ -132,10 +141,15 @@ button { font-family:var(--mono); cursor:pointer; }
 .chip-ok { color:var(--ok); background:color-mix(in srgb, var(--ok) 16%, transparent); }
 .chip-bad { color:var(--bad); background:color-mix(in srgb, var(--bad) 16%, transparent); }
 .candidate-key-fields { margin-top:6px; font-size:.74rem; color:var(--text-dim); word-break:break-word; }
+/* `white-space:pre-wrap` alone wraps at WHITESPACE only, so a drafted body containing one
+   attacker-length unbroken token (a base64 blob, a 5000-char path) blew straight through the
+   column and gave the whole PAGE a horizontal scrollbar. `overflow-wrap:anywhere` is the fix and it
+   is load-bearing, not cosmetic: a drafted memory/skill body is untrusted model output, so its
+   token lengths are not ours to assume. Pinned by `tests/static-contract.test.js`. */
 .candidate-draft {
   margin-top:8px; padding:10px; background:var(--surface-1); border:1px solid var(--border);
   border-radius:var(--radius); font-family:var(--mono); font-size:.78rem; white-space:pre-wrap;
-  max-height:260px; overflow-y:auto; color:var(--text);
+  overflow-wrap:anywhere; max-height:260px; overflow-y:auto; color:var(--text);
 }
 .candidate-problems { margin-top:8px; }
 .problem-line { font-size:.76rem; color:var(--bad); }
@@ -151,3 +165,14 @@ button { font-family:var(--mono); cursor:pointer; }
 .rubric-fact { display:flex; justify-content:space-between; gap:8px; font-size:.76rem; padding:2px 0; }
 .rubric-fact-key { color:var(--text-dim); }
 .rubric-fact-value { color:var(--text); text-align:right; word-break:break-word; }
+
+/* ── responsive ─────────────────────────────────────────────────────────── */
+/* The three fixed tracks (320px | 1fr | 300px) total ~1000px, so below that the grid overflowed the
+   viewport and the whole page scrolled sideways. Stack instead, and drop the viewport-height pin:
+   with one column the panels must grow and the PAGE scrolls, which is the correct mobile behaviour
+   (three independent scroll tracks stacked inside a fixed 100vh would each be a few rows tall). */
+@media (max-width: 1040px) {
+  .layout { grid-template-columns:minmax(0,1fr); height:auto; }
+  .feed-panel { max-height:50vh; }
+  .panel { overflow-y:auto; }
+}

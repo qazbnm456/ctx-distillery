@@ -4,77 +4,47 @@
 CLAUDE.md's invariants require, and its `__init__` wires the five READ-ONLY tools from an immutable
 memory-index snapshot plus an already-redacted transcript list. `session.run_distillation` is the
 driver that produces both and assembles the result; nothing here reads a harness directly.
+
+The SUBMIT shapes themselves (`DistillAction` / `DistillCandidate` / `DistillPlan`) used to be
+DEFINED here, next to the `RLMTask`. They now live in the dspy-free `schema.py` and are RE-EXPORTED
+below, so `from ctx_distillery.task import DistillPlan` keeps working exactly as before — see
+`schema.py`'s docstring for the measurement that forced the split (importing `eval/`'s or `studio/`'s
+entry point pulled dspy purely because the only route to these shapes ran through this module's
+`from rlm_kit import RLMTask`). What stayed HERE is what genuinely needs dspy or is task-specific:
+the task class, its instructions, and the `pyodide` pin, which CLAUDE.md invariant 1 requires be
+stated in the task rather than delegated to config.
 """
 
 from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Sequence
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
 from rlm_kit import RLMTask
 from rlm_kit.config import RLMConfig
 from rlm_kit.runtime import get_config
 from rlm_kit.tools.model import ChatFn
 
 from .adapters.base import ArtifactRef
+from .schema import DistillAction, DistillCandidate, DistillPlan
 from .tools.drafting import make_draft_memory_file_tool, make_draft_skill_file_tool
 from .tools.memory_reader import make_list_memory_files_tool, make_read_memory_file_tool
 from .tools.transcript_reader import make_read_transcript_chunk_tool
 
+#: Re-exported for back-compat — `DistillAction`/`DistillCandidate`/`DistillPlan` are DEFINED in
+#: `schema.py` (dspy-free) and listed here so every historical `from .task import ...` call site,
+#: in this repo and in both workspace members, resolves unchanged.
+__all__ = [
+    "PINNED_INTERPRETER",
+    "DistillAction",
+    "DistillCandidate",
+    "DistillPlan",
+    "DistillSession",
+]
+
 #: The sandbox this task ALWAYS runs in — see `_forced_config` and CLAUDE.md invariant (1).
 PINNED_INTERPRETER = "pyodide"
-
-# --- Output contract -----------------------------------------------------------------------
-#
-# Per CLAUDE.md invariant (2), the judgement-only SUBMIT shape: the plan carries only
-# {action, artifact_id, key_fields} per candidate — never the drafted memory/skill content
-# itself. The actual markdown+frontmatter text for a promotion is produced by a separate
-# drafting tool (`draft_memory_file` / `draft_skill_file`, both TODO below) and re-sourced on
-# READ by matching the tool-call event whose `artifact_id` matches this candidate's — never
-# from the plan's own claim about what it wrote. This keeps the judgement (what to do) and the
-# authored content (the tool-call event) from ever drifting apart.
-
-DistillAction = Literal["keep", "prune", "promote_to_memory", "promote_to_skill"]
-
-
-class DistillCandidate(BaseModel):
-    """One judgement about one transcript segment or existing memory/skill artifact."""
-
-    action: DistillAction = Field(..., description="The judgement for this candidate.")
-    artifact_id: str | None = Field(
-        default=None,
-        description=(
-            "For promote_to_memory / promote_to_skill: the artifact_id emitted by the matching "
-            "draft_memory_file / draft_skill_file tool-call event. Null for keep/prune, where "
-            "there is no drafted artifact to assemble."
-        ),
-    )
-    key_fields: dict = Field(
-        default_factory=dict,
-        description=(
-            "Structured, deterministic-check-friendly fields for this candidate — e.g. which "
-            "transcript segment(s) it covers, a one-line reason, or a cross-reference to another "
-            "candidate flagged as an overlap/conflict. Never the drafted artifact body itself. "
-            "For a `prune` candidate, `target_path` is REQUIRED by convention: the exact `path` of "
-            "the existing artifact being pruned, verbatim from list_memory_files() (see "
-            "ctx_distillery/apply.py — a prune with no matching target_path is refused). For a "
-            "`promote_to_skill` candidate, `scope` is REQUIRED by the same convention: \"project\" "
-            "for a finding tied to this project, \"global\" for a portable technique — it selects "
-            "which skills directory the apply step would write into, and a promote_to_skill with no "
-            "valid scope is refused."
-        ),
-    )
-
-
-class DistillPlan(BaseModel):
-    """The full proposed plan for one distillation run. Inert until a human applies it."""
-
-    candidates: list[DistillCandidate] = Field(
-        default_factory=list,
-        description="One entry per transcript segment / memory file judged by this run.",
-    )
 
 
 _INSTRUCTIONS = """\
