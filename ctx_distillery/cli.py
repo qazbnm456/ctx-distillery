@@ -4,10 +4,11 @@
     ctx-distillery distill /path/to/project        # ... a specific project
     ctx-distillery show traces/<run-id>.jsonl      # re-read a finished run's plan (offline)
     ctx-distillery show traces/<run-id>.jsonl --json
+    ctx-distillery export "traces/*.jsonl" > ds.json   # reward-free SFT/RL dataset (offline)
 
-`distill` needs model credentials (`CD_*`, see `.env.example`) and a sandbox; `show` is fully
-offline and works on any trace file. Drive runs through this CLI rather than an ad-hoc script — if
-something is missing, extend it here.
+`distill` needs model credentials (`CD_*`, see `.env.example`) and a sandbox; `show` and `export`
+are fully offline and work on any trace file. Drive runs through this CLI rather than an ad-hoc
+script — if something is missing, extend it here.
 
 **Applying a plan is a DIFFERENT command in a DIFFERENT module: `ctx-distillery-apply`.** That split
 is structural, not stylistic. `tests/test_no_write_capability.py::test_apply_is_unreachable_from_the_planner_path`
@@ -20,8 +21,12 @@ this module never imports `apply`, and `apply.py` hosts its own `main()`.
 
 Two visible consequences of the same invariant, both deliberate:
 
-* **`show` has no `--out`.** This module is inside the mutation scan, so it may not open a file for
-  writing at all. Redirect with `>` — the rendering goes to stdout.
+* **`show` and `export` have no `--out`.** This module is inside the mutation scan, so it may not
+  open a file for writing at all. Redirect with `>` — the rendering goes to stdout. Note the form:
+  `print(json.dumps(...))`, never `json.dump(..., sys.stdout)`. Both pass the scan textually, but
+  the second calls `.write` at runtime while only LOOKING clean, which is evading the tripwire
+  rather than satisfying it. (The three sibling projects' `export` all take a positional `out` path
+  and `open(out, "w")` it; that is the one thing from their exporter that cannot be ported here.)
 * **A run id is unique per invocation.** `TraceRecorder` APPENDS, and the sibling projects' `run()`
   drops a stale trace with `os.remove` before recording; that call is forbidden here. So the default
   `--run-id` carries a UTC timestamp and every run gets its own file. There is deliberately no
@@ -32,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import glob
 import json
 import os
 import re
@@ -43,8 +49,10 @@ from . import __version__
 from .adapters.claude_code import ClaudeCodeAdapter, project_storage_dir, transcript_files
 from .config import DistillConfig, make_chat_fn, setup
 from .render import plan_as_dict, render_plan
+from .rl_export import export_dataset, load_runs
 from .rubric import plan_from_events
-from .session import AssembledPlan, assemble, run_distillation
+from .schema import AssembledPlan, assemble
+from .session import run_distillation
 from .trace_io import load_trace
 
 #: Where `distill` records, unless `--trace-dir` says otherwise. `CTXD_TRACES_DIR` is the SAME
@@ -62,13 +70,16 @@ Propose a distillation plan over a project's Claude Code sessions. This never wr
     ctx-distillery distill /path/to/project         # ... a specific project
     ctx-distillery show traces/<run-id>.jsonl       # re-read a finished run's plan (offline)
     ctx-distillery show traces/<run-id>.jsonl --json
+    ctx-distillery export "traces/*.jsonl" > ds.json    # reward-free SFT/RL dataset (offline)
 
-`distill` needs model credentials (CD_*, see .env.example) and a sandbox; `show` is fully offline.
+`distill` needs model credentials (CD_*, see .env.example) and a sandbox; `show` and `export` are
+fully offline.
 
 APPLYING a plan is a separate command, `ctx-distillery-apply` - a different binary on purpose, so
 that nothing on the planner's side can reach the one module that writes. Two things follow from the
-same rule and are worth knowing up front: `show` has no --out (redirect with `>`), and every run
-gets a unique, timestamped id because a trace file is appended to and never deleted here.
+same rule and are worth knowing up front: neither `show` nor `export` has --out (redirect with `>`),
+and every run gets a unique, timestamped id because a trace file is appended to and never deleted
+here.
 """
 
 
@@ -202,6 +213,51 @@ def _cmd_show(args) -> int:
     return 1 if assembled.problems else 0
 
 
+def _cmd_export(args) -> int:
+    """Print a reward-free SFT/RL dataset for one or more traces as JSON on stdout. Offline.
+
+    No `--out`, and no `json.dump(..., sys.stdout)` — see the module docstring; the sibling
+    projects' `export` writes a file, and this module may not. Redirect with `>`.
+
+    An empty match REFUSES rather than emitting an empty bundle. A mistyped or unquoted glob is the
+    overwhelmingly likely cause (an unquoted `traces/*.jsonl` is expanded by the shell before argv
+    is built, so it silently becomes a literal that matches nothing), and quietly printing a
+    well-formed dataset containing zero runs is the same failure mode `eval/`'s `_read_transcripts`
+    already refuses: an empty required input must fail like a missing one.
+    """
+    paths = [path for pattern in args.trace for path in sorted(glob.glob(pattern))]
+    if not paths:
+        print(
+            f"no trace files matched {' '.join(args.trace)} — quote the glob so the shell does not "
+            f"expand it, and check the directory ($CTXD_TRACES_DIR, else {_DEFAULT_TRACE_DIR}).",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        runs = load_runs(*paths)
+        bundle = export_dataset(runs)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        # `export_dataset` is INSIDE the try deliberately — found by review, with a real traceback.
+        # `trace_io.dict_events` guarantees dict-NESS, not key presence: it was written for the
+        # `42`/`null`/`[1,2,3]` class of bad line. A dict-shaped line missing `type` (or `payload`,
+        # or carrying a non-dict `payload`) sails through it and reaches rlm-kit's own direct
+        # `e["type"]` indexing in `export_actions`, raising `KeyError` from a frame two libraries
+        # deep. `TraceRecorder` always writes both keys, so reaching this needs a hand-edited or
+        # foreign JSONL — but "a bad trace must not produce a traceback" is what this command
+        # already promises elsewhere, and a promise that only holds for the malformed shapes we
+        # happened to think of first is not one.
+        print(f"cannot read the trace(s): {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(bundle, ensure_ascii=False, indent=2, default=str))
+    print(
+        f"runs={len(runs)} | actions={len(bundle['actions'])} (drafting={len(bundle['drafting'])}, "
+        f"orchestrator_tools={len(bundle['orchestrator_tools'])}) | "
+        f"sft_turns={len(bundle['sft_turns'])} | reward-free",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="ctx-distillery",
@@ -230,6 +286,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--run-id", default=None, help="only read events for this run id")
     s.add_argument("--json", action="store_true", help="emit the plan as JSON instead of text")
     s.set_defaults(func=_cmd_show)
+
+    e = sub.add_parser(
+        "export",
+        help="print a reward-free SFT/RL dataset for one or more traces as JSON on stdout (offline)",
+    )
+    e.add_argument("trace", nargs="+", help="trace file glob(s) — QUOTE them, e.g. 'traces/*.jsonl'")
+    e.set_defaults(func=_cmd_export)
     return p
 
 

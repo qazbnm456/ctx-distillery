@@ -35,9 +35,18 @@ dependencies = [
 
 [project.optional-dependencies]
 # Only `ctx-distillery distill` needs a model client — it builds the `chat_fn` the two drafting
-# tools call (`config.make_chat_fn`, which imports `openai` inside the closure). `show` and the
-# whole `ctx-distillery-apply` path are fully offline, so a library-only install stays lean.
+# tools call (`config.make_chat_fn`, which imports `openai` inside the closure). `show`, `export`
+# and the whole `ctx-distillery-apply` path are fully offline, so a library-only install stays lean.
 cli = ["openai>=1.0"]
+# Run the PLANNER + sub LM on a Claude Pro/Max subscription (CD_ROOT_LM / CD_SUB_LM =
+# `claude-agent-sdk/<id>`) via rlm-kit's `rlm_kit.ClaudeAgentLM`. Installs the Claude Agent SDK the
+# adapter needs; also needs the Claude Code CLI installed + logged in — a runtime prerequisite pip
+# can't express (see .env.example). The DRAFTER may NEVER ride it: `config.make_chat_fn` builds an
+# OpenAI client directly, so `DistillConfig.from_env` REFUSES a `claude-agent-sdk/…` CD_DRAFT_LM,
+# including one INHERITED from CD_SUB_LM/CD_ROOT_LM. This is ctx-distillery's own audience talking:
+# the harness distills Claude Code sessions, so its users are exactly the people holding a Claude
+# subscription and no proxy key.
+subscription = ["claude-agent-sdk>=0.1.60"]
 
 [project.scripts]
 ctx-distillery = "ctx_distillery.cli:main"
@@ -51,6 +60,10 @@ ctx-distillery-apply = "ctx_distillery.apply:main"
 dev = [
     "pytest>=8.0",
 ]
+# A dev-group MIRROR of the `subscription` optional-dependency extra (kept above for the pip
+# surface), default-installed via `[tool.uv] default-groups` so a bare `uv sync` doesn't prune the
+# Claude Agent SDK out of the shared workspace venv.
+subscription-sdk = ["claude-agent-sdk>=0.1.60"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -66,6 +79,15 @@ packages = ["ctx_distillery"]
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+
+# Bare `uv sync` (and `--all-packages`) default-installs the `subscription-sdk` dev group (above) so
+# the Claude Agent SDK isn't pruned from the shared workspace venv — an EXTRA is not synced by
+# default, so a `uv sync` without `--extra subscription` PRUNES it and a subscription dev run then
+# crashes (ClaudeAgentLM ImportError). `dev` MUST stay listed — default-groups REPLACES uv's
+# `["dev"]` default, it does not append. The public pip extra above is unchanged. Opt out for one
+# sync: `uv sync --no-group subscription-sdk`.
+[tool.uv]
+default-groups = ["dev", "subscription-sdk"]
 
 # rlm-kit is public but not on PyPI yet, so it comes in via a commit-pinned git source
 # rather than a normal PyPI dependency; uv.lock pins the exact commit. Never `pip install`

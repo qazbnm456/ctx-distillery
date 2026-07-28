@@ -1,14 +1,21 @@
-"""One-shot driver + assemble-on-read: run a distillation, then re-source what really happened.
+"""One-shot driver: ingest a harness once, run one `DistillSession`, assemble the result.
 
 This project proposes ONE plan per run — there is no "adopt the best of N" search loop (nothing here
 has a reward signal to rank candidates by). So the driver is deliberately linear: ingest once,
 redact once, run once, assemble once.
 
-`assemble` is the read side of `CLAUDE.md` invariant (2). The planner's `DistillPlan` carries only
-`{action, artifact_id, key_fields}`; the actual drafted markdown lives on the `draft_memory_file` /
-`draft_skill_file` `tool_call` events. Assembling by `artifact_id` means the plan's label can never
-drift from the bytes it describes — and a candidate naming an `artifact_id` no tool call produced is
-reported as a PROBLEM (unassemblable) rather than trusted or raising.
+`assemble` — the read side of `CLAUDE.md` invariant (2) — used to be DEFINED here, alongside
+`AssembledPlan` / `AssembledCandidate` / `PROMOTION_ACTIONS`. They now live in the dspy-free
+`schema.py` and are RE-EXPORTED below, so `from ctx_distillery.session import assemble` (and every
+other historical import of those names) resolves unchanged. The reason is measured, not aesthetic:
+this module imports `task.py`, which does `from rlm_kit import RLMTask`, so `eval/` and `studio/` —
+which only ever REPLAY a finished trace — were paying for dspy purely to reach a pure function over
+`(events, plan)`. See `schema.py`'s docstring for the numbers and the full argument.
+
+What stayed HERE is what genuinely needs the LM stack or the harness: `run_distillation` (it
+constructs a `DistillSession`) and `render_memory_index` (it renders `ArtifactRef`s for THIS task's
+`memory_index: str` signature input — prompt-side presentation for one task, not part of the plan's
+shape, so it would be a bad fit for a shapes module).
 
 Nothing in this module writes or applies anything. The returned `AssembledPlan` is inert; applying it
 is a separate, human-gated step outside the RLM trajectory entirely.
@@ -18,149 +25,28 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
 from typing import Any
 
-from rlm_kit.trace import EVENT_TOOL_CALL, TraceRecorder
+from rlm_kit.trace import TraceRecorder
 
 from .adapters.base import ArtifactRef, HarnessAdapter
 from .redact import redact_transcript
 from .rubric import default_rubric, rubric_to_meta
-from .task import DistillPlan, DistillSession
-from .trace_io import dict_events, load_trace
+from .schema import PROMOTION_ACTIONS, AssembledCandidate, AssembledPlan, assemble
+from .task import DistillSession
+from .trace_io import load_trace
 
-#: Which drafting tool authors each promotion action's artifact.
-_DRAFT_TOOL_FOR_ACTION = {
-    "promote_to_memory": "draft_memory_file",
-    "promote_to_skill": "draft_skill_file",
-}
-PROMOTION_ACTIONS = tuple(_DRAFT_TOOL_FOR_ACTION)
-
-
-@dataclass
-class AssembledCandidate:
-    """One plan candidate, with its drafted text re-sourced from the trace (never from the plan)."""
-
-    action: str
-    artifact_id: str | None = None
-    key_fields: dict = field(default_factory=dict)
-    #: The verbatim drafted text, for a promotion whose artifact_id matched a tool_call event.
-    draft: str | None = None
-    #: That drafting call's own deterministic validation verdict.
-    draft_ok: bool | None = None
-    problems: list[str] = field(default_factory=list)
-
-
-@dataclass
-class AssembledPlan:
-    """The whole run, assembled. `problems` here are RUN-level (per-candidate ones live inline)."""
-
-    candidates: list[AssembledCandidate] = field(default_factory=list)
-    problems: list[str] = field(default_factory=list)
-
-
-def _draft_calls(events: Sequence[dict], tool: str) -> dict[str, dict]:
-    """`{artifact_id: payload}` for `tool`'s `tool_call` events — LAST call per id wins.
-
-    Last-wins because a repair loop legitimately re-drafts; the final call for an id is the one whose
-    bytes the plan is describing. (Each call actually mints a fresh id, so this is a safety net.)
-    """
-    found: dict[str, dict] = {}
-    for event in events:
-        if event.get("type") != EVENT_TOOL_CALL:
-            continue
-        payload = event.get("payload") or {}
-        if payload.get("tool") != tool:
-            continue
-        artifact_id = payload.get("artifact_id")
-        if isinstance(artifact_id, str) and artifact_id:
-            found[artifact_id] = payload
-    return found
-
-
-def assemble(events: Sequence[dict], plan: DistillPlan) -> AssembledPlan:
-    """Re-source each promotion candidate's drafted text from the trace, keyed by `artifact_id`.
-
-    Structural checks only, and none of them raise: a broken candidate is reported so a human sees
-    exactly which part of the plan is not backed by a real drafting call.
-
-    FIXED per adversarial review: "none of them raise" did NOT hold for a malformed trace.
-    `_draft_calls` scans EVERY event before the candidate loop, so a non-dict trace line (see
-    `trace_io.py`) raised a raw `AttributeError` for ANY non-`None` plan — including an all-`keep`
-    plan with no artifact to assemble at all. Only the `plan is None` path escaped, and only
-    because it returns before touching `events`.
-    """
-    assembled = AssembledPlan()
-    if plan is None:
-        assembled.problems.append("no plan was produced by this run")
-        return assembled
-    # A non-dict trace line must never reach `_draft_calls`'s unconditional `.get`. Filtered ONCE
-    # here rather than inside `_draft_calls` (which runs once PER drafting tool), so the pass is
-    # O(events), not O(events x tools).
-    events = dict_events(events)
-    by_tool = {tool: _draft_calls(events, tool) for tool in _DRAFT_TOOL_FOR_ACTION.values()}
-
-    for candidate in plan.candidates:
-        out = AssembledCandidate(
-            action=candidate.action,
-            artifact_id=candidate.artifact_id,
-            key_fields=dict(candidate.key_fields or {}),
-        )
-        if candidate.action not in PROMOTION_ACTIONS:
-            # keep / prune: no artifact to assemble. An artifact_id here is a plan inconsistency.
-            if candidate.artifact_id:
-                out.problems.append(
-                    f"action {candidate.action!r} carries artifact_id "
-                    f"{candidate.artifact_id!r}, but only "
-                    f"{list(PROMOTION_ACTIONS)} draft an artifact"
-                )
-            assembled.candidates.append(out)
-            continue
-        tool = _DRAFT_TOOL_FOR_ACTION[candidate.action]
-        if not candidate.artifact_id:
-            out.problems.append(
-                f"action {candidate.action!r} carries no artifact_id, so there is no {tool} call "
-                f"to assemble its text from"
-            )
-            assembled.candidates.append(out)
-            continue
-        payload = by_tool[tool].get(candidate.artifact_id)
-        if payload is None:
-            # Either the id was fabricated, or it was drafted by the OTHER tool (a mismatched kind) —
-            # distinguish the two, because they mean different things to a reviewer.
-            other = next(
-                (
-                    name
-                    for name, calls in by_tool.items()
-                    if name != tool and candidate.artifact_id in calls
-                ),
-                None,
-            )
-            if other is not None:
-                out.problems.append(
-                    f"artifact_id {candidate.artifact_id!r} was drafted by {other} but the "
-                    f"candidate's action {candidate.action!r} expects {tool}"
-                )
-            else:
-                out.problems.append(
-                    f"no {tool} tool_call for artifact_id {candidate.artifact_id!r} "
-                    f"(the plan names an artifact this run never drafted)"
-                )
-            assembled.candidates.append(out)
-            continue
-        draft = payload.get("draft")
-        out.draft = draft if isinstance(draft, str) else None
-        out.draft_ok = bool(payload.get("ok"))
-        if not (out.draft or "").strip():
-            out.problems.append(f"artifact {candidate.artifact_id!r} recorded an empty draft")
-        if not out.draft_ok:
-            errors = payload.get("errors") or []
-            out.problems.append(
-                f"artifact {candidate.artifact_id!r} failed its format check: "
-                f"{'; '.join(str(e) for e in errors) or 'no detail recorded'}"
-            )
-        assembled.candidates.append(out)
-    return assembled
+#: Re-exported for back-compat — the assemble-on-read shapes are DEFINED in `schema.py` (dspy-free)
+#: and listed here so `from .session import assemble` / `AssembledPlan` / `AssembledCandidate` /
+#: `PROMOTION_ACTIONS` keep resolving, in this repo and in both workspace members.
+__all__ = [
+    "PROMOTION_ACTIONS",
+    "AssembledCandidate",
+    "AssembledPlan",
+    "assemble",
+    "render_memory_index",
+    "run_distillation",
+]
 
 
 def render_memory_index(memory_index: Sequence[ArtifactRef]) -> str:

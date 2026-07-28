@@ -11,13 +11,13 @@ both are driveable from the command line.** The five read-only planning tools, t
 adapter, the assemble-on-read convention, the human-gated `apply_plan`, auto-discovery of Claude
 Code's real on-disk storage (transcripts + both skill scopes), and the two console scripts are
 implemented. Two sibling `uv` workspace members round it out: **`eval/`**
-(`ctx-distillery-eval`) — an offline, reward-free LLM-as-judge scoring the assembled plan against
-its transcript(s) — and **`studio/`** (`ctx-distillery-studio`) — a replay-only FastAPI +
-zero-build-vanilla-JS console previewing each candidate's drafted text next to its plan entry,
-purely from a finished run's trace file. Both reward-free/read-only by construction; see their own
-`eval/README.md`/`studio/README.md`. Still missing: subagent-transcript distillation, a reward-free
-dataset export, and any harness other than Claude Code. See `CLAUDE.md` for the hard invariants this
-project is built against.
+(`ctx-distillery-eval`) — a reward-free LLM-as-judge scoring the assembled plan against its
+transcript(s), offline by default and pointable at a real model with `CDEVAL_MODEL` — and
+**`studio/`** (`ctx-distillery-studio`) — a replay-only FastAPI + zero-build-vanilla-JS console
+previewing each candidate's drafted text next to its plan entry, purely from a finished run's trace
+file. Both reward-free/read-only by construction; see their own `eval/README.md`/`studio/README.md`.
+Still missing: subagent-transcript distillation, an eval `run` subcommand over a real taskset
+(deferred with three named blockers — see `eval/README.md`), and any harness other than Claude Code. See `CLAUDE.md` for the hard invariants this project is built against.
 
 ## Install and run
 
@@ -40,6 +40,9 @@ uv run ctx-distillery show traces/<run-id>.jsonl
 #    dry run that writes nothing; there is no flag that approves the whole plan.
 uv run ctx-distillery-apply traces/<run-id>.jsonl --project /path/to/your/project --approve 0,3
 uv run ctx-distillery-apply traces/<run-id>.jsonl --project /path/to/your/project --approve 0,3 --confirm
+
+# 4. (optional) export finished runs as a reward-free SFT/RL dataset — offline, JSON on stdout
+uv run ctx-distillery export "traces/*.jsonl" > dataset.json
 ```
 
 Applying is a **separate binary** on purpose, not a third subcommand: nothing on the planner's side
@@ -48,8 +51,23 @@ skill into `~/.claude/skills` (rather than into the project you named) needs one
 `--allow-skill-scope global`, because a global skill reaches every project you will ever open — and
 shadows a project skill of the same name.
 
-Offline commands need none of the setup above: `show`, `ctx-distillery-apply`, the eval scorer, and
-the studio all work on a finished trace file alone.
+Offline commands need none of the setup above: `show`, `export`, `ctx-distillery-apply`, the eval
+scorer, and the studio all work on a finished trace file alone.
+
+`export` has no `--out` for the same reason `show` doesn't — nothing on the planner's side may open a
+file for writing — so redirect it. The bundle is `{actions, drafting, orchestrator_tools, planner,
+sft_turns, labels, metrics, rubric_signal}`; every ACTION record carries `reward: null` (SFT turns
+carry no reward key at all), and `labels` counts
+only what the trace structurally establishes (how many candidates, how many unbacked, whether the run
+finalized). Nothing in it claims a judgement was *right* — there is no oracle for "was this the right
+thing to prune", and inventing one would fabricate the signal. See `VENDOR.md`.
+
+**Running on a Claude subscription.** Give `CD_ROOT_LM` / `CD_SUB_LM` the `claude-agent-sdk/<id>`
+prefix and the planner runs on your own Claude Pro/Max plan instead of an API key
+(`uv sync --extra subscription`, Claude Code CLI logged in, `ANTHROPIC_API_KEY` unset). The
+**drafter** cannot ride it — it talks to an OpenAI-compatible endpoint directly — so set `CD_DRAFT_LM`
+to a real model id; leaving it unset makes it inherit the sentinel and the run refuses to start rather
+than 404ing mid-trajectory. See the subscription block in `.env.example`.
 
 ## Point it at a project
 

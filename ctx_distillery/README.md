@@ -171,23 +171,30 @@ CLI module importing both `run_distillation` and `apply_plan` would turn it red 
 not a precedent for a second exemption. So `apply.py` hosts its own `main()`:
 
 ```
-ctx-distillery        = ctx_distillery.cli:main     # distill / show — never imports apply
+ctx-distillery        = ctx_distillery.cli:main     # distill / show / export — never imports apply
 ctx-distillery-apply  = ctx_distillery.apply:main   # the writer, with its own entry point
 ```
 
-Two visible consequences of the same rule, both deliberate: `ctx-distillery show` has no `--out`
-(`cli.py` may not open a file for writing — redirect with `>`), and `distill` REFUSES a run id whose
-trace file already exists rather than deleting it, because `TraceRecorder` appends and `os.remove`
-is forbidden here. There is no `--force`.
+Two visible consequences of the same rule, both deliberate: neither `show` nor `export` has an
+`--out` (`cli.py` may not open a file for writing — redirect with `>`, and the form is
+`print(json.dumps(...))`, never `json.dump(..., sys.stdout)`, which would only *look* clean while
+calling `.write` at runtime), and `distill` REFUSES a run id whose trace file already exists rather
+than deleting it, because `TraceRecorder` appends and `os.remove` is forbidden here. There is no
+`--force`. All three sibling projects' `export` takes a positional output path and opens it for
+writing; that is the one part of their exporter that cannot be ported here.
 
 ## Layout
 
 ```
 ctx_distillery/
   README.md            # this file — module map, internals, testing
-  cli.py               # `ctx-distillery` — distill / show. Never imports apply.
+  __init__.py          # the public surface — eager dspy-free names, lazy dspy-bearing ones,
+                       #   and NO route to the writer (invariant 8)
+  cli.py               # `ctx-distillery` — distill / show / export. Never imports apply.
   __main__.py          # `python -m ctx_distillery ...` -> cli:main
-  config.py            # DistillConfig.from_env — the CD_* surface; setup() + make_chat_fn()
+  config.py            # DistillConfig.from_env — the CD_* surface; setup() + make_chat_fn();
+                       #   the `claude-agent-sdk/` subscription sentinel + its drafter refusal
+  schema.py            # the dspy-free plan shapes + assemble() (eval/ and studio/ read them)
   task.py              # DistillSession(RLMTask) — signature, output_model, instructions
   session.py           # run_distillation (ingest once, redact once, run once) + assemble()
   apply.py             # apply_plan — the human-gated writer, outside the RLM entirely,
@@ -196,11 +203,14 @@ ctx_distillery/
   redact.py            # host-side redaction, applied before any text reaches the model
   frontmatter.py       # nested-YAML frontmatter parsing (memory + skill shapes)
   rubric.py            # ATLAS TF/TA/TG/PA facts (reward-free), sourced from session.assemble()
+  rl_export.py         # the reward-free SFT/RL bundle `ctx-distillery export` prints. No main(),
+                       #   no --out, structural labels only (no oracle) — see VENDOR.md
   trace_io.py          # load_trace / dict_events — the ONE place JSONL bytes become events
   tools/               # the five READ-ONLY planner tools
   adapters/
     base.py            # the read-only harness-adapter seam
     claude_code.py     # the one in-scope adapter
+  skills/              # memory-vs-skill-criteria.md — shipped in the wheel, read by the planner
 eval/                  # ctx-distillery-eval — a separate uv workspace member, judges the ARTIFACT
 studio/                # ctx-distillery-studio — replay-only console over a finished trace
 tests/                 # fully offline: no live model, no Deno, no network

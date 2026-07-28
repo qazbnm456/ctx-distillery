@@ -11,13 +11,23 @@ is entirely ours.
 transcripts+memory); only the transcripts/memory differ. That constant task shape is why
 `default_rubric()` can return the same four criteria every time rather than being assembled per run.
 
-Sources facts from `session.assemble()`'s output (`AssembledPlan`/`AssembledCandidate`) rather than
+Sources facts from `assemble()`'s output (`AssembledPlan`/`AssembledCandidate`) rather than
 re-deriving them from raw events, so a criterion's `observed` dict can never drift from what
 `assemble` already established as ground truth for THIS trace.
+
+`DistillPlan` and `assemble` are imported at MODULE level, from `schema.py`. They used to be
+function-local imports (`from .task import DistillPlan` inside `plan_from_events`, `from .session
+import assemble` inside `trace_facts`) with the stated reason "keep rubric.py's top light" — and
+that reason was REAL while both names lived beside an `RLMTask`: a module-level import would have
+made every consumer of this module pay for dspy. `schema.py` removes the weight entirely (plain
+pydantic + dataclasses, no dspy anywhere in its import graph), so deferring them now buys nothing
+and only hides the dependency. There is no cycle to dodge either: `schema.py` imports only
+`trace_io` and `rlm_kit.trace`, and imports nothing from here.
 """
 
 from __future__ import annotations
 
+from pydantic import ValidationError
 from rlm_kit.rubric import (
     Criterion,
     CriterionFact,
@@ -29,6 +39,7 @@ from rlm_kit.rubric import rubric_from_meta as _kit_rubric_from_meta
 from rlm_kit.rubric import validate_rubric as _kit_validate_rubric
 from rlm_kit.trace import EVENT_RESULT, EVENT_TOOL_CALL
 
+from .schema import DistillPlan, assemble
 from .trace_io import dict_events
 
 CRITERION_CATEGORIES = ("TF", "TA", "TG", "PA")
@@ -128,11 +139,11 @@ def plan_from_events(events: list[dict]):
     absent, while a bad line AFTER it — trailing garbage, a truncated tail, a concatenated file —
     or a trace with no result event at all, crashed. `dict_events` (`trace_io.py`) drops them once,
     at the top; the `ValidationError` catch below is a different shape problem entirely.
+
+    (`DistillPlan` and `ValidationError` are now module-level imports — see this module's docstring
+    for why the previously function-local ones stopped earning their keep once the shapes moved to
+    the dspy-free `schema.py`.)
     """
-    from pydantic import ValidationError
-
-    from .task import DistillPlan  # local import: keep rubric.py's top light, mirror trace_facts style
-
     for event in reversed(dict_events(events)):
         if event.get("type") == EVENT_RESULT:
             output = (event.get("payload") or {}).get("output")
@@ -147,7 +158,7 @@ def plan_from_events(events: list[dict]):
 def trace_facts(events: list[dict]) -> dict:
     """The deterministic per-run facts every ATLAS criterion's `observed` slices from.
 
-    Sources candidate-level facts from `session.assemble()`'s output (never re-derived from raw
+    Sources candidate-level facts from `schema.assemble()`'s output (never re-derived from raw
     events, so they can't drift from what `assemble` already established); sources ordering/breaker
     facts directly from the trace's own `tool_call` events, since `assemble` doesn't surface those.
 
@@ -155,8 +166,6 @@ def trace_facts(events: list[dict]) -> dict:
     comprehensions below are safe; `assemble` re-filters, which is idempotent and O(n), because it
     is public in its own right and cannot assume its caller went through here.
     """
-    from .session import assemble
-
     events = dict_events(events)
     plan = plan_from_events(events)
     a = assemble(events, plan)

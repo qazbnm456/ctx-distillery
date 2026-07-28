@@ -12,6 +12,354 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **FIXED: the invariant-1/8 tripwire was structurally blind over most of two modules.** An
+  adversarial review of this batch found `tests/test_no_write_capability.py::_code_lines` entered
+  docstring-skip mode only when a stripped line STARTED with `"""`. Two modules assign a
+  triple-quoted string to a name at module level — `task._INSTRUCTIONS`, `cli._CLI_DESCRIPTION` —
+  so the opener was missed, the bare closing `"""` was read as an OPENER, and the parity stayed
+  INVERTED for the rest of the file: real code was silently skipped as "docstring body". Measured
+  against `tokenize` as ground truth, **81% of `cli.py` and 36% of `task.py` went unscanned**, and
+  the new `_cmd_export` landed inside the blind region — the one function whose stated safety
+  argument is `cli.py`'s own claim to be inside the scan. Proven, not inferred: planting
+  `open(..., "w")`, `.write()`, `shutil.rmtree`, `subprocess.run(["rm","-rf","/"])` **and**
+  `from .apply import apply_plan` into `_cmd_export` left the suite fully green at 31 passed; after
+  the fix the same plant fails both `test_no_module_contains_a_write_or_delete_call[cli.py]` and
+  `test_apply_is_unreachable_from_the_planner_path`. A scan that reads nothing reports no offences
+  and is indistinguishable from the outside from one that reads everything. `_code_lines` is now
+  `tokenize`-based (a line counts as code when it carries a token that is not a string, comment, or
+  layout), which also keeps the two properties the old version juggled by hand: docstring prose that
+  NAMES a forbidden call stays excluded, and a trailing comment on a real statement stays scanned.
+  `test_the_scan_still_sees_code_after_a_module_level_triple_quoted_assignment` pins it — all three
+  of its assertions fail against the old algorithm. **No violation was ever present**: a
+  tokenize-based ground-truth sweep of all 20 non-writer modules found zero write calls and zero
+  writer imports. The defect was in the guard, not the code.
+- **Review fixes across this batch.** `ctx-distillery export` raised a raw `KeyError` on a
+  dict-shaped trace line missing `type`/`payload` — `export_dataset` sat outside the `try`, and
+  `dict_events` guarantees dict-NESS, not key presence; it is now guarded and reports cleanly at
+  rc=1. The studio's `applyBlocker()` framed a bad `promote_to_skill` scope and a target-less
+  `prune` as affirmatively "backed" though `apply_plan` refuses both, so both are now blocked, and
+  `DESIGN.md` no longer claims red EQUALS the refusal set: `apply.py` refuses at 29 sites, five are
+  trace-decidable, and the rest depend on the apply-time re-scan a studio cannot see — "red means
+  refused; absence of red does not mean accepted." The Load placeholder never cleared `hidden`, so
+  every load after the first showed a blank stage instead of "Loading…". Plus doc-truth
+  corrections: both workspace members DO expose `__version__` (CLAUDE.md said neither did),
+  `from_env` raises on three conditions not two, `make_chat_fn` was a sixth site still carrying the
+  retired live-drive justification, `uv sync --extra judge` errors (the extra belongs to the eval
+  member), `reward: null` is on ACTION records only (SFT turns have no reward key), two "live feed"
+  prose sites survived the rename, and `--bad`/`--radius`/failure-path counts were wrong.
+- **The studio's live-drive refusal, rewritten on reasons that are actually true — plus
+  `studio/DESIGN.md` and a node static-contract suite.**
+  **The old justification had gone false and was repeated in five places.** It said
+  `run_distillation` needs "a caller-supplied `HarnessAdapter` + `chat_fn` already wired, a
+  materially heavier precondition than a self-contained one-shot driver a web request could
+  reasonably own end-to-end". `cli.py::_cmd_distill` IS that driver — it assembles the whole
+  precondition from the `CD_*` env. (Not "five lines", as an earlier draft of the reasoning claimed:
+  an audit measured ~55 lines with four distinct failure paths. The point survives the correction;
+  the rhetoric did not.) The endpoint is STILL declined, now on three reasons that survive the CLI:
+  (1) **no cancel seam** — a distillation is a multi-minute, up-to-30-turn sandboxed episode, and
+  neither `run_distillation` nor anything in rlm-kit takes a `cancel_event`, so an HTTP-started run
+  could only be hung or SIGKILLed into exactly the truncated trace the studio papers over with its
+  synthesized terminal event; `diff-sentry`/`toolscout` ship live endpoints without cancel because
+  their operations are SHORT, and `cve-reverser` — whose profile matches ours — is the one sibling
+  that needed it, at the cost of a threaded `cancel_event`, a cancel route, a dedicated
+  `shutdown.py` + tests, and SIGINT/SIGTERM wrapping to defeat a real uvicorn deadlock. The fix
+  belongs upstream in rlm-kit. (2) **the import-level `live`-extra valve is unavailable** — every
+  sibling gates its live path behind `live = ["<parent>"]` so a replay-only deploy physically cannot
+  spend; ours makes `ctx-distillery` a CORE dependency because replay itself calls `assemble`.
+  **Stated as contingent, not structural**, per an audit: `live = ["openai"]` would not restore it
+  either (the planner spends through dspy/litellm, a core rlm-kit dep, long before any drafting
+  call), and neither does the `schema.py` split, because `assemble` ships in the same distribution
+  as the driver — splitting a package is the only route and is out of scope. The same audit killed
+  the phrase "armed the moment `CD_ROOT_LM` is in the environment": route existence and credential
+  presence are different things, and no sibling gates on env. (3) **the live input would be
+  `project_dir`** — an unauthenticated HTTP parameter selecting whose ENTIRE Claude Code
+  conversation history is rendered and shipped to a remote model, with no `_slug_id` analogue, while
+  invariants 5/6's defenses all assume the caller chose the project; redaction is a filter, not an
+  authorization decision. This one is the strongest. The positive case is stated too:
+  `ctx-distillery distill` writes into `$CTXD_TRACES_DIR`, the SAME directory the studio globs, so
+  `distill` → refresh → **Load** already delivers what a live endpoint would, from a process that
+  owns its credentials and can be Ctrl-C'd. And the refusal is made FALSIFIABLE, with named
+  reopening conditions: a cancel seam in rlm-kit; an opt-in gate that makes the route not exist by
+  default; an allowlist of drivable project dirs sourced from the ENVIRONMENT, never the request
+  body; a stated loopback-bind/auth posture.
+  **Five sites, not four.** `CLAUDE.md` invariant 10, `studio/README.md` §Scope (the canonical long
+  form), `studio/app.py`'s module docstring, and — the one the plan missed, found by audit —
+  `studio/ctx_distillery_studio/__init__.py`, which carried the stale wording verbatim. The fifth,
+  `config.py`'s docstring, was NOT stale (it says the studio "replays a finished trace and drives
+  nothing", still true) and was only pointed at the real reasoning rather than rewritten.
+  **`CHANGELOG.md`'s own earlier entries still carry the old wording, deliberately** — they are
+  HISTORICAL records of what was decided at the time, and a changelog that edits its own past is
+  worth less than one that doesn't. Do not "fix" them.
+  **New `studio/DESIGN.md`** — a VISUAL & UX spec on toolscout's skeleton (theme · signature ·
+  palette · typography · components · depth/motion · do-don't · exactly eight browser-checkable
+  acceptance items), explicitly NOT an architecture doc: `studio/README.md` keeps the endpoints, the
+  SSE vocabulary, scope and install/run, and the two files now cross-link. This is the one
+  design-shaped file that IS a family convention, and it is a different species from the
+  project-level blueprint this repo purged. Its §2 is ctx-distillery's own signature rather than a
+  copied verdict axis: **the plan's `artifact_id` CLAIM ≠ the drafted BYTES** (invariant 2), with a
+  three-state frame keyed only on what `assemble()` derived — `blocked` / `backed` / `inert`. Six
+  things were deliberately NOT copied, each verified false here: model-role chips (`/v1/config`
+  returns `{traces_dir}` only), a vendored font (`static/vendor/` does not exist), a primary POST
+  button / run-id preview / `run-core.js`, a Trajectory drawer + `/iterations` route (named as
+  DEFERRED, with where the fix belongs — never described as built), a "streams as it happens" claim,
+  and `live`/`subscription` studio extras.
+  **Writing the spec forced two real frontend fixes, because a spec that describes a UI that does
+  not exist is worse than no spec.** (a) The feed panel was labelled `▾ Live feed` with a
+  `streaming…` status while being replay-only; renamed to **Replay feed** / `replaying…`, and the
+  real ordering caveat is now carried in both docs — `main_step` flushes POST-HOC with trailing
+  `step_id`s, so a replay streams the run's ACTIONS BEFORE the reasoning turns that produced them.
+  (b) §2's "flagged, never silently dropped" was only two-thirds true: `app.js` flagged a candidate
+  with `problems`, but `apply.py::_blocking_problem` refuses on THREE conditions, and the third — a
+  promotion whose assembled `draft` is empty — carries no `problems` and can even report
+  `draft_ok === true`, so the candidate a reviewer most needs to see rendered as an ordinary row
+  with a missing `<pre>` and no marker. `app.js` gained `applyBlocker()` mirroring that function
+  exactly, `candidateState()` deriving the three frame states, a `⚠` refusal marker line, and
+  `style.css` the `.candidate-row.state-{blocked,backed,inert}` frames. Two more genuine bugs fell
+  out of writing §6: the draft `<pre>` had `white-space:pre-wrap` only, which wraps at WHITESPACE —
+  one attacker-length unbroken token in untrusted model output gave the whole PAGE a horizontal
+  scrollbar (fixed with `overflow-wrap:anywhere`); and the three fixed grid tracks (~1000px total)
+  had no breakpoint at all, so "no overflow at 375px" was simply false (fixed with a `max-width:
+  1040px` stack that also RELEASES the `calc(100vh - 56px)` pin, since one stacked column of
+  fixed-height scroll tracks crushes every panel to a few rows).
+  **New `studio/tests/static-contract.test.js`** — plain CommonJS, `require("assert")`, a ~5-line
+  hand-rolled harness exiting non-zero, run as `node <file>`. No npm, no `package.json`, no
+  `node_modules`, matching all three siblings. **Adapted, not ported:** an audit checked toolscout's
+  five assertions and only THREE have an analogue here — the `[hidden]` guard, the `.layout`
+  viewport-height pin, and `word-break` on model-supplied fields (`.fr-fields`,
+  `.candidate-key-fields`, `.rubric-fact-value`). The other two assert selectors this studio does
+  not have (there is no inline SVG in `index.html` at all, and no `.meta-col`/`.prose`/`.tchip`), so
+  they were DROPPED rather than faked. Four assertions are ours with no sibling precedent: the draft
+  `<pre>`'s `overflow-wrap` + height cap, the §2 derived-state frame classes and their `--bad`
+  refusal color, the responsive stack releasing the height pin, and a no-markup scan of `app.js`
+  itself — matched on CODE SHAPE (`.innerHTML =`, `insertAdjacentHTML(`, …) rather than the bare
+  identifier, because `app.js` NAMES `innerHTML` twice while promising never to use it and a
+  substring scan would flag the documentation OF the rule as a violation of it (the same failure
+  mode `studio/tests/test_boundary.py` already solved by moving to `ast`).
+  **CI: its own `studio-static` job, not a step in `studio-test`.** Uses toolscout's
+  `shopt -s nullglob` form, not the other two's unguarded loop (with no `*.test.js`, `for f in
+  studio/tests/*.test.js` runs `node 'studio/tests/*.test.js'` literally and fails
+  module-not-found). The divergence from all three siblings — which append it as a step to their
+  single studio job — is deliberate and flagged by audit: `studio-test` here is a 3-version Python
+  matrix, and these assertions read files as TEXT with no Python involved, so a step there would run
+  them three times identically for no signal. A separate job also skips `uv sync` entirely and names
+  a CSS regression precisely instead of burying it inside "studio (py3.12)".
+- **The eval member's LIVE judge (`CDEVAL_*`) — and the three shape changes that had to land first.**
+  `eval/pyproject.toml` had declared `judge = ["openai>=1.0"]` since this package existed and NOTHING
+  imported it: a dead extra, and an eval harness that could never be pointed at a real model is not a
+  peer of the three siblings. `judge.make_eval_judge(config, chat_fn=...)` now builds it on
+  `rlm_kit.tools.make_model_tool` — the same chat → transient-retry → validate → circuit-breaker core
+  the rollout side's drafting tools use — with `from openai import OpenAI` LAZY inside the chat
+  closure, `max_retries=0` (the retry loop has ONE owner; leaving the client's own retries on would
+  multiply the two and turn a hard 60s timeout into minutes), `temperature=0.0`, and a strict
+  `parse_eval_json` that strips a ``` fence, slices `{`…`}`, requires all four ATLAS categories as
+  real numbers — **rejecting `bool` FIRST, because it subclasses `int` and `{"TF": true}` would
+  otherwise clamp to a real-looking 1.0** — clamps to [0, 10], tolerates extra fields, and truncates
+  notes at 2000 chars. `EvalJudgeConfig.from_env()` reads `CDEVAL_MODEL`/`_BASE_URL`/`_API_KEY`/
+  `_TIMEOUT`, a SEPARATE surface from the root's `CD_*` because the judge must be pointable at a
+  different model than the run it scores. `PROMPT_VERSION = "atlas-ctxd-eval-v1"`.
+  **The client was the small half.** Three shape changes were preconditions, not follow-ups:
+  1. **`Judge` returns a `JudgeVerdict(ok, score, reason)`**, not a bare `EvalScore`. A live judge has
+     three distinct ways to produce no number — circuit-broken, endpoint error, off-schema — and a
+     function returning `EvalScore` can express none of them without inventing one. The reasons are
+     `"judge circuit breaker: too many unusable replies in a row"`, `"judge endpoint error: <exc>"`,
+     and `"judge output off-schema: <validator errors>"`, kept distinct because their fixes differ.
+  2. **`EvalRow.score` is now OPTIONAL, beside a `unscored_reason` that is REQUIRED whenever it is
+     `None`** (a model validator refuses the blank-mystery row). It used to be required, so a failed
+     judge had literally nowhere to land. `compute_means` drops unscored rows from the sum AND the
+     DENOMINATOR — counting them there is arithmetically identical to scoring them 0, the exact lie
+     "unscored, never a fake 0" exists to prevent. **Divergence from all three siblings, argued:**
+     they store BOTH an `unscored: bool` and an optional `score`, two representations of one fact that
+     can disagree; here `score is None` IS unscored, exposed as a derived `@property`.
+  3. **`EvalReport` gained `n` / `n_unscored` / `judge_model` / `prompt_version`.** Without
+     `prompt_version` a number is not attributable to the prompt that produced it, which is the whole
+     point of the constant. No `taskset` field, unlike every sibling: there is no taskset concept here
+     to name (see the deferral below), and the field would be unfillable.
+  Also: `cli._pick_judge(force_stub)` (live iff `CDEVAL_MODEL` and not `--stub`; built ONCE per batch
+  because the breaker lives in the closure), a `--stub` flag, an unscored row rendering as `--` +
+  its reason with an `n=… (… unscored)  judge=…  prompt=…` footer, the siblings' `return 1` when
+  nothing scored, `ctx_distillery_eval/__main__.py`, and `eval/tests/conftest.py` — whose autouse
+  fixture scrubs `CDEVAL_*` so a developer with a live judge exported cannot have the CLI tests
+  quietly start billing. **Two deliberate divergences beyond the `unscored` one**: the input contract
+  stays two positional arguments (`judge(plan_text, transcript_texts)`) rather than the siblings'
+  `inputs: dict` from a `build_judge_inputs` — theirs reconstructs FIVE slots from a trace, one of
+  them judge-only ground truth from a taskset, while ours has exactly two already-typed values
+  carried end-to-end from the CLI, and a dict would invite a `reference` key with no producer; and
+  `StubJudge` stays a CLASS rather than becoming a module-level function, because it is
+  parameterizable and `test_score.py`'s means test genuinely needs two rows with different scores.
+  `eval/tests/test_judge.py` (19 tests, mirroring toolscout's — the deepest of the three) drives every
+  path through an INJECTED `chat_fn`: no network, no monkeypatching of `openai`, and the one thing a
+  callable cannot check (that `openai` is not imported at module scope) asserted structurally against
+  the module's own AST. eval suite 41 → 84.
+- **DEFERRED, with the three real blockers recorded** (`eval/README.md` + a CLAUDE.md
+  known-simplification bullet): the eval `run` subcommand and a real taskset. `taskset.py` is NOT a
+  taskset — `collect_tasks(glob)` enumerates `{run_id, trace_path}` from TRACES, where every sibling's
+  `run` iterates a real `EvalTask` with an id, a planner-visible input and a judge-only `reference`;
+  `judge.build_prompt` has no `{reference}` slot at all, so adding judge-only ground truth is a PROMPT
+  change and prompt changes are what `PROMPT_VERSION` exists to make attributable; and
+  `run_distillation` returns an `AssembledPlan`, not artifacts, and never returns the REDACTED
+  transcript text it ingested — so an eval `run` would have to re-`ingest()`/re-`redact()` and could
+  then score against a DIFFERENT redaction than the run actually saw (the clean fix is a returned
+  artifacts object, a driver signature change belonging with the taskset design). None of it blocked
+  the live judge: this project's judge takes `transcript_texts` as its ground-truth analogue and needs
+  no `reference`, so it is exercisable end-to-end on `score` alone.
+- **The `subscription` extra — run the PLANNER on a Claude Pro/Max account, with a hard refusal for
+  the DRAFTER.** Five pieces mirroring the siblings: `subscription = ["claude-agent-sdk>=0.1.60"]`
+  under `[project.optional-dependencies]`, a `subscription-sdk` dev-group MIRROR of it, a new
+  `[tool.uv] default-groups = ["dev", "subscription-sdk"]` (an EXTRA is not synced by default, so a
+  bare `uv sync` would prune the SDK out of the shared workspace venv and a subscription dev run
+  would then crash; `dev` must stay listed because `default-groups` REPLACES uv's default rather
+  than appending), the ~17-line `.env.example` block, and `config.SUBSCRIPTION_PREFIX` +
+  `config._maybe_subscription_lm` wired as `main_lm=` / `sub_lm=` into the existing
+  `rlm_kit.configure(...)` call. `ModuleNotFoundError` re-raise with the actionable
+  `uv sync --extra subscription` hint follows diff-sentry/toolscout (cve-reverser omits it — the
+  minority). **Divergence, in our favour:** all three siblings put the router in their dspy-BEARING
+  task module because their `config.py` must stay import-clean; ours already imports `rlm_kit`
+  inside `setup()`'s body, so it lives in `config.py` with `from rlm_kit import ClaudeAgentLM` inside
+  the SENTINEL BRANCH — the module top stays dspy-free, asserted in a fresh interpreter by both
+  `tests/test_public_api.py` and the new `tests/test_subscription.py` (13 tests).
+  **The load-bearing piece is an UNCONDITIONAL `CD_DRAFT_LM` sentinel refusal in
+  `DistillConfig.from_env`.** Every sibling has exactly one role that is a separate
+  OpenAI-compatible client and may never carry the sentinel (cve-reverser's generator, diff-sentry's
+  classifier, toolscout's judge); ours is the DRAFTER, since `make_chat_fn` builds an `openai.OpenAI`
+  client directly. Two things make it mandatory rather than defensive, and they compound: BOTH
+  drafting tools are ALWAYS wired in `DistillSession.__init__` (diff-sentry's exact "always
+  registered, so a sentinel here would fail LATE" condition — mid-trajectory, on the one hard-budget
+  attempt), and `draft_model` falls back to `sub_model` falls back to `main_model`, so a user who
+  sets ONLY `CD_ROOT_LM=claude-agent-sdk/…` silently ships the sentinel to the drafting endpoint as
+  a bogus model id. The error distinguishes *explicitly set* from *inherited* and names WHICH
+  variable it was inherited from. `studio/app.py` needed no mirrored prefix — its `/v1/config`
+  reports no model at all.
+- **`ctx_distillery/rl_export.py` + `ctx-distillery export` — the reward-free SFT/RL dataset bundle,
+  narrowed to fit this project's invariants.** Built on `rlm_kit.dataset`'s `export_actions` /
+  `export_sft_turns` / `run_label_bundle`, emitting `{actions, drafting, orchestrator_tools, planner,
+  sft_turns, labels, metrics, rubric_signal}` with `reward: null` on every record. Role split:
+  `drafting` = the two `make_model_tool` tools (the analogue of the siblings' generator/classifier),
+  `orchestrator_tools` = the three read-only lookups. Legacy-rubric backfill follows
+  cve-reverser/diff-sentry (`rubric_from_meta(events).criteria or default_rubric().criteria`), NOT
+  toolscout's bare form, which reports an empty rubric beside a full set of facts on an old trace.
+  Four deliberate divergences, each recorded in the module docstring:
+  1. **No writing `main()` and no `--out`.** The siblings' `rl_export.main()` and `cli._cmd_export`
+     both do `open(out, "w")`, which would turn `tests/test_no_write_capability.py` red — and
+     `CLAUDE.md` says a red tripwire IS the finding. So it is `ctx-distillery export <trace-glob>...`
+     printing JSON to stdout, redirected with `>`, mirroring `show`. The form is
+     `print(json.dumps(...))` and NOT `json.dump(..., sys.stdout)`: both pass the scan TEXTUALLY, but
+     the second calls `.write` at runtime while only looking clean, which reads as evading the
+     tripwire. An empty glob match REFUSES (exit 1) rather than printing a zero-run bundle, and the
+     one-line summary goes to stderr so a redirect yields valid JSON and nothing else.
+  2. **`run_labels` IS built, and the earlier reasoning against it was wrong.** An audit found the
+     original refusal cited toolscout's model-decided `met` booleans — which live in `rubric_signal`,
+     the surface KEPT here, not in `run_labels` at all. diff-sentry's `run_labels` and toolscout's
+     are purely structural and map one-for-one onto `AssembledCandidate`'s real fields
+     (`unbacked_*` ≈ `problems`, `finalized` ≈ `plan is not None`); only cve-reverser's
+     `valid`/`complete` is oracle-flavoured, and its domain has ground truth. So the shipped shape is
+     `{finalized, n_candidates, n_keep, n_prune, n_promote_memory, n_promote_skill, n_unbacked,
+     n_draft_not_ok, plan_problems}` — every field recomputable from the same JSONL, zero oracle,
+     zero fabrication, and a test asserts no `valid`/`complete`/`correct`/`score`/`reward`/`met` key
+     ever appears.
+  3. **Reads through `trace_io.load_trace` / `dict_events`**, never `rlm_kit.trace.load_events`
+     (invariant 11's non-dict-line guard applies to a new reader exactly as to the old ones).
+  4. **The `drafting` split is NOT filtered on `outcome.output`**, unlike cve-reverser's and
+     diff-sentry's generator/classifier splits. `tools/drafting.py` records the authored bytes under
+     `draft=`, and rlm-kit's `_action_record` reads only `raw`/`result`/`results`/`preview` — so
+     `outcome.output` is `None` for EVERY ctx-distillery tool call and that filter would silently
+     produce an empty split. Pinned by a test, with the reason, so the fix for an empty-looking split
+     is not to re-add it. Re-source a draft's text the way invariant 2 already requires: from the
+     `tool_call` event keyed by `artifact_id`, via `schema.assemble`.
+  New `tests/test_rl_export.py` (31 tests). `ctx_distillery/README.md`'s layout and CLI sections
+  updated (they had also never listed `schema.py`). Together with `SUBSCRIPTION_PREFIX` above, these
+  eight names (`load_runs`, `export_dataset`, `run_labels`, `run_metrics`, `rubric_signal`,
+  `DRAFTING_TOOLS`, `ORCHESTRATOR_TOOLS`) take the eager public surface from 44 to **52** — `load_runs`
+  is exported where the siblings keep theirs private, because without a writing `main()` it is the
+  entry a library caller needs to reach `export_dataset`.
+- **`VENDOR.md`'s export paragraph rewritten.** It declined an exporter on the grounds that "there's
+  no obvious reward signal for *was this the right thing to prune*" — an argument that defeats an
+  ORACLE labels surface and nothing else, and that mis-described what the siblings actually built
+  (mostly `sft_turns` + `actions`, all `reward: null`, with `run_label_bundle` structurally refusing
+  the name `reward`). It now describes what exists, what is deliberately absent, and why. A
+  `ClaudeAgentLM` bullet was added alongside, naming the drafter exclusion.
+- **A real public surface on `ctx_distillery/__init__.py` — 44 eager names + 3 lazy ones, and the
+  writer excluded on purpose.** The package was 8 lines (a docstring and `__version__`); it now
+  follows the sibling projects' convention exactly: eager `from .x import ...` for every dspy-free
+  module, `__all__` grouped by seam with a literal `# dspy-bearing (lazy):` block, `__version__`
+  between `__all__` and a PEP 562 `__getattr__` that defers the dspy import to first use. The
+  partition was MEASURED per module rather than inherited from a pre-`schema.py` design note — after
+  the shapes split, only `task`, `session` and `cli` still pull dspy, so the lazy tail is just
+  `DistillSession` / `run_distillation` / `main` and everything else (schema, config, render,
+  trace_io, redact, rubric, `adapters.*`, `tools.*`) is eager.
+  **`apply_plan`, `ApplyOutcome`, `slugify` and `ARCHIVE_DIRNAME` are deliberately absent**, and the
+  module docstring says why and points at `from ctx_distillery.apply import apply_plan` / the
+  `ctx-distillery-apply` console script: invariant 8 requires that no module on the RLM path can
+  reach the human-gated writer, `__init__.py` is on that path (its imports run eagerly), and
+  `test_no_write_capability.py`'s `IMPORTS_APPLY` regex matches every re-export form including an
+  indented `from . import apply` inside `__getattr__`. That is a principled divergence from all
+  three siblings, each of which re-exports its writer-adjacent helpers freely.
+  New `tests/test_public_api.py` (6 tests) **supersedes and replaces `tests/test_import.py`** — two
+  files both claiming to test importability was the drift being removed. It mirrors toolscout's four
+  (fresh-subprocess dspy-free import, every `__all__` name resolves, `__version__` matches
+  `pyproject.toml`, lazy names deferred) plus two of this project's own. **The originally-designed
+  form of the writer test was wrong and is recorded as such in the test's docstring**:
+  `assert not hasattr(ctx_distillery, "apply")` is red on day one, because `tests/test_apply.py` and
+  `tests/test_apply_cli.py` import the submodule at MODULE level and importing a submodule binds it
+  as an attribute of its parent package during pytest's COLLECTION phase, before any test runs. The
+  shipped form asserts the names are absent from `__all__` (always valid) plus `hasattr` is False for
+  the four that genuinely fall through `__getattr__`, and makes the module-attribute claim honestly
+  in a fresh subprocess that never imports the writer.
+  `__all__` carries the package's one `# noqa: RUF022`: the grouping is the dspy manifest, and an
+  isort-style sort would scatter the lazy names through the eager ones. Every other module's `__all__`
+  stays sorted.
+- **`## Versioning` in `CLAUDE.md`** (all three siblings had one; this repo did not) — keep
+  `pyproject.toml` `[project].version` and `ctx_distillery.__version__` in sync, fold a bump's changes
+  into this file, plus two facts specific to this repo: the two workspace members carry their OWN
+  `version` (both `0.1.0`) and NOTHING checks them, and 0.1.0 is UNRELEASED — `## [Unreleased]` is
+  this file's only version heading, so the first bump is a RENAME of it plus a fresh empty one above,
+  never a new section under a shipped one.
+- **`pytest-asyncio` / `asyncio_mode = "auto"` DECLINED, recorded as a decision** (`CLAUDE.md`
+  `## Verify`). All three siblings carry them; all three of this repo's suites have ZERO async tests,
+  and the four async call sites are driven from synchronous tests through explicit `asyncio.run(...)`,
+  so adopting it would add a dev dependency with no consumer.
+- **`VENDOR.md` stub rot fixed.** Its `configure`/`RLMConfig` bullet still described `task.py` as an
+  unwired stub — "not yet imported", the pyodide pin "not yet reflected in code" — and its
+  `make_model_tool` bullet still pointed at a `task.py` TODO enumeration that no longer exists. All
+  three claims were false: `config.setup()` calls `rlm_kit.configure(RLMConfig(...))`,
+  `task._forced_config` enforces the pin via `dataclasses.replace`, and `DistillConfig.from_env`
+  additionally refuses a non-`pyodide` `CD_INTERPRETER` loudly. (The `rl_export` paragraph is
+  untouched — a later pass owns it.)
+- **`ctx_distillery/schema.py` — the dspy-free shapes module every sibling already had.** A pure
+  refactor plus two tests; no behaviour change. `DistillAction`/`DistillCandidate`/`DistillPlan`
+  moved out of `task.py`, and `AssembledCandidate`/`AssembledPlan`/`PROMOTION_ACTIONS`/`assemble`
+  out of `session.py`. **The gap this closes was measured, not assumed**: importing either workspace
+  member's entry module put `dspy` in `sys.modules` (`eval` cli -> True, `studio` app -> True), while
+  the same check on `diff_sentry_eval.cli` and `toolscout_eval.cli` returned False. Root cause was
+  purely structural — the only route to `assemble` ran through `session.py`, which imports `task.py`,
+  which does `from rlm_kit import RLMTask` — so a fully-offline `ctx-distillery-eval score --stub`
+  run, and EVERY studio HTTP request, imported an LM framework neither one calls. `assemble` was
+  verified to qualify rather than assumed to: its whole dependency set is `EVENT_TOOL_CALL` (a string
+  constant), `trace_io.dict_events` and the dataclasses, i.e. a pure function over `(events, plan)`.
+  **`task.py` and `session.py` re-export every moved name** (`__all__`), so `from
+  ctx_distillery.task import DistillPlan` / `from ctx_distillery.session import assemble` resolve
+  unchanged and to the IDENTICAL object — this is a move, not an API break. `run_distillation` stays
+  in `session.py` (it constructs a `DistillSession`) and so does `render_memory_index` (prompt-side
+  presentation for one task, not part of the plan's shape); `DistillSession` + the `pyodide` pin stay
+  in `task.py`, where invariant 1 requires the pin to be stated. `render.py`, `apply.py`, `cli.py`,
+  `rubric.py`, `eval/score.py` and `studio/app.py` now import the shapes from `schema`; `rubric.py`'s
+  two function-local imports (`from .task import DistillPlan`, `from .session import assemble`) became
+  module-level, since "keep the top light" was only ever true while those names lived beside an
+  `RLMTask` and `schema.py` imports nothing from `rubric.py`, so there is no cycle to dodge. Fallout
+  worth naming: `ctx_distillery.apply` — and so the `ctx-distillery-apply` console script — is now
+  dspy-free too.
+- **The two missing boundary gates, in a FRESH SUBPROCESS, one per member.** `eval/tests/` and
+  `studio/tests/` each gained `import <root> must not pull the member` and `importing the member
+  pulls the root one way AND stays light (no dspy, no openai)`, modelled on
+  `diff-sentry/eval/tests/test_boundary.py`'s first two tests — the ones ctx-distillery could not have
+  written before this refactor. They import each member's ENTRY module (`.cli` / `.app`) rather than
+  the bare package, a deliberate divergence: diff-sentry's `__init__.py` eagerly re-exports its whole
+  surface so a bare import walks the real graph, whereas both of ours are still a docstring plus
+  `__version__`, which would make the assertions vacuous. The entry module is the stronger check
+  anyway — it covers the whole real import graph, not a curated re-export list. `eval/`'s existing
+  TEXTUAL scan is kept as-is (diff-sentry keeps its own third test textual; it is belt and braces,
+  not the gate), which is why `schema.py`'s docstring names the two members by DIRECTORY and never by
+  import name — the scan cannot tell prose from an import.
+
 - **The CLI, as TWO console scripts — because one binary is provably impossible here.**
   `ctx-distillery distill [project]` discovers a project's Claude Code storage, wires the `chat_fn`
   from `CD_*`, runs the distillation, and prints the assembled plan; `ctx-distillery show <trace>

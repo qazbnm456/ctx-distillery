@@ -5,7 +5,7 @@ description = "SSE server + web frontend for ctx-distillery — replay a distill
 requires-python = ">=3.11"
 # Unlike diff-sentry-studio (whose REPLAY mode needs no diff-sentry import at all, since diff-sentry
 # writes a full pre-rendered response JSON), ctx-distillery writes NO such artifact — replay itself
-# must call session.assemble/rubric.trace_facts directly. So ctx-distillery is a CORE dependency
+# must call schema.assemble/rubric.trace_facts directly. So ctx-distillery is a CORE dependency
 # here, not behind a `live` extra — there is no live extra, because there is no live endpoint (v1).
 dependencies = [
     "ctx-distillery",

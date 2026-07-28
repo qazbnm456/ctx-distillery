@@ -14,11 +14,23 @@ reason: `ctx_distillery_studio/__init__.py`'s docstring legitimately NAMES `appl
 sentence that promises never to call it, and a textual scan would flag the statement of the
 invariant as a violation of it. `ast` sees code and never prose — the same distinction
 `tests/test_no_write_capability.py` makes with its docstring-stripping pass.
+
+Parity pass 1 added the other half this file was missing, mirroring
+`diff-sentry/eval/tests/test_boundary.py`'s first two tests: a FRESH-SUBPROCESS pair pinning that
+`import ctx_distillery` never drags this package in, and that importing this package's app module
+pulls `ctx_distillery` one way while STAYING LIGHT — no `dspy`, no `openai`. The static scans below
+read source; those two measure what actually lands in `sys.modules`, which is a different claim and
+the one that regressed: until that pass, EVERY studio HTTP request had already paid for a dspy
+import, because `app.py` reached `assemble` through `ctx_distillery.session` -> `ctx_distillery.task`
+-> `from rlm_kit import RLMTask`. A replay server that never constructs an `RLMTask` should not
+import an LM framework, and `ctx_distillery.schema` is what makes that true.
 """
 
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 import ctx_distillery_studio
@@ -27,6 +39,45 @@ import ctx_distillery
 
 STUDIO_PACKAGE_DIR = Path(ctx_distillery_studio.__file__).parent
 ROOT_PACKAGE_DIR = Path(ctx_distillery.__file__).parent
+
+
+def _fresh(code: str) -> None:
+    """Run `code` in a FRESH interpreter and require it to print `ok`.
+
+    A same-process assertion would be worthless: pytest has already imported half the workspace (this
+    module imports both packages at the top), so `'dspy' in sys.modules` would say nothing about who
+    pulled it. A new process is the only honest measurement.
+    """
+    # `check=False` deliberately: a violation must surface as an ASSERTION carrying the child's
+    # stderr (which names the offending import), not as a bare CalledProcessError.
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "ok"
+
+
+def test_import_ctx_distillery_does_not_import_the_studio():
+    """The rollout core must stay studio-free — the runtime counterpart of the source scan below."""
+    _fresh(
+        "import sys, ctx_distillery; "
+        "assert 'ctx_distillery_studio' not in sys.modules; print('ok')"
+    )
+
+
+def test_import_studio_app_pulls_ctx_distillery_one_way_and_stays_light():
+    """Importing the app reads `ctx_distillery`'s contract without dragging dspy or openai.
+
+    Imports `.app` rather than the bare package, for the same reason `eval/tests/test_boundary.py`
+    does: `ctx_distillery_studio/__init__.py` is a docstring plus `__version__`, so a bare import
+    would pull nothing and assert nothing. `.app` is what `uvicorn` loads, so its import graph
+    (`app` -> `mapper` + `ctx_distillery.rubric` / `.schema` / `.trace_io`) is the real one, and it
+    is the graph every HTTP request pays for.
+    """
+    _fresh(
+        "import sys, ctx_distillery_studio.app; "
+        "assert 'ctx_distillery' in sys.modules; "
+        "assert 'dspy' not in sys.modules; "
+        "assert 'openai' not in sys.modules; print('ok')"
+    )
 
 
 def _names_apply_plan(node: ast.AST) -> bool:

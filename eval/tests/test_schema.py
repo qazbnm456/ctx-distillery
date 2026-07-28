@@ -29,6 +29,48 @@ def test_compute_means_is_empty_for_no_rows_not_a_dict_of_zeros():
     assert compute_means([]) == {}
 
 
+# -- the unscored shape (parity pass 4) -----------------------------------------------------------
+
+
+def test_eval_row_score_is_optional_so_a_failed_judge_has_somewhere_to_land():
+    """It used to be REQUIRED, which is why a live judge could not exist: a failed judge's only
+    representable outcomes were a real number and an exception."""
+    row = EvalRow(run_id="r1", trace_path="a.jsonl", unscored_reason="judge endpoint error: boom")
+    assert row.score is None and row.unscored is True
+
+
+def test_eval_row_unscored_is_derived_from_the_score_not_stored_alongside_it():
+    """Divergence from the siblings, pinned: they store BOTH an `unscored: bool` and an optional
+    `score`, i.e. two representations of one fact that can disagree. Here `score is None` IS
+    unscored, so `unscored` must be a property and must NOT appear as a field."""
+    assert "unscored" not in EvalRow.model_fields
+    scored = EvalRow(run_id="r1", trace_path="a.jsonl", score=EvalScore(TF=5, TA=5, TG=5, PA=5))
+    assert scored.unscored is False
+    assert "unscored" not in scored.model_dump()
+
+
+def test_eval_row_refuses_an_unscored_row_with_no_reason():
+    """A blank unscored row is the silent-mystery failure mode the optional score exists to prevent."""
+    with pytest.raises(ValidationError):
+        EvalRow(run_id="r1", trace_path="a.jsonl")
+    with pytest.raises(ValidationError):
+        EvalRow(run_id="r1", trace_path="a.jsonl", unscored_reason="   ")
+
+
+def test_compute_means_skips_unscored_rows_entirely():
+    rows = [
+        EvalRow(run_id="r1", trace_path="a.jsonl", score=EvalScore(TF=8, TA=8, TG=8, PA=8)),
+        EvalRow(run_id="r2", trace_path="b.jsonl", unscored_reason="judge output off-schema: nope"),
+    ]
+    # Not 4.0 — an unscored row is excluded from the DENOMINATOR too, or it would be a fake 0.
+    assert compute_means(rows) == {"TF": 8.0, "TA": 8.0, "TG": 8.0, "PA": 8.0}
+
+
+def test_compute_means_of_only_unscored_rows_is_empty():
+    rows = [EvalRow(run_id="r1", trace_path="a.jsonl", unscored_reason="judge endpoint error: boom")]
+    assert compute_means(rows) == {}
+
+
 def test_compute_means_averages_each_category_independently():
     rows = [
         EvalRow(run_id="r1", trace_path="a.jsonl", score=EvalScore(TF=10, TA=0, TG=5, PA=5)),
@@ -48,3 +90,19 @@ def test_compute_means_never_produces_a_composite_key():
 def test_eval_report_defaults_to_empty():
     report = EvalReport()
     assert report.rows == [] and report.means == {}
+    assert report.n == 0 and report.n_unscored == 0
+
+
+def test_eval_report_carries_provenance_so_a_number_is_attributable():
+    """`prompt_version` is the load-bearing one: two scorecards produced under different prompts are
+    not comparable, and nothing else in the report would say so."""
+    report = EvalReport(n=3, n_unscored=1, judge_model="judge-x", prompt_version="atlas-ctxd-eval-v1")
+    assert (report.n, report.n_unscored) == (3, 1)
+    assert report.judge_model == "judge-x" and report.prompt_version == "atlas-ctxd-eval-v1"
+
+
+def test_eval_report_has_no_taskset_field_because_there_is_no_taskset_concept():
+    """Every sibling's report names its taskset. Ours cannot: `taskset.py` enumerates runs from
+    TRACES, not tasks, and building a real taskset is the deferred `run` work (see eval/README.md).
+    Adding the field before the concept exists would label a report with an unfillable value."""
+    assert "taskset" not in EvalReport.model_fields

@@ -10,22 +10,57 @@ this tree.
 - **`RLMTask`** — subclassed as `DistillSession` (`ctx_distillery/task.py`). The declaration carries the
   `signature`, `output_field`, `output_model` (`DistillPlan`), and `instructions`; retry/validation,
   sandbox selection, budget caps, and observability are inherited, not reimplemented here.
-- **`configure` / `RLMConfig`** — will feed rlm-kit's config from this project's own env-driven surface
-  (`CD_*` vars, see `.env.example`) once `DistillSession` is wired to a live run — not yet imported in
-  `ctx_distillery/task.py`'s current stub. The design *commits* to pinning the interpreter explicitly to
-  `pyodide` (see `CLAUDE.md` invariant 1, the structural no-mutation guarantee) and never switching to
-  `local` or a writable-mount `container` config — that pin still needs to land as a real constructor
-  kwarg once the task is wired up; it is not yet reflected in code.
+- **`configure` / `RLMConfig`** — feed rlm-kit's config from this project's own env-driven surface
+  (`CD_*` vars, see `.env.example`). `ctx_distillery/config.py`'s `setup(config)` calls
+  `rlm_kit.configure(RLMConfig(...))` with the resolved `CD_*` values (both imported lazily, inside
+  the function body, so the env-reading half of that module stays stdlib-only). The interpreter pin to
+  `pyodide` (see `CLAUDE.md` invariant 1, the structural no-mutation guarantee) is ENFORCED IN CODE, not
+  merely committed to in the design: `task._forced_config` runs `dataclasses.replace(config,
+  interpreter="pyodide")` before `super().__init__`, so a caller passing `interpreter="local"` still
+  gets `pyodide`, and `DistillConfig.from_env` additionally REFUSES a non-`pyodide` `CD_INTERPRETER`
+  loudly rather than coercing it silently. There is no `local` and no writable-mount `container` path.
+- **`ClaudeAgentLM`** (the optional `[subscription]` extra) — used to run the PLANNER and the sub LM on
+  the operator's own Claude Pro/Max subscription when their `CD_*` model id carries the
+  `claude-agent-sdk/` sentinel. Imported lazily inside `config._maybe_subscription_lm`'s sentinel branch
+  and injected through the public `configure(main_lm=…, sub_lm=…)` seam — not vendored, not wrapped, and
+  never reimplemented. The DRAFTER is always a separate OpenAI-compatible endpoint (`config.make_chat_fn`
+  builds an `openai.OpenAI` client directly), so it may never carry the sentinel: `DistillConfig.from_env`
+  refuses one there unconditionally, including one inherited down the `CD_DRAFT_LM` → `CD_SUB_LM` →
+  `CD_ROOT_LM` fallback chain.
 - **The trace schema + `rlm_kit.trace` helpers** — every run's tool calls (`draft_memory_file`,
-  `draft_skill_file`, and the read-only lookups) are recorded through the standard trace/v1 events. This
-  project's use of the trace is for auditability, not for producing an RL dataset — there's no obvious
-  reward signal for "was this the right thing to prune." That's a reasonable variant, not a misfit:
-  rlm-kit's "trajectories, never reward" invariant constrains what the *kit* computes, not what a
-  consumer must do with the trace, and no `export_*` call is forced on a consumer.
+  `draft_skill_file`, and the read-only lookups) are recorded through the standard trace/v1 events. The
+  trace is read for auditability (`ctx-distillery show`, `eval/`, `studio/`) **and** exported as a
+  reward-free dataset.
+- **`rlm_kit.dataset`'s `export_actions` / `export_sft_turns` / `run_label_bundle`** —
+  `ctx_distillery/rl_export.py` builds the bundle `ctx-distillery export` prints:
+  `{actions, drafting, orchestrator_tools, planner, sft_turns, labels, metrics, rubric_signal}`. Every
+  action record carries `reward: null`, and `run_label_bundle` *refuses* a surface literally named
+  `reward` (it raises), so "trajectories, never reward" is enforced at the transport rather than merely
+  intended here.
+
+  **What is deliberately absent, and the correction that got it right.** An earlier version of this file
+  declined an exporter outright, on the grounds that "there's no obvious reward signal for *was this the
+  right thing to prune*". That argument is sound — and it defeats exactly one surface: an **oracle**
+  labels field. It does not touch `sft_turns` (pure behaviour cloning of the planner's own turns, no
+  label at all), `actions`, `planner`, `metrics`, or `rubric_signal`, none of which need ground truth;
+  and it mis-described what the sibling projects actually built, which is mostly those. So the exporter
+  exists, and `run_labels` is **structural only** — action counts, `finalized`, unbacked/invalid-draft
+  counts, the run-level problem strings — every field recomputable from the same JSONL by a second
+  reader. Nothing claims a judgement was CORRECT. `cve-reverser`'s `valid`/`complete` is the one sibling
+  label with real ground truth behind it (does this template match the patch?); ctx-distillery has no
+  equivalent, and inventing one would fabricate the very signal the original objection was right about.
+
+  Two smaller divergences from the siblings' exporters, both forced by this project's own invariants:
+  there is **no writing `main()` and no `--out`** (`tests/test_no_write_capability.py` scans
+  `rl_export.py` and `cli.py`, and a red tripwire is the finding, not a test to relax — so the CLI does
+  `print(json.dumps(...))` to stdout, redirected with `>`, the same shape `show` already has); and
+  reading goes through `trace_io.load_trace`, never `rlm_kit.trace.load_events` (`CLAUDE.md` invariant
+  11's non-dict-line guard applies to a new reader exactly as to the old ones).
 - **`make_model_tool`** — the base primitive for both of this project's LM-backed drafting tools,
   `draft_memory_file` and `draft_skill_file` (per `CLAUDE.md` invariant 2's judgement-only SUBMIT — the
-  `output_model` carries only `{action, artifact_id, key_fields}`, never the drafted body — and
-  `ctx_distillery/task.py`'s TODO enumeration). Both are TEXT-ONLY tools — they author a candidate
+  `output_model` carries only `{action, artifact_id, key_fields}`, never the drafted body; both tools
+  are wired in `DistillSession.__init__` and defined in `ctx_distillery/tools/drafting.py`, whose
+  validators own this project's frontmatter rules). Both are TEXT-ONLY tools — they author a candidate
   memory/skill body and an `artifact_id`, and never touch the memory directory or a `skill_dir` themselves.
   Two separate tool instances, one per drafting target, following `make_model_tool`'s "one tool per run,
   per-call breaker state in the closure" shape.

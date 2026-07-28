@@ -129,8 +129,17 @@ function startReplay(runId) {
   stopReplay();
   const feed = document.getElementById("feed");
   clear(feed);
-  document.getElementById("feed-status").textContent = "streaming…";
-  document.getElementById("plan-empty").textContent = "Loading…";
+  // "replaying…", not "streaming…" — the rows come from a FINISHED trace (there is no live-drive
+  // endpoint), and `?delay=` only PACES the replay to feel live. Saying "streaming" claimed a
+  // capability the backend does not have.
+  document.getElementById("feed-status").textContent = "replaying…";
+  const planEmpty = document.getElementById("plan-empty");
+  planEmpty.textContent = "Loading…";
+  // `hidden = false` is REQUIRED, not redundant — found by review. `loadPlan` sets `hidden = true`
+  // on a successful render, so on every load AFTER the first this note stayed hidden and the middle
+  // stage sat blank for the whole replay instead of saying "Loading…". It only ever looked right
+  // because a fresh page starts with the note visible.
+  planEmpty.hidden = false;
   clear(document.getElementById("plan-list"));
   clear(document.getElementById("rubric-list"));
   document.getElementById("rubric-empty").textContent = "—";
@@ -173,9 +182,57 @@ const CATEGORY_LENS = {
   PA: ["n_candidate_problems", "n_bad_skill_scope"],
 };
 
+// The two actions that carry drafted bytes — mirrors `ctx_distillery.schema.PROMOTION_ACTIONS`.
+const PROMOTION_ACTIONS = ["promote_to_memory", "promote_to_skill"];
+
+// Mirrors `ctx_distillery.apply._blocking_problem` — the three conditions `apply_plan` refuses on
+// regardless of action kind. Returns the reason, or null. Keyed ONLY on state `assemble()` already
+// computed from the trace, never on the plan's own claim about what it drafted (CLAUDE.md
+// invariant 2). The third condition is why this is a function and not just `problems.length`: an
+// empty promotion draft carries no `problems` and may even report `draft_ok === true`, so without
+// it the one candidate a reviewer most needs to see would render as an ordinary row.
+function applyBlocker(candidate) {
+  if (candidate.problems && candidate.problems.length) {
+    return "carries problems — apply_plan refuses this candidate";
+  }
+  if (candidate.draft_ok === false) {
+    return "the drafting call failed its deterministic format check — apply_plan refuses it";
+  }
+  if (PROMOTION_ACTIONS.includes(candidate.action) && !String(candidate.draft || "").trim()) {
+    return "no drafted text was assembled for this promotion (nothing to write)";
+  }
+  // The two ADDITIONAL refusals that are derivable from the trace alone — added after a review
+  // found the console framed both of these teal ("backed") while `apply_plan` would refuse them.
+  // Everything above mirrors `apply.py::_blocking_problem`; these two mirror the per-action-kind
+  // key_fields conventions (`_promote_skill`'s scope gate, `_prune`'s target gate). They belong
+  // here and the REST of apply.py's refusals do not, because these are the only ones decidable
+  // from what a finished trace carries — see DESIGN.md §2 for the ones that are apply-time-only.
+  const keyFields = candidate.key_fields || {};
+  if (candidate.action === "promote_to_skill") {
+    const scope = keyFields.scope;
+    if (scope !== "global" && scope !== "project") {
+      return "key_fields['scope'] must be \"global\" or \"project\" — apply_plan refuses it";
+    }
+  }
+  if (candidate.action === "prune" && !String(keyFields.target_path || "").trim()) {
+    return "a prune must name key_fields['target_path'] — apply_plan refuses it";
+  }
+  return null;
+}
+
+// The derived frame state, §2 of DESIGN.md: "blocked" (apply_plan would refuse), "backed" (a
+// promotion whose artifact_id resolved to real drafted bytes), else "inert" (keep/prune — there is
+// nothing to back).
+function candidateState(candidate) {
+  if (applyBlocker(candidate)) return "blocked";
+  if (PROMOTION_ACTIONS.includes(candidate.action)) return "backed";
+  return "inert";
+}
+
 function renderCandidate(candidate, index) {
   const row = el("div", "candidate-row");
-  if (candidate.problems && candidate.problems.length) row.classList.add("has-problems");
+  const state = candidateState(candidate);
+  row.classList.add("state-" + state);
 
   const head = el("div", "candidate-head");
   head.appendChild(el("span", "candidate-index", `#${index}`));
@@ -202,6 +259,11 @@ function renderCandidate(candidate, index) {
     for (const p of candidate.problems) problems.appendChild(el("div", "problem-line", p));
     row.appendChild(problems);
   }
+
+  // The refusal marker goes LAST so it reads as the verdict on everything above it. It is the only
+  // surface that makes the empty-promotion-draft case visible at all.
+  const blocker = applyBlocker(candidate);
+  if (blocker) row.appendChild(el("div", "candidate-blocked", "⚠ " + blocker));
   return row;
 }
 

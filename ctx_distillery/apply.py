@@ -97,7 +97,7 @@ from .adapters.claude_code import (
 )
 from .render import render_plan
 from .rubric import plan_from_events
-from .session import PROMOTION_ACTIONS, AssembledCandidate, AssembledPlan, assemble
+from .schema import PROMOTION_ACTIONS, AssembledCandidate, AssembledPlan, assemble
 from .trace_io import load_trace
 
 __all__ = [
