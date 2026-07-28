@@ -301,6 +301,15 @@
       // `project` is a BASENAME — `iterations._project_label` never carries the absolute path.
       kv(parent, "project", ini.project);
       kv(parent, "transcripts", ini.transcripts);
+      // The COMPOSITION, when the trace carries the identity list — a jump from 1 to 43 because
+      // subagent transcripts were included is otherwise invisible here. Both rows are simply
+      // omitted on an old or malformed trace: rendering 0 would claim something it never said.
+      if (ini.sessions !== null && ini.sessions !== undefined) {
+        kv(parent, "sessions", ini.sessions);
+      }
+      if (ini.subagents !== null && ini.subagents !== undefined) {
+        kv(parent, "subagents", ini.subagents);
+      }
       kv(parent, "memory artifacts", ini.memory_artifacts);
       // planner/drafter are the TRACE's recorded model names, not a `/v1/config` field, and they
       // stay plain kv rows in here. DESIGN.md §5.1's "no model-role chips" Don't is about the

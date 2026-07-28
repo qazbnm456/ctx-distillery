@@ -46,7 +46,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import __version__
-from .adapters.claude_code import ClaudeCodeAdapter, project_storage_dir, transcript_files
+from .adapters.claude_code import (
+    INDEX_LINE_MAX,
+    ClaudeCodeAdapter,
+    project_storage_dir,
+    subagent_files,
+    transcript_files,
+)
 from .config import DistillConfig, make_chat_fn, setup
 from .render import plan_as_dict, render_plan
 from .rl_export import export_dataset, load_runs
@@ -68,6 +74,7 @@ Propose a distillation plan over a project's Claude Code sessions. This never wr
 
     ctx-distillery distill                         # distill the current directory's sessions
     ctx-distillery distill /path/to/project         # ... a specific project
+    ctx-distillery distill --include-subagents      # ... and its subagent transcripts too
     ctx-distillery show traces/<run-id>.jsonl       # re-read a finished run's plan (offline)
     ctx-distillery show traces/<run-id>.jsonl --json
     ctx-distillery export "traces/*.jsonl" > ds.json    # reward-free SFT/RL dataset (offline)
@@ -156,7 +163,24 @@ def _cmd_distill(args) -> int:
         )
         return 1
 
+    subagents = subagent_files(project, home=args.claude_home) if args.include_subagents else []
+    entries = len(found) + len(subagents)
+
     config = setup(DistillConfig.from_env())
+    # The ENTRY ceiling, stated at the point of use rather than discovered inside a truncated scan.
+    # The planner orients itself by printing line 0 of every entry, and `CD_MAX_OUTPUT_CHARS` caps
+    # ONE REPL cell's output — so past `max_output_chars // (INDEX_LINE_MAX + 1)` entries that scan
+    # comes back head+tail truncated (visibly, with dspy's own marker, and pageable) rather than
+    # complete. Both numbers come from one constant so they cannot drift apart.
+    ceiling = config.max_output_chars // (INDEX_LINE_MAX + 1)
+    if entries > ceiling:
+        print(
+            f"warning: {entries} transcript entries exceeds the ~{ceiling} that fit one REPL "
+            f"cell's index scan at CD_MAX_OUTPUT_CHARS={config.max_output_chars}. The planner "
+            f"still sees every entry and can page through them, but its one-shot overview will be "
+            f"truncated; the full index is recorded in the trace either way.",
+            file=sys.stderr,
+        )
     run_id = _slug(args.run_id) if args.run_id else default_run_id(project)
     if not run_id:
         print(f"--run-id {args.run_id!r} reduces to an empty token — give it some [A-Za-z0-9._-]",
@@ -174,9 +198,20 @@ def _cmd_distill(args) -> int:
             file=sys.stderr,
         )
         return 1
-    adapter = ClaudeCodeAdapter.for_project(project, home=args.claude_home)
+    adapter = ClaudeCodeAdapter.for_project(
+        project, home=args.claude_home, include_subagents=args.include_subagents
+    )
 
-    print(f"distilling {len(found)} transcript(s) for {project} as {run_id} ...")
+    # `entries`, not `len(found)`: with subagents on, a project with 19 sessions and 351 subagents
+    # would otherwise report 19.
+    #
+    # This is what was DISCOVERED, which is an upper bound on what the planner ends up seeing —
+    # `for_project` drops an entry that renders empty (an unreadable file, or one with no
+    # user/assistant events at all). Deliberately not made exact: the true figure needs the render,
+    # i.e. a second full `ingest()` over up to ~880 files, and `run_distillation` owns the one
+    # ingest by invariant 5. An upper bound is also the RIGHT input for the ceiling warning below,
+    # which should fire early rather than late.
+    print(f"distilling up to {entries} transcript(s) for {project} as {run_id} ...")
     try:
         assembled = asyncio.run(
             run_distillation(
@@ -291,6 +326,11 @@ def build_parser() -> argparse.ArgumentParser:
                         f"{_DEFAULT_TRACE_DIR} — the same variable ctx-distillery-studio reads)")
     d.add_argument("--claude-home", default=None,
                    help="override ~/.claude (a non-default install; also what keeps the tests hermetic)")
+    d.add_argument("--include-subagents", action="store_true",
+                   help="also distil this project's SUBAGENT transcripts "
+                        "(<session-id>/subagents/**/agent-*.jsonl), each as its own labelled "
+                        "entry. Off by default: it renumbers every transcript index and ships "
+                        "substantially more text to the model, so it is an explicit act")
     d.add_argument("--json", action="store_true", help="emit the plan as JSON instead of text")
     d.set_defaults(func=_cmd_distill)
 

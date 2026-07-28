@@ -4,7 +4,8 @@ here are fine (unlike `test_app.py`) because `to_event` is a pure function over 
 shapes already pinned by `rlm_kit`'s own trace/v1 contract — no `TraceRecorder` round trip is needed
 to exercise its branches."""
 
-from ctx_distillery_studio.mapper import _scalar_fields, to_event
+import pytest
+from ctx_distillery_studio.mapper import _scalar_fields, to_event, transcript_composition
 
 
 def test_run_start_carries_transcripts_memory_artifacts_and_a_rubric_hint():
@@ -32,6 +33,55 @@ def test_run_start_rubric_hint_empty_when_absent():
     ev = to_event({"type": "run_start", "payload": {"meta": {}}})
     assert ev["data"]["rubric"] == {"categories": [], "criteria": 0}
     assert ev["data"]["transcripts"] is None and ev["data"]["memory_artifacts"] is None
+
+
+def test_run_start_carries_the_transcript_COMPOSITION_when_the_trace_has_one():
+    """A bare `transcripts=43` cannot say what those entries were, and a jump from 1 to 43 because
+    subagent transcripts were included is otherwise silent semantic drift in the feed."""
+    ev = to_event(
+        {
+            "type": "run_start",
+            "payload": {
+                "meta": {
+                    "transcripts": 3,
+                    "transcript_index": [
+                        {"kind": "session", "id": "s1", "session": "s1", "parent": "session:s1"},
+                        {"kind": "subagent", "id": "a1", "session": "s1", "parent": "session:s1"},
+                        {"kind": "subagent", "id": "a2", "session": "s1", "parent": "workflow:wf_1"},
+                    ],
+                }
+            },
+        }
+    )
+    assert ev["data"]["transcripts"] == 3
+    assert ev["data"]["sessions"] == 1 and ev["data"]["subagents"] == 2
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {},                                              # an OLD trace: no identity list at all
+        {"transcript_index": "nope"},                    # a non-LIST
+        {"transcript_index": {"kind": "session"}},       # a dict, not a list
+        {"transcript_index": None},
+        "not a dict at all",
+    ],
+)
+def test_an_absent_or_malformed_identity_list_degrades_to_None_never_to_zero(meta):
+    """Both halves matter and they are different failures. ABSENT is an old trace; MALFORMED is a
+    corrupted or foreign one, which invariant 10 says must degrade rather than 500 the endpoint.
+    Neither may render `sessions=0 subagents=0` — that is a positive claim the trace never made.
+    """
+    assert transcript_composition(meta) == {"sessions": None, "subagents": None}
+
+
+def test_a_non_dict_ELEMENT_inside_the_identity_list_is_filtered_not_fatal():
+    """The per-element guard, the same shape `trace_io.dict_events` applies one level up: a
+    `.get(...)` on `42` is an `AttributeError`, i.e. a genuine 500 out of a replay endpoint."""
+    meta = {"transcript_index": [
+        42, None, ["x"], {"kind": "session"}, {"kind": "subagent"}, {"no": "kind"},
+    ]}
+    assert transcript_composition(meta) == {"sessions": 1, "subagents": 1}
 
 
 def test_main_step_is_a_plan_step_carrying_the_planners_own_reasoning():

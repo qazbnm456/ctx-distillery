@@ -88,6 +88,36 @@ def _ev(name: str, data: dict) -> dict[str, Any]:
     return {"event": name, "data": data}
 
 
+def transcript_composition(meta: Any) -> dict[str, int | None]:
+    """`{"sessions": a, "subagents": b}` from `run_start.meta["transcript_index"]`, or Nones.
+
+    THE one implementation (`CLAUDE.md` invariant 11): `iterations._initial` imports this rather
+    than keeping a second copy, because the guard is the interesting part and two copies of a guard
+    is exactly how one of them drifts.
+
+    A bare `transcripts=<n>` cannot say what those entries WERE, and once subagent transcripts can
+    be ingested a jump from 1 to 43 is silent semantic drift. The identity list added by
+    `ctx_distillery.adapters.base.TranscriptId` is what makes the composition answerable.
+
+    **Absent and MALFORMED both degrade to None, never to zero.** An old trace simply has no
+    `transcript_index` key; a corrupted or foreign one can carry anything at all there. Reporting
+    `sessions=0 subagents=0` for either would be a positive claim the trace never made — and
+    invariant 10 requires this member to degrade rather than 500 on a malformed trace, so the guard
+    is `isinstance(v, list)` PLUS a per-element `isinstance(e, dict)` filter, the same shape
+    `trace_io.dict_events` applies one level up.
+    """
+    if not isinstance(meta, dict):
+        return {"sessions": None, "subagents": None}
+    index = meta.get("transcript_index")
+    if not isinstance(index, list):
+        return {"sessions": None, "subagents": None}
+    kinds = [entry.get("kind") for entry in index if isinstance(entry, dict)]
+    return {
+        "sessions": sum(1 for kind in kinds if kind == "session"),
+        "subagents": sum(1 for kind in kinds if kind == "subagent"),
+    }
+
+
 def to_event(trace_event: dict) -> dict[str, Any] | None:
     """Return `{"event": <name>, "data": {...}}` for a surfaced trace event, else None."""
     t = trace_event.get("type")
@@ -106,6 +136,7 @@ def to_event(trace_event: dict) -> dict[str, Any] | None:
             "distill.run.created",
             {
                 "transcripts": meta.get("transcripts"),
+                **transcript_composition(meta),
                 "memory_artifacts": meta.get("memory_artifacts"),
                 "rubric": {
                     "categories": sorted({c.get("category") for c in rubric if c.get("category")}),

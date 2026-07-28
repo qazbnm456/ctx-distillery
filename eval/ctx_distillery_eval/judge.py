@@ -10,6 +10,15 @@ docstrings — "never the body"), so scoring against them would score an EMPTY s
 degraded one. The judge therefore takes the transcript text(s) as an explicit, MANDATORY argument
 alongside the rendered plan — there is no trace-only fallback path, here or in the CLI.
 
+**`PROMPT_VERSION` pins the PROMPT, never the INPUT, and the difference matters now that the same
+plan can be judged against two different transcript SETS.** Two scorecards carrying the same
+`prompt_version` are comparable only if their rows' inputs came from the same mode — main-thread
+sessions only, or sessions plus their subagent transcripts — and the TRACE is what says so, per row,
+via `run_start.meta["transcript_index"]` (an ordered `{kind, id, session, parent}` list; count the
+kinds). That is deliberately not asserted by a constant here: input provenance belongs where it can
+be CHECKED rather than claimed, and folding it into `PROMPT_VERSION` would make one constant mean
+two things and destroy its usefulness for the thing it does mean.
+
 Rubric-free: the judge prompt asks artifact-framed questions directly (`JUDGE_QUESTIONS` below) — it
 never imports or references `rlm_kit.rubric` / `ctx_distillery.rubric`, and never sees a criterion's
 deterministic `observed` facts. This keeps the judge a genuinely independent, artifact-level read,
@@ -98,7 +107,36 @@ from .schema import EVAL_CATEGORIES, EvalScore
 #: named this exact change as the thing that would have to bump the constant, so it does. Note that a
 #: run with NO reference renders a prompt byte-identical to v1's — the version still bumps anyway,
 #: because a scorecard cannot say "v1 for some rows, v2 for others" and provenance is per-report.
-PROMPT_VERSION = "atlas-ctxd-eval-v2"
+#:
+#: **v2 -> v3: the length caps** (`JUDGE_MAX_*` below). Squarely inside this constant's contract —
+#: it is a `build_prompt` ASSEMBLY change. Note what does NOT bump it: feeding the judge a different
+#: SET of transcripts (subagent transcripts included, say) changes no line of the prompt's own text,
+#: and bumping for an input change would make the constant mean two things at once and destroy its
+#: usefulness for the thing it does mean. That comparability belongs per-row, in the trace — see
+#: this module's docstring.
+PROMPT_VERSION = "atlas-ctxd-eval-v3"
+
+#: Per-ENTRY, TOTAL and PLAN character budgets for `build_prompt`. They exist because the judge was
+#: uncapped end to end, and that already failed today, without any feature attached: a real
+#: cve-reverser run is a ~10.6 M-character prompt from the transcripts alone. It does not even fail
+#: cleanly — an over-length prompt raises from the ENDPOINT, and `rlm_kit/tools/model.py` is explicit
+#: that an endpoint error is infra flakiness and must NOT trip the breaker, so `make_model_tool`'s
+#: `max_consecutive_invalid` never fires and a batch burns a full retry cycle per row returning
+#: nothing. Hence: cap BEFORE the call, never catch the failure after it.
+#:
+#: The numbers are a budget CHOICE, not a measurement: worst case here is ~280 K characters (~70 K
+#: tokens), which leaves real headroom inside a 128 K-token context for the system prompt and the
+#: reply. Raise them for a longer-context judge; they are recorded in the scorecard footer because a
+#: cap is prompt-affecting provenance.
+JUDGE_MAX_TRANSCRIPT_CHARS = 60_000
+JUDGE_MAX_TOTAL_CHARS = 240_000
+#: `build_prompt`'s FIRST argument is equally uncapped, and it is `render_plan` output over a plan
+#: whose candidate count and drafted-body sizes are both model-controlled. Capping only the
+#: transcripts would close the instance and leave the surface open.
+JUDGE_MAX_PLAN_CHARS = 40_000
+#: Below this much remaining budget an entry becomes a STUB rather than a sliver — a 200-character
+#: head+tail of a 2 MB transcript tells a judge nothing and still costs a section header.
+_MIN_EXCERPT_CHARS = 2_000
 
 #: The artifact-framed question each category asks the judge — kept as DATA (not just prose in a
 #: docstring) so `build_prompt` renders this exact wording rather than a paraphrase, and so the one
@@ -155,6 +193,42 @@ OUTPUT_CONTRACT = (
 )
 
 
+def _elide(text: str, limit: int) -> str:
+    """`text`, or its head+tail with a VISIBLE `... (N characters omitted) ...` marker between them.
+
+    Deliberately the same shape as dspy's own `REPLEntry.format_output`, so the judge sees the same
+    elision convention the planner does — and so an elision can never be mistaken for the end of the
+    input, which is the failure a silent truncation produces.
+    """
+    if len(text) <= limit:
+        return text
+    head = limit // 2
+    tail = limit - head
+    return f"{text[:head]}\n... ({len(text) - limit} characters omitted) ...\n{text[len(text) - tail:]}"
+
+
+def _excerpts(transcript_texts: list[str]) -> str:
+    """The `=== TRANSCRIPT(S) ===` body: per-entry elision, a total budget, index-preserving stubs.
+
+    **The stub is mandatory, not an optimisation.** `--- transcript {i} ---` labels are load-bearing
+    (they are how the judge refers to a transcript, and how a reader pairs its verdict back to an
+    entry), so an entry past the budget must still appear, as
+    `--- transcript {i} (elided: N chars) ---`. Dropping entries instead would renumber every entry
+    after it, which is worse than showing less.
+    """
+    parts: list[str] = []
+    budget = JUDGE_MAX_TOTAL_CHARS
+    for index, text in enumerate(transcript_texts):
+        allowance = min(JUDGE_MAX_TRANSCRIPT_CHARS, budget)
+        if len(text) > allowance and allowance < _MIN_EXCERPT_CHARS:
+            parts.append(f"--- transcript {index} (elided: {len(text)} chars) ---")
+            continue
+        body = _elide(text, allowance)
+        budget -= min(len(text), allowance)
+        parts.append(f"--- transcript {index} ---\n{body}")
+    return "\n\n".join(parts) or "(none supplied)"
+
+
 def build_prompt(plan_text: str, transcript_texts: list[str], reference: str = "") -> str:
     """Render the rubric-free judge prompt from the plan, the transcript text(s), and any reference.
 
@@ -182,10 +256,14 @@ def build_prompt(plan_text: str, transcript_texts: list[str], reference: str = "
     is defensive only: `cli._read_transcripts` refuses an empty or whitespace-only transcript loudly,
     so the CLI cannot reach this branch — but `build_prompt` is a public function and a caller
     reaching it directly should see the absence stated, not a section that merely looks truncated.
+
+    **v3 caps every body it assembles** — `JUDGE_MAX_PLAN_CHARS` on the plan, and per-entry plus
+    total budgets on the transcripts, with index-preserving stubs past the budget (see `_excerpts`).
+    An input under every cap renders BYTE-IDENTICALLY to v2, which is what keeps the caps a
+    provenance change rather than a rewrite.
     """
-    excerpts = "\n\n".join(
-        f"--- transcript {i} ---\n{text}" for i, text in enumerate(transcript_texts)
-    ) or "(none supplied)"
+    excerpts = _excerpts(transcript_texts)
+    plan_text = _elide(plan_text, JUDGE_MAX_PLAN_CHARS)
     questions = "\n".join(f"- {category}: {question}" for category, question in JUDGE_QUESTIONS.items())
     # Whitespace-only is treated as absent: a taskset entry with `"reference": "  "` has no ground
     # truth in it, and rendering the header over a blank body would read as a truncated section.

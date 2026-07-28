@@ -18,7 +18,7 @@ dspy = pytest.importorskip("dspy")
 import rlm_kit.runtime as rt
 from rlm_kit import RLMConfig
 from rlm_kit.testing import ScriptedInterpreter, scripted_lm
-from rlm_kit.trace import EVENT_TOOL_CALL, load_events
+from rlm_kit.trace import EVENT_RUN_START, EVENT_TOOL_CALL, load_events
 
 from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
 from ctx_distillery.session import (
@@ -29,7 +29,16 @@ from ctx_distillery.session import (
     run_distillation,
     run_distillation_artifacts,
 )
-from ctx_distillery.task import DistillCandidate, DistillPlan
+from ctx_distillery.task import PLANNER_PROMPT_VERSION, DistillCandidate, DistillPlan
+
+from .test_adapters_claude_code import (
+    NESTED_META,
+    WORKFLOW_RUN,
+    _event,
+    _sub_event,
+    seed_project,
+    write_subagent,
+)
 
 _SECRET = "sk-abcdefghijklmnopqrstuvwx1234567890"
 
@@ -430,6 +439,135 @@ def test_run_distillation_artifacts_reports_a_generated_run_id(memory_dir, tmp_p
     )
     assert artifacts.run_id
     assert {e.get("run_id") for e in artifacts.events} == {artifacts.run_id}
+
+
+# -- subagent ingestion: redaction, and the trace's identity list -------------------------------
+
+
+def _subagent_project(tmp_path, claude_home, subagent_events):
+    """A project whose ONE session has one NESTED subagent transcript beside it."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    storage = seed_project(claude_home, project_dir, {"sess-1": [_event("user", "the main thread")]})
+    write_subagent(
+        storage / "sess-1" / "subagents" / "workflows" / WORKFLOW_RUN,
+        "nested1",
+        NESTED_META,
+        subagent_events,
+    )
+    return project_dir
+
+
+def test_a_secret_planted_in_a_NESTED_subagent_never_reaches_the_artifacts(tmp_path, claude_home):
+    """Invariant 3, end to end, through the discovery path a flat glob could not even reach.
+
+    This is the structural argument made executable: subagent text arrives as ordinary
+    `RawSession.transcripts` entries, so it goes through the ONE `redact()` call
+    `run_distillation_artifacts` already makes — before the task is constructed and before
+    `read_transcript_chunk`'s closure is built. There is no second redaction site, and adding one is
+    what putting the text on any other field would have required.
+    """
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    project_dir = _subagent_project(
+        tmp_path, claude_home, [_sub_event("user", "the deploy key is " + _SECRET)]
+    )
+    adapter = ClaudeCodeAdapter.for_project(project_dir, home=claude_home, include_subagents=True)
+
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+
+    assert len(artifacts.transcripts) == 2                      # the session, then its subagent
+    assert _SECRET not in "\n".join(artifacts.transcripts)
+    assert "[REDACTED:api_key]" in artifacts.transcripts[1]
+    # …and the header is inside the same redacted string, which is why `description` (model-authored
+    # text) can live there at all.
+    assert artifacts.transcripts[1].startswith(f"[1] subagent nested1 parent=workflow:{WORKFLOW_RUN}")
+    assert _SECRET not in json.dumps(artifacts.events)
+
+
+def test_run_meta_carries_the_ordered_transcript_identity_list(tmp_path, claude_home):
+    """`transcript_index` round-trips into the trace: kinds, ids and parents, in entry order.
+
+    This is what makes a positional index answerable after the fact — and it is why a boolean
+    `include_subagents` flag would not have closed the hole: it asserts the MODE without making the
+    INDEX mean anything, and `transcript_index` is load-bearing in three separate places.
+    """
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    project_dir = _subagent_project(tmp_path, claude_home, [_sub_event("user", "sub body")])
+    adapter = ClaudeCodeAdapter.for_project(project_dir, home=claude_home, include_subagents=True)
+
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["transcripts"] == 2
+    assert meta["transcript_index"] == [
+        {"kind": "session", "id": "sess-1", "session": "sess-1", "parent": "session:sess-1"},
+        {"kind": "subagent", "id": "nested1", "session": "sess-1",
+         "parent": f"workflow:{WORKFLOW_RUN}"},
+    ]
+    # The identity list carries IDENTIFIERS ONLY — no drafted body, no description, no path.
+    assert all(set(entry) == {"kind", "id", "session", "parent"} for entry in meta["transcript_index"])
+
+
+def test_the_transcript_index_stamp_is_OMITTED_when_the_adapter_reports_no_identities(
+    memory_dir, tmp_path
+):
+    """CONDITIONAL, and the reason is that an unconditional stamp makes `[]` mean two things.
+
+    An adapter handed plain strings names no entries, so the key is ABSENT — not `[]` beside a
+    `transcripts` count of 1, which a consumer told to render "None when absent" would faithfully
+    render as `sessions=0 subagents=0`. Present-and-empty is not absent.
+    """
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    adapter = ClaudeCodeAdapter(memory_dir, transcripts=["a plain string"])
+
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert "transcript_index" not in meta
+    assert meta["transcripts"] == 1
+
+
+def test_the_driver_stamps_the_planner_prompt_version(memory_dir, tmp_path):
+    """Stamped by the DRIVER, not by a CLI: `cli._cmd_distill`, `eval`'s `run` and any script each
+    build their own `meta`, and this is the one place all of them pass through. Without it two
+    traces either side of an instruction change are indistinguishable on the axis that dominates
+    plan quality."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            ClaudeCodeAdapter(memory_dir, transcripts=["t"]),
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["planner_prompt_version"] == PLANNER_PROMPT_VERSION
 
 
 def test_run_distillation_is_a_thin_wrapper_returning_exactly_the_same_plan(memory_dir, tmp_path):

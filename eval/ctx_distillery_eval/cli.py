@@ -65,7 +65,16 @@ from pathlib import Path
 
 from ctx_distillery.trace_io import load_trace
 
-from .judge import PROMPT_VERSION, EvalJudgeConfig, Judge, StubJudge, make_eval_judge
+from .judge import (
+    JUDGE_MAX_PLAN_CHARS,
+    JUDGE_MAX_TOTAL_CHARS,
+    JUDGE_MAX_TRANSCRIPT_CHARS,
+    PROMPT_VERSION,
+    EvalJudgeConfig,
+    Judge,
+    StubJudge,
+    make_eval_judge,
+)
 from .schema import EvalReport, EvalRow
 from .score import aggregate, score_run
 from .taskset import EvalTask, collect_tasks, demo_taskset, load_taskset
@@ -169,6 +178,12 @@ def render_scorecard(report: EvalReport) -> str:
     its four columns as `--` followed by `unscored: <reason>`, and is absent from the means. It is
     never rendered as a 0, and it is never silently dropped from the listing either: a batch where
     the judge died must LOOK like one, both per-row and in the `n=… (… unscored)` footer.
+
+    The footer also states the prompt's LENGTH CAPS, because a cap is prompt-affecting provenance: a
+    plan or a transcript that was elided was not fully read, and a reader comparing two scorecards
+    needs to see that the budgets were the same. They ride alongside `prompt=`, i.e. only when a
+    prompt was actually rendered — the stub judge never called `build_prompt`, so claiming its caps
+    would claim a provenance it does not have.
     """
     header = "run_id".ljust(24) + "  TF    TA    TG    PA   notes"
     lines = [header]
@@ -193,7 +208,13 @@ def render_scorecard(report: EvalReport) -> str:
         lines.append("(no runs scored)")
     lines.append(
         f"n={report.n} ({report.n_unscored} unscored)  judge={report.judge_model or '?'}"
-        + (f"  prompt={report.prompt_version}" if report.prompt_version else "")
+        + (
+            f"  prompt={report.prompt_version}"
+            f"  caps=plan:{JUDGE_MAX_PLAN_CHARS}/transcript:{JUDGE_MAX_TRANSCRIPT_CHARS}"
+            f"/total:{JUDGE_MAX_TOTAL_CHARS}"
+            if report.prompt_version
+            else ""
+        )
     )
     return "\n".join(lines)
 

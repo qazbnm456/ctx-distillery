@@ -155,8 +155,14 @@ and how matters more than that they are:
 2. **`judge.build_prompt` had no `{reference}` slot.** It has one now, as a third positional
    argument, and `PROMPT_VERSION` bumped to `atlas-ctxd-eval-v2` for exactly the reason the constant
    exists. The section renders **only when there is a reference**, so a `score` run without a taskset
-   still produces the byte-identical v1 prompt (the divergence from the siblings' unconditional
+   produced the byte-identical v1 prompt (the divergence from the siblings' unconditional
    `"(no reference provided; …)"` fallback is argued in `judge.py`).
+
+   `PROMPT_VERSION` is **`atlas-ctxd-eval-v3`** as of the subagent-distillation change, which added
+   per-excerpt and total CHARACTER CAPS to prompt assembly. So the byte-identity above now holds
+   only below those caps — which is the honest statement, and why the bump happened: a capped prompt
+   is a different prompt, and scores either side of it are not comparable. `judge.py`'s own
+   docstring carries the same qualification.
 3. **`run_distillation` returned an `AssembledPlan`, not artifacts.** The fix was ADDITIVE:
    `ctx_distillery.session.run_distillation_artifacts` returns a `DistillArtifacts` carrying the
    plan plus `events` / `run_id` / `trace_path` / the **redacted** transcripts / the memory index,

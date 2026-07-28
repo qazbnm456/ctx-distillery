@@ -301,6 +301,65 @@ def test_min_read_and_draft_step_are_none_when_no_such_calls_exist():
     assert facts["min_draft_step"] is None
 
 
+# -- trace_facts: transcript COVERAGE (n_transcripts / n_transcripts_read) ----------------------
+
+
+def _read(index, *, step_id=0):
+    """A `read_transcript_chunk` call whose ARGS carry the index it read — the audit record."""
+    event = _tool_call("read_transcript_chunk", step_id=step_id)
+    event["payload"]["args"] = {"transcript_index": index, "offset": 0, "limit": 4000}
+    return event
+
+
+def _run_start(meta):
+    return {"type": EVENT_RUN_START, "step_id": 0, "payload": {"meta": meta}}
+
+
+def test_coverage_facts_count_the_input_and_the_DISTINCT_entries_actually_read():
+    """The blind spot this closes: a run that read 2 of 414 transcripts and a run that read 2 of 2
+    produced IDENTICAL facts. With subagent ingestion multiplying entries by up to 18.5x, "how much
+    of the input did this plan actually look at" stopped being answerable from the rubric at all.
+
+    Both are deterministic counts off the trace, and neither decides met/unmet — repeated reads of
+    ONE entry are one entry of coverage, which is why the count is over the distinct set.
+    """
+    events = [
+        _run_start({"transcripts": 43}),
+        _read(0, step_id=1),
+        _read(0, step_id=2),          # the same entry again — still one entry covered
+        _read(7, step_id=3),
+        _result(_plan_dict()),
+    ]
+    facts = trace_facts(events)
+    assert facts["n_transcripts"] == 43
+    assert facts["n_transcripts_read"] == 2
+
+
+def test_coverage_facts_degrade_rather_than_raise_on_an_old_or_malformed_trace():
+    """`trace_facts` is served over HTTP by the studio and run over a whole glob by the eval member,
+    so a trace with no `run_start`, a non-dict `meta`, a non-int count, or junk in a tool's `args`
+    must degrade — never raise, and never invent a number."""
+    assert trace_facts([_result(_plan_dict())])["n_transcripts"] is None
+    assert trace_facts([_run_start("nope"), _result(_plan_dict())])["n_transcripts"] is None
+    assert trace_facts([_run_start({"transcripts": "two"})])["n_transcripts"] is None
+    # `True` is an `int` in Python; a bool count is not a count.
+    assert trace_facts([_run_start({"transcripts": True})])["n_transcripts"] is None
+
+    junk = [_read("/etc/passwd", step_id=1), _read(None, step_id=2), _read(True, step_id=3)]
+    assert trace_facts([*junk, _result(_plan_dict())])["n_transcripts_read"] == 0
+
+
+def test_the_coverage_facts_are_deliberately_absent_from_every_criterion_lens():
+    """They are facts about the run's INPUT, not evidence for any of the four criteria AS WORDED —
+    TA asks whether evidence-gathering preceded drafting, not how much of the corpus was covered.
+    Folding a new fact into an existing criterion would change what that criterion's `observed`
+    claims without changing its description; wiring these up means writing a criterion for them.
+    """
+    lensed = {key for keys in _CATEGORY_LENS.values() for key in keys}
+    assert "n_transcripts" not in lensed and "n_transcripts_read" not in lensed
+    assert {"n_transcripts", "n_transcripts_read"} <= set(trace_facts([_result(_plan_dict())]))
+
+
 # -- non-dict trace lines: every rubric entry point degrades instead of raising ----------------
 
 

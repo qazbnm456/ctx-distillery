@@ -37,6 +37,7 @@ from .tools.transcript_reader import make_read_transcript_chunk_tool
 #: in this repo and in both workspace members, resolves unchanged.
 __all__ = [
     "PINNED_INTERPRETER",
+    "PLANNER_PROMPT_VERSION",
     "DistillAction",
     "DistillCandidate",
     "DistillPlan",
@@ -45,6 +46,19 @@ __all__ = [
 
 #: The sandbox this task ALWAYS runs in — see `_forced_config` and CLAUDE.md invariant (1).
 PINNED_INTERPRETER = "pyodide"
+
+#: Bump whenever `_INSTRUCTIONS` changes in a way that could move plan quality — the same contract
+#: the eval member's `judge.py::PROMPT_VERSION` has for the JUDGE prompt, on the side that
+#: had no counterpart at all. (Named without its package, deliberately: `eval/`'s boundary test
+#: scans this package's source TEXT for that package's name, prose included.) Without it, two
+#: traces either side of an instruction change are
+#: indistinguishable on the axis that dominates plan quality; `session.run_distillation_artifacts`
+#: stamps it into every run's `run_meta`, and `tests/test_task.py` pins the literal so the constant
+#: cannot drift silently from the text it names.
+#:
+#: v1 -> v2: the subagent paragraphs below (findings ARE evidence / parent-and-subagent agreement is
+#: an echo / contradiction is a signal), plus the index-line orientation paragraph.
+PLANNER_PROMPT_VERSION = "ctxd-planner-v2"
 
 
 _INSTRUCTIONS = """\
@@ -63,6 +77,29 @@ during a session is a SKILL candidate. These are two distinct target shapes, not
 When multiple transcripts independently confirm the same thing, say so explicitly rather than
 silently deduplicating. When two transcripts disagree, flag it as a conflict for human review
 rather than picking a side.
+
+Some runs include SUBAGENT transcripts alongside the session transcripts. When they do, every
+entry begins with a short index line saying which it is: `[i] subagent <id> parent=... type=...
+depth=...` versus `[i] session <id>`, followed by a `session=` line naming what it belongs to.
+
+A subagent's FINDINGS are ordinary evidence and you should use them exactly as you would a
+session's: what it read, what it measured, what it concluded, what it decided. Most of the real
+work in a session is often inside its subagents, and ignoring them would distil the coordination
+layer and skip the content.
+
+What a subagent is NOT is an INDEPENDENT witness to its own parent. Its task came from that parent,
+so parent-and-subagent agreement is an echo, not corroboration — never count it as "multiple
+transcripts independently confirm". Two entries only corroborate each other when neither descends
+from the other: compare their `session=` values, and for entries in the same session compare
+`parent=`. Subagents that share a parent are siblings, not independent witnesses either.
+
+A subagent CONTRADICTING its parent, on the other hand, is a strong signal and worth flagging as a
+conflict — the derivation makes disagreement harder to produce, not easier.
+
+When entries carry that index line, orient yourself first with
+`print("\\n".join(t.split("\\n")[0] for t in transcripts))`, and give that scan its OWN REPL cell —
+one cell's output is capped, so printing anything else beside it eats the same budget. If the
+output comes back truncated, page it (`transcripts[:200]`, then `transcripts[200:400]`, ...).
 
 For a `prune` candidate you MUST set `key_fields["target_path"]` to the exact `path` of the
 existing artifact you are proposing to prune, copied verbatim from `list_memory_files()`. That is

@@ -12,6 +12,110 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **Subagent-transcript distillation, OPT-IN** (`ClaudeCodeAdapter.for_project(...,
+  include_subagents=True)` / `ctx-distillery distill --include-subagents`). The corpus this was
+  designed against is 875 subagent transcripts across 11 projects; three of the findings below are
+  corrections to things this project previously stated as fact.
+
+  1. **Discovery is a RECURSIVE walk under `<project storage>/<session-id>/subagents/`, filtered to
+     `agent-*.jsonl`** (`adapters/claude_code.py::subagent_files` -> `SubagentTranscript`). Both
+     halves are the SDK's own (claude-agent-sdk 0.2.116, `_internal/sessions.py::_collect_agent_files`),
+     and both are load-bearing: a FLAT glob — what this project's docs described — misses the
+     `subagents/workflows/<run-id>/` files, **34% of the corpus**; and `rglob("*.jsonl")` (the shape
+     the SDK's store-MIRRORING helper uses) ingests the 9 `journal.jsonl` run-journals as if they
+     were transcripts. The first-party specification existed on this machine the whole time; a
+     `grep -rn subagents site-packages/` would have found it. **Look for a first-party spec before
+     treating local observation as the ceiling.**
+  2. **Containment is anchored on the STORAGE directory, with an exact-parent hop at BOTH levels**
+     (`session_dir.resolve().parent == storage`, then `subagents.resolve().parent == session_dir`),
+     and a prefix test only for the depth that is legitimately unbounded. The obvious form — resolve
+     `subagents/` and `is_relative_to` it — was written, argued for ("both operands are resolved, so
+     nothing can fool the prefix test") and REPRODUCED FAILING: resolving the root makes it move WITH
+     the symlink. Three arrangements escaped into LM context (`subagents/` symlinked outside, the
+     session directory symlinked outside, and `subagents/` symlinked to the storage directory's own
+     `memory/` — the last defeats any check phrased as "did we stay under the project's directory"),
+     and all three are now fixture tests that go red against that form. Un-resolving the root instead
+     silently returns ZERO files on macOS (`/var` -> `/private/var`); both sides of each `==` are
+     resolved.
+  3. **The sidecar degrades per FIELD, never per file.** `agentType` + `spawnDepth` are the only
+     REQUIRED keys (874/874); `description` and `toolUseId` are present on the 575 flat files and
+     NONE of the 299 nested ones, and `parentAgentId` on only the 44 flat files at depth > 1. The
+     parent link therefore has THREE cases tested PATH-FIRST — `workflow:<run-id>` / `agent:<id>` /
+     `session:<id>` — because "depth 1 means the session owns it" is confidently wrong on a third of
+     the corpus.
+  4. **`render_transcript_events` / `render_transcript_file` gained `include_sidechain: bool = False`**,
+     and the main-thread rendering is BYTE-IDENTICAL with the default. `isSidechain` is the field
+     that separates the two STORES, not noise: `False` on 0 of 57,928 main-thread user/assistant
+     events, `True` on 72,126 of 72,126 subagent ones — so the shipped renderer returned exactly 0
+     characters on all 874 subagent files. The filter is turned OFF explicitly rather than deleted.
+  5. **Each subagent becomes its OWN `transcripts[]` entry with a 3-line header** (index line / full
+     identity + SDK-shaped `subpath` / `task:`), ordered session-then-its-own-subagents. Separate
+     entries make redaction, auditability and judgeability STRUCTURAL — the text lands in the one
+     list `run_distillation_artifacts` redacts, `read_transcript_chunk` closes over, and `eval/`'s
+     judge reads. A new `RawSession` TEXT field would have bypassed all three (invariant 11's failure
+     mode, for the third time); folding into the parent's text would blind the audit trail and make
+     the largest entry 7 M characters, i.e. 351 sequential chunk reads against a 30-turn budget.
+  6. **Orientation is an index line, bounded by `INDEX_LINE_MAX = 86`** — measured over the real
+     corpus (subagent lines 65..86, median 76; session lines 22) — with the implied entry ceiling
+     (`CD_MAX_OUTPUT_CHARS // (INDEX_LINE_MAX + 1)` = 459 by default) asserted from the SAME constant
+     in the same test, and a `cli` warning above it. A `transcript_manifest` signature input was
+     rejected: it would get the same fixed 1000-character `REPLVariable` preview, break every direct
+     caller of `arun` (dspy raises on a missing input field), and duplicate the headers.
+  7. **`RawSession.transcript_ids` + a CONDITIONAL `run_meta["transcript_index"]` stamp.** An ordered
+     `{kind, id, session, parent}` list — four `str` fields, all derived from filenames, nothing
+     model-authored — so a reviewer holding a trace can finally answer "what was transcript 7?".
+     Nothing anywhere mapped that positional index to a file before. The stamp is conditional
+     because an unconditional one makes `[]` mean two different things ("no identities reported" vs
+     "no transcripts"), and every non-Claude-Code adapter would write it.
+  8. **`PLANNER_PROMPT_VERSION = "ctxd-planner-v2"`** (`task.py`), stamped by the DRIVER into every
+     run's `run_meta`. The instructions gained the findings-vs-agreement distinction — a subagent's
+     FINDINGS are ordinary evidence, its AGREEMENT with its parent is an echo and never "multiple
+     transcripts independently confirm", and a CONTRADICTION is a strong signal — plus the index-scan
+     paragraph. `eval/`'s `PROMPT_VERSION` deliberately does NOT bump for the input change.
+  9. **`eval/`'s judge was uncapped end to end, and that already failed WITHOUT this feature**: a
+     cve-reverser run is a ~10.6 M-character prompt main-only. It fails as an ENDPOINT error, which
+     `make_model_tool` is explicit must not trip the breaker — so a batch burns a full retry cycle
+     per row returning nothing. `build_prompt` now caps the plan and each transcript and the total,
+     with index-preserving `--- transcript {i} (elided: N chars) ---` stubs (dropping entries would
+     renumber the labels), applied BEFORE the call. `PROMPT_VERSION` -> `atlas-ctxd-eval-v3`, and the
+     caps ride in the scorecard footer as provenance.
+  10. **`rubric.trace_facts` gained `n_transcripts` / `n_transcripts_read`**, closing a blind spot
+      that predates this feature and that it makes worse: a run that read 2 of 414 transcripts and
+      one that read 2 of 2 produced identical ATLAS facts. Both are deterministic trace-derived
+      counts, neither decides met/unmet. This widens the module's sourcing to THREE places
+      (`assemble()`, `tool_call` events, and now `run_start.meta`), stated rather than left to drift.
+  11. **`studio/` renders the COMPOSITION** (`sessions=a subagents=b`) beside the count, in the feed
+      and the Trajectory drawer, through ONE shape-guarded reader (`mapper.transcript_composition`,
+      imported by `iterations.py`, not copied). Absent AND malformed both degrade to `None`, never to
+      zero — an old trace carries no identity list, and reporting `0/0` would be a claim it never
+      made.
+
+  Default OFF, on two decisive grounds: `transcripts` is positional, so flipping it silently
+  renumbers every entry and `read_transcript_chunk(3, …)` names a different conversation before and
+  after; and redaction is pattern-based and admits false negatives by construction, so shipping ~1.5x
+  more text — and up to 18.5x more ENTRIES — to a remote model is an operator's explicit act. Not a
+  `CD_*` env var: that surface is models and budgets, this is input selection, and a CLI flag is
+  visible in the shell history that produced the trace.
+
+  **Not built, and named so it is not mistaken for shipped:** the eval scorecard footer does NOT
+  report a row's transcript composition (`transcripts=<n> (sessions=<a> subagents=<b>)`). It needs
+  `EvalRow`/`EvalReport` fields the design never specified, and it is ill-defined for `score`, whose
+  rows come from a glob of traces each with its own composition. The load-bearing half did land:
+  `judge.py` states that comparability is per-row and the trace is the authority.
+
+- **FIXED — a symlinked `~/.claude` silently yielded ZERO transcripts** (`claude_home`). The helper
+  was `Path.home().resolve() / CLAUDE_DIRNAME`, which resolves the home component and leaves
+  `.claude` itself unresolved; `transcript_files` then compares a RESOLVED session path's parent
+  against that unresolved storage directory, the parents never match, and every session file is
+  filtered out. `storage.is_dir()` is still True, so no "no storage here" branch fires and the run
+  reports nothing found. Anyone who keeps `~/.claude` in a dotfiles repo or on an external volume —
+  a common arrangement — got an empty distillation with no error. Now `(Path.home() /
+  CLAUDE_DIRNAME).resolve()`, with a regression test whose CONTROL is the same content behind a real
+  directory (measured pre-fix: 1 transcript vs 0). Pre-existing, unrelated to subagents, and found
+  only because review asked why `subagent_files`' own `.resolve()` calls could not be mutated into
+  failure — the answer being that its caller had already refused everything. A defence that cannot
+  be made to fail is not necessarily strong; it may just be unreachable.
+
 - **A drafting call's cause is now RECORDED by the source and READ by every consumer, and the two
   places that used to derive it are one shared helper.** rlm-kit `4fcd50b2` added
   `ModelToolResult.cause` (`"ok"` / `"invalid"` / `"endpoint"` / `"circuit_broken"`) and
@@ -1143,11 +1247,15 @@ never applies anything itself.
   label, and `tool_result` a size label whose UNIT depends on ITS OWN content being a string
   (`N chars`) or a list (`N blocks`) — both occur, so neither shape is assumed; an unrecognized block
   type becomes `[unrecognized content block: X]` rather than raising or vanishing. A torn or
-  non-JSON line is skipped, not fatal. `isSidechain` events are skipped as a DEFENSIVE NO-OP, stated
-  accurately: it was `false` on all 1216 real events checked, because subagent messages live in
-  separate `subagents/agent-<id>.jsonl` files and are never inlined — the filter guards a future
-  version that inlines them and is not currently removing "subagent noise". Distilling subagent
-  transcripts is a deferred extension (same file shape, different glob).
+  non-JSON line is skipped, not fatal. `isSidechain` events are skipped BY DEFAULT — this entry used
+  to call that "a DEFENSIVE NO-OP … not currently removing subagent noise" and to describe subagent
+  distillation as "a deferred extension (same file shape, different glob)", and both are CORRECTED
+  IN PLACE here (this section sits under the only version heading in the file, so it is not shipped
+  history to supersede). `isSidechain` is the field that separates the two transcript STORES: `false`
+  on 0 of 57,928 user/assistant events across 883 session files, and `true` on 72,126 of 72,126
+  across 874 subagent files. Reading a subagent transcript therefore needs `include_sidechain=True`
+  explicitly (see the subagent entry at the top of this section), and it is a recursive WALK under
+  `<session-id>/subagents/`, not a different glob.
 - **`list_targets()` now returns `kind="skill"` refs — for BOTH scopes**, closing the previously
   stated gap ("never returns `kind="skill"` yet") at both ends rather than only the global one:
   `~/.claude/skills/*/SKILL.md` as `scope="global"` and `<project_dir>/.claude/skills/*/SKILL.md` as
