@@ -27,6 +27,17 @@
         <div class="hint" id="runs-hint"></div>
       </div>
 
+      <!-- The candidate LIST is the review surface, so it sits above the replay feed and takes the
+           rail's flexible height. It used to be the middle column with every draft expanded inline:
+           10 candidates x a 260px capped draft is ~3,200px of content in a ~900px panel, and reading
+           one meant scrolling the panel to it, then scrolling INSIDE its own box, whereupon the
+           wheel escaped back to the panel and jumped past it. List here, one detail there. -->
+      <div class="panel cand-panel">
+        <div class="panel-label">▾ Candidates <span class="dim" id="cand-count"></span></div>
+        <div class="cand-empty" id="cand-empty">Load a run to see its assembled plan.</div>
+        <div class="cand-list" id="cand-list" role="listbox" aria-label="Plan candidates"></div>
+      </div>
+
       <div class="panel feed-panel">
         <!-- "Replay feed", NOT "Live feed": this studio has no live-drive endpoint, so every row
              here comes from a FINISHED trace re-streamed over SSE. The old label promised a
@@ -36,14 +47,22 @@
       </div>
     </section>
 
-    <section class="panel plan-panel" id="plan-panel">
-      <div class="panel-label">▾ Plan — the money shot: candidate + drafted text, side by side</div>
-      <div class="plan-empty" id="plan-empty">Load a run to see its assembled plan.</div>
-      <div class="plan-list" id="plan-list"></div>
+    <!-- The STAGE: one candidate at a time, the sibling studios' rail -> stage relationship. -->
+    <section class="panel stage-panel" id="plan-panel">
+      <div class="stage-head">
+        <div class="panel-label" id="stage-label">▾ Plan</div>
+        <div class="stage-switch" id="stage-switch" hidden>
+          <button type="button" data-view="entry" class="on">Entry</button>
+          <button type="button" data-view="draft">Draft</button>
+        </div>
+      </div>
+      <div class="plan-empty" id="plan-empty">Load a run, then pick a candidate.</div>
+      <div class="stage-body" id="stage-body"></div>
     </section>
 
-    <aside class="panel rubric-panel" id="rubric-panel">
-      <div class="panel-label">▾ Rubric facts (ATLAS)</div>
+    <!-- The meta column: one module per ATLAS category, matching the sibling studios. It is NOT a
+         `.panel` — each module carries its own frame, and the COLUMN is the scroll track. -->
+    <aside class="meta-col" id="rubric-panel">
       <div class="rubric-empty" id="rubric-empty">—</div>
       <div class="rubric-list" id="rubric-list"></div>
     </aside>
@@ -66,21 +85,36 @@
       <button id="traj-close" class="traj-close" title="Close (Esc)" aria-label="Close">✕</button>
     </header>
     <div class="traj-note" id="traj-note" hidden></div>
+    <!-- WIDTH IS TIME. This strip used to be a 260px side column of equal-height rows, which is
+         where a duration can only ever be text. On the run it was rebuilt against, one of nine
+         calls took 242.6s of 313.4s (84.3%) and the rest took 2-8s each — a fact that a column of
+         identical rows cannot show and a horizontal strip cannot hide.
+         ALWAYS populated: built from `timeline`, which never depends on `turn_index` — that is
+         absent from every entry whenever per_turn_timing is false, i.e. on every offline trace.
+         Grouping tools under turns only would show an empty pane in exactly that case. -->
+    <div class="traj-timeline-wrap">
+      <div class="traj-axis">
+        <span>start</span>
+        <span class="traj-axis-note">width is time · elapsed + gap (planner-think + tool-exec)</span>
+        <span id="traj-axis-end"></span>
+      </div>
+      <div class="traj-timeline" id="traj-timeline" role="list" aria-label="Tool timeline (width is time)"></div>
+    </div>
     <div class="traj-main">
       <nav class="traj-nav" aria-label="Turns">
         <div class="traj-col-label">Turns</div>
+        <!-- Search over a turn's reasoning + code + output. It earns its place here more than in
+             the siblings: a single turn's REPL echo ran 16,038 characters on the run this was
+             built against, so "which turn touched X" is otherwise a manual read of every turn. -->
+        <div class="traj-search-wrap">
+          <input id="traj-search" class="traj-search" type="search" spellcheck="false"
+            placeholder="search turns…" aria-label="Search turn content" />
+          <span id="traj-search-count" class="traj-search-count"></span>
+        </div>
         <div class="traj-col-note">←/→ steps Init ↔ turns</div>
         <div class="traj-steps" id="traj-steps"></div>
       </nav>
       <div class="traj-detail" id="traj-detail"></div>
-      <aside class="traj-side" aria-label="Tool timeline">
-        <div class="traj-col-label">Tool timeline</div>
-        <!-- ALWAYS populated: built from `timeline`, which never depends on `turn_index` — that is
-             absent from every entry whenever per_turn_timing is false, i.e. on every offline
-             trace. Grouping tools under turns only would show an empty pane in exactly that case. -->
-        <div class="traj-col-note">elapsed · gap (planner-think + tool-exec)</div>
-        <div class="traj-timeline" id="traj-timeline"></div>
-      </aside>
     </div>
   </section>
 

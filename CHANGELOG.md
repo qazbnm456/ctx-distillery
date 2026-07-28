@@ -12,7 +12,64 @@ never applies anything itself.
 
 ## [Unreleased]
 
-Nothing yet.
+- **The studio's plan review is now a rail LIST + a middle STAGE, the sibling studios' shape.** The
+  middle column used to render all ten candidates with every drafted body expanded: measured on a
+  real run, **32,091 characters of draft across 10 rows**, each `<pre>` capped at 260px with its own
+  scrollbar, inside a panel that ALSO scrolled. Reading candidate 5 meant scrolling the panel to it,
+  scrolling inside its box, and being thrown to candidate 6 when the wheel escaped. Now: a scannable
+  one-line list in the rail (index · action · name · `⚠`/`◆`), one candidate on the stage with an
+  `Entry | Draft` switch, `↑`/`↓` to step. `key_fields` renders one row per field rather than one
+  `JSON.stringify` line — its longest value is `reason`, a paragraph of model prose, which collapsed
+  the whole object into an unreadable ribbon exactly where a reviewer must read most carefully.
+- **One scroll track per panel, and the affordance that says a track continues.** `.panel` carried
+  `overflow-y:auto` while its inner track did too, so every column had two nested scrollers and the
+  wheel handed off mid-gesture. Panels are boxes now; scrolling belongs to one designated child, and
+  every track carries the siblings' top/bottom `mask-image` fade. The old contract asserting
+  `.candidate-draft` must cap its height and scroll ITSELF was replaced rather than relaxed: it
+  encoded the layout just removed, and it passed against `max-height:none` while constraining
+  nothing. The replacement pins "no nested scroller" and goes red under mutation.
+- **The trajectory timeline encodes DURATION AS WIDTH.** It was a 260px side column of equal-height
+  rows — the one place a duration can only ever be text. On the run this was rebuilt against, **one
+  of nine calls took 242.6s of 313.4s (84.3%)** and the rest took 2-8s: a fact identical rows cannot
+  show and a proportional strip cannot hide. Now a full-width horizontal strip with an axis, segment
+  width = share of the run's wall clock (floored at 108px, scrolling horizontally rather than
+  squeezing), a per-tool-family hue on each segment's top edge, and clickable `T<n> ▸` markers at
+  turn boundaries. Plus a **search** over each turn's `reasoning + code + output` — one turn's REPL
+  echo ran 16,038 characters, so "which turn touched X" was otherwise a manual read of every turn.
+  A miss dims rather than being filtered out, because which turn matched is only meaningful against
+  the run's sequence.
+- **The meta column stopped rendering tool-call counts as conclusions about the planner.** Two
+  headlines said more than their facts measure, the same mistake twice:
+  * TA read `draft -> read`. Both numbers are step ids of TOOL CALLS, and the planner also receives
+    `transcripts`/`memory_index` as REPL VARIABLES. A real run read all three transcripts IN FULL at
+    turns 0-2 by printing the variable and escalating to the sub-LM, then drafted at turn 3 and
+    called `list_memory_files` at step 9 — tool-wise draft-first, in substance evidence-first. Now
+    `tools: draft first`, with a caveat block.
+  * The unclaimed group read `0 / 3 read`. The FRACTION was the lie — it frames read-tool calls as a
+    proportion of transcripts, asserting the rest went unread, which the trace cannot support. The
+    numbers stay; the arithmetic is gone, and the group is named `outside the four criteria` after
+    what it IS rather than after today's two members.
+  Each module now carries the criterion's own `description`, **served** as `rubric_criteria` from the
+  run's `run_start` meta rather than copied into `app.js` — a copy drifts the moment a criterion is
+  reworded, silently, and reading it per run means an old trace explains itself with the rubric it
+  actually ran under. Facts no category claims still surface, so a fact the server ADDS cannot
+  vanish the way `n_transcripts` / `n_transcripts_read` did.
+- **FIXED — a non-dict `payload["meta"]` raised out of `rubric_from_meta`.** `dict_events` normalized
+  the event and its `payload`; `meta` is one level deeper and is the only payload key in this
+  workspace unwrapped with `.get`, so `{"payload": {"meta": "nope"}}` — an object whose payload is an
+  object, passing both filters — raised `AttributeError: 'str' object has no attribute 'get'`. It
+  cost `GET /v1/runs/{id}` a 500 the moment that endpoint began serving the criteria, and it had
+  already cost `ctx-distillery export` an entire bundle for one bad line. Fixed in `dict_events`, so
+  both consumers inherit it.
+- **The `TRACES` header chip shows the path's TAIL.** The siblings' `22ch` head-truncation is right
+  for a MODEL NAME and wrong for a PATH: it rendered `/Users/operator/Documents/…`, hiding the only
+  segment a reader is checking. Now `…/ctx-distillery/traces`, full value on the `title`.
+- **`CLAUDE.md` records what a rendered transcript actually contains.** Measured: user 153,285 chars
+  vs assistant 27,443, while the RAW content is 305,816 vs 392,030. `tool_use` collapsing to a label
+  is this renderer's deliberate choice; **`thinking` renders to nothing because Claude Code does not
+  persist the thinking TEXT** — the block carries an empty `thinking` and a ~1,840-char crypto
+  `signature`, and across 60 session files 2,384 thinking blocks had 0 with content. The renderer is
+  correct; the gap is upstream, and is now stated instead of hiding inside "deliberately LOSSY".
 
 ## [0.1.0] - 2026-07-29
 

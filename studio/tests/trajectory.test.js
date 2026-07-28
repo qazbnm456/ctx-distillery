@@ -30,8 +30,25 @@ function stubEl(tag) {
     get firstChild() { return this.children[0] || null; },
     addEventListener(name, fn) { (this.handlers[name] = this.handlers[name] || []).push(fn); },
     click() { (this.handlers.click || []).forEach((fn) => fn()); },
-    setAttribute() {}, removeAttribute() {},
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    setAttribute() {}, removeAttribute() {}, value: "",
+    // A REAL class set, not four no-ops. The no-op version could not tell a test that search had
+    // marked a turn `match` or dimmed it, so the feature would have shipped observable only by eye.
+    // Same rule as `style` below: a double that silently accepts every call cannot fail, which is
+    // the one thing a double must be able to do.
+    classList: {
+      _set: new Set(),
+      add(c) { this._set.add(c); }, remove(c) { this._set.delete(c); },
+      toggle(c, on) { if (on === undefined) { this._set.has(c) ? this._set.delete(c) : this._set.add(c); }
+                      else if (on) { this._set.add(c); } else { this._set.delete(c); } },
+      contains(c) { return this._set.has(c); },
+    },
+    // A real element always has `style`, and `style` always has `setProperty`; the stub had
+    // neither, so the first production code to size a node inline (the timeline's proportional
+    // segment width) and the first to set a custom property (its family hue) each failed here, in
+    // five tests that are not about styling at all. A stub that omits a universal DOM member does
+    // not test less — it fails WRONGLY, and a wrongly-failing test invites removing the feature
+    // rather than completing the double. `props` is readable so a test can assert on width/hue.
+    style: { props: {}, setProperty(k, v) { this.props[k] = v; } },
   };
 }
 
@@ -244,12 +261,100 @@ async function test(name, fn) {
     const { t, byId } = make();
     stubFetch(liveTrace());
     await t.open();
-    byId("traj-timeline").children[0].click();
+    // Select by what the row IS, not by position and not by "has a handler": the timeline
+    // interleaves "T<n> ▸" turn markers between turn groups, a positional index silently picks one,
+    // and they are clickable too (they open their turn), so a handler test picks them up as well.
+    const segs = byId("traj-timeline").children.filter((c) => /\bseg\b/.test(c.className));
+    assert.ok(segs.length, "the timeline must render at least one clickable entry");
+    segs[0].click();
     const text = allText(byId("traj-detail"));
     assert.ok(text.includes("draft memory"), "the entry's label must head the pane");
     assert.ok(text.includes("2f6d40f59078"), "the allowlisted fields must render");
     assert.ok(text.some((s) => s.indexOf("not instrumented tool time") >= 0),
       "duration_s must never be presented as an instrumented tool latency");
+  });
+
+  await test("the timeline encodes DURATION AS WIDTH, floored, with a family hue per tool", async () => {
+    // The point of the strip: on the run this was rebuilt against, ONE of nine calls took 84.3% of
+    // the wall clock while the rest took 2-8s, which a column of equal-height rows cannot express.
+    // The ratio here (2s vs 38s) is deliberately lopsided enough that the SHORT call's natural
+    // width (2/40 * 720 = 36px) falls under the 108px floor, so one assertion covers the
+    // proportion and the other covers the floor that keeps a fast call readable. An earlier draft
+    // of this test used 8s vs 32s and asserted the floor on a segment that computes to 144px — the
+    // test caught its own arithmetic. Without it, `width is time` is a claim in a comment.
+    const trace = liveTrace();
+    trace.timeline = [
+      { entry_kind: "tool", tool: "read_transcript_chunk", ok: true, duration_s: 2, label: "read",
+        seq: 0, rel_s: 2, turn_index: 0, errors: [], endpoint_error: null, circuit_broken: false },
+      { entry_kind: "tool", tool: "draft_memory_file", ok: true, duration_s: 38, label: "draft",
+        seq: 1, rel_s: 40, turn_index: 0, errors: [], endpoint_error: null, circuit_broken: false },
+    ];
+    const { t, byId } = make({});
+    stubFetch(trace);
+    await t.open();
+    const segs = byId("traj-timeline").children.filter((c) => /\bseg\b/.test(c.className));
+    assert.strictEqual(segs.length, 2, "both calls must render");
+    const px = (n) => Number(String(n.style.width).replace("px", ""));
+    assert.ok(px(segs[1]) > px(segs[0]), "the longer call must be the wider segment");
+    assert.strictEqual(px(segs[1]), Math.round((38 / 40) * 720), "width is its share of the run");
+    assert.strictEqual(px(segs[0]), 108, "a short call floors at 108px rather than vanishing");
+    assert.strictEqual(segs[0].style.props["--fam"], "var(--fam-read)", "a read call is read-hued");
+    assert.strictEqual(segs[1].style.props["--fam"], "var(--fam-draft)", "a draft call is draft-hued");
+    assert.strictEqual(byId("traj-axis-end").textContent, "40.0s", "the axis must end at the total");
+  });
+
+  await test("a turn marker is a working BUTTON, not a divider that looks like one", async () => {
+    // Shipped once as a plain `div`: it sat in the strip looking exactly like the clickable
+    // segments beside it and did nothing when pressed. A control that LOOKS interactive and is not
+    // is worse than no control, so the marker's handler is pinned, and pinned to open the same turn
+    // its label names — a marker that opened the wrong turn would still pass a "has a handler" test.
+    const trace = liveTrace();
+    trace.timeline = [
+      { entry_kind: "tool", tool: "read_memory_file", ok: true, duration_s: 1, label: "read",
+        seq: 0, rel_s: 1, turn_index: 0, errors: [], endpoint_error: null, circuit_broken: false },
+      { entry_kind: "tool", tool: "draft_memory_file", ok: true, duration_s: 1, label: "draft",
+        seq: 1, rel_s: 2, turn_index: 1, errors: [], endpoint_error: null, circuit_broken: false },
+    ];
+    const { t, byId } = make({});
+    stubFetch(trace);
+    await t.open();
+    const marks = byId("traj-timeline").children.filter((c) => /turn-mark/.test(c.className));
+    assert.strictEqual(marks.length, 2, "one marker per turn boundary");
+    assert.ok((marks[1].handlers.click || []).length, "a marker must be clickable");
+    marks[1].click();
+    // Turn 1's own reasoning, i.e. the marker opened the turn it names rather than any turn.
+    assert.ok(allText(byId("traj-detail")).some((s) => s.indexOf("draft the rules") >= 0),
+      "clicking T1 must open turn 1");
+  });
+
+  await test("search matches a turn's OUTPUT, dims the misses, and counts the hits", async () => {
+    // Searching titles only would be near-useless here: a turn's `output` is the REPL echo and ran
+    // 16,038 characters on the run this was built against, which is exactly where the thing you are
+    // looking for lives. So the haystack is reasoning + code + output, and this pins that by putting
+    // the needle ONLY in `output` — a title/reasoning-only implementation goes red.
+    const trace = liveTrace();
+    trace.iterations = [
+      { turn: 0, index: 0, reasoning: "look around", code: "list_memory_files()", output: "[]" },
+      { turn: 1, index: 1, reasoning: "keep going", code: "pprint(x)", output: "NEEDLE_IN_OUTPUT" },
+    ];
+    const { t, byId } = make({});
+    stubFetch(trace);
+    await t.open();
+    const steps = byId("traj-steps").children.filter((c) => /tstep/.test(c.className));
+    assert.ok(steps.length >= 2, "the turns must render as steps");
+
+    byId("traj-search").value = "needle_in_output";
+    (byId("traj-search").handlers.input || []).forEach((fn) => fn());
+    const matched = steps.filter((s) => s.classList.contains("match"));
+    assert.strictEqual(matched.length, 1, "exactly the turn whose OUTPUT carries it matches");
+    assert.ok(steps.some((s) => s.classList.contains("dim")), "a miss must dim, not vanish");
+    assert.strictEqual(byId("traj-search-count").textContent, "1 match", "the hit count is shown");
+
+    // Clearing restores every step: a search must not leave the list permanently filtered.
+    byId("traj-search").value = "";
+    (byId("traj-search").handlers.input || []).forEach((fn) => fn());
+    assert.ok(!steps.some((s) => s.classList.contains("dim")), "clearing the query undims everything");
+    assert.strictEqual(byId("traj-search-count").textContent, "", "and drops the count");
   });
 
   await test("a failed /iterations fetch reports through onError and leaves the drawer closed", async () => {

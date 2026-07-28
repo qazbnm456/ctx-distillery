@@ -51,6 +51,9 @@
       steps: document.getElementById("traj-steps"),
       detail: document.getElementById("traj-detail"),
       timeline: document.getElementById("traj-timeline"),
+      axisEnd: document.getElementById("traj-axis-end"),
+      search: document.getElementById("traj-search"),
+      searchCount: document.getElementById("traj-search-count"),
       close: document.getElementById("traj-close"),
     };
 
@@ -209,6 +212,39 @@
       });
     }
 
+    // Search over a turn's own content. `reasoning + code + output` is the whole of what a turn IS
+    // here, and `output` is where the volume lives (16,038 characters in one turn on the run this
+    // was built against), so a title-only search would miss the thing worth finding.
+    function stopMatches(kind, index, q) {
+      if (kind === "init") {
+        return JSON.stringify((data && data.initial) || {}).toLowerCase().indexOf(q) >= 0;
+      }
+      const it = ((data && data.iterations) || [])[index] || {};
+      const hay = String(it.reasoning || "") + "\n" + String(it.code || "") + "\n" + String(it.output || "");
+      return hay.toLowerCase().indexOf(q) >= 0;
+    }
+
+    function runSearch(raw) {
+      const q = String(raw || "").trim().toLowerCase();
+      let hits = 0;
+      stepItems.forEach(function (item) {
+        if (!q) {
+          item.node.classList.remove("match");
+          item.node.classList.remove("dim");
+          return;
+        }
+        const hit = stopMatches(item.kind, item.index, q);
+        if (hit) hits += 1;
+        // A miss DIMS rather than hiding: which turn matched is only meaningful against the run's
+        // sequence, and a filtered list silently renumbers what the reader is looking at.
+        item.node.classList.toggle("match", hit);
+        item.node.classList.toggle("dim", !hit);
+      });
+      if (dom.searchCount) {
+        dom.searchCount.textContent = q ? hits + (hits === 1 ? " match" : " matches") : "";
+      }
+    }
+
     function addStep(kind, index, label, sub, it) {
       const node = el("button", "tstep");
       node.type = "button";
@@ -236,14 +272,46 @@
         dom.timeline.appendChild(el("div", "traj-empty", "no tool or sub-LM calls recorded"));
         return;
       }
+      // WIDTH IS TIME. The denominator is the SUM, because a segment's width is its share of the
+      // run's wall clock, not its size relative to the slowest call — the strip is a ruler laid
+      // along the whole run. It is floored at 108px so a 2-second call stays readable rather than
+      // collapsing to a sliver, which means the strip is WIDER than the drawer when the durations
+      // are lopsided; that is why it scrolls horizontally instead of squeezing.
+      let total = 0;
+      tl.forEach(function (t) { total += Math.max(t.duration_s || 0, 0); });
+      if (dom.axisEnd) dom.axisEnd.textContent = total > 0 ? secs(total) : "";
+      let prevTurn = null;
       tl.forEach(function (t) {
+        // A "from here = turn N" rule between turn groups. The strip is otherwise a flat sequence,
+        // and which calls shared ONE planner turn is a thing a reader is trying to reconstruct.
+        const ti = t.turn_index === null || t.turn_index === undefined ? null : t.turn_index;
+        if (ti !== null && ti !== prevTurn) {
+          // A BUTTON that opens its turn, not a decorative divider. Shipped once as a plain `div`:
+          // it looked exactly like the clickable segments beside it and did nothing when pressed,
+          // which is worse than not drawing it at all. `selectStop("turn", …)` is the same entry
+          // point the Turns list uses, so the marker, the list and the cross-highlight agree.
+          const mark = el("button", "turn-mark");
+          mark.type = "button";
+          mark.setAttribute("title", "Turn " + ti + " starts here — open it");
+          mark.setAttribute("aria-label", "Open turn " + ti);
+          mark.appendChild(el("span", "tm-lab", "T" + ti));
+          mark.appendChild(el("span", "tm-arrow", "\u25b8"));
+          mark.addEventListener("click", (function (turnIndex) {
+            return function () { selectStop("turn", turnIndex); };
+          })(ti));
+          dom.timeline.appendChild(mark);
+          prevTurn = ti;
+        }
         let cls = "seg";
         if (t.ok === false) cls += " seg-bad";
         if (t.unrecognized) cls += " seg-unknown";
         const node = el("button", cls);
         node.type = "button";
+        node.style.setProperty("--fam", famColor(t.tool));
+        const dur = Math.max(t.duration_s || 0, 0);
+        node.style.width = (total > 0 ? Math.max(108, Math.round((dur / total) * 720)) : 108) + "px";
         node.appendChild(el("span", "seg-lab", t.label || t.tool || "call"));
-        node.appendChild(el("span", "seg-time", "+" + secs(t.rel_s) + " · gap " + secs(t.duration_s)));
+        node.appendChild(el("span", "seg-time", "+" + secs(t.rel_s) + " · " + secs(dur)));
         node.addEventListener("click", function () { selectStop("tool", t.seq); });
         dom.timeline.appendChild(node);
         segItems.push({
@@ -256,7 +324,18 @@
 
     // -- selection -----------------------------------------------------------------------------
 
-    function selectStop(kind, index) {
+    // Tool FAMILY -> hue. Five read-only tools, three families: gathering evidence, authoring a
+  // draft, and enumerating the store. Colour is the only thing that survives a segment being
+  // squeezed to its 108px floor, so it carries the taxonomy the label cannot.
+  function famColor(tool) {
+    const name = String(tool || "");
+    if (name.indexOf("draft") === 0) return "var(--fam-draft)";
+    if (name.indexOf("read") === 0) return "var(--fam-read)";
+    if (name.indexOf("list") === 0) return "var(--fam-list)";
+    return "var(--fam-other)";
+  }
+
+  function selectStop(kind, index) {
       sel = { kind: kind, index: index };
       const its = (data && data.iterations) || [];
       const tl = (data && data.timeline) || [];
@@ -429,9 +508,16 @@
       dom.handle.addEventListener("click", open);
       if (dom.close) dom.close.addEventListener("click", close);
       if (dom.backdrop) dom.backdrop.addEventListener("click", close);
+      if (dom.search) {
+        dom.search.addEventListener("input", function () { runSearch(dom.search.value); });
+      }
       document.addEventListener("keydown", function (evt) {
         if (!dom.drawer || dom.drawer.hidden) return;
         if (evt.key === "Escape") { close(); return; }
+        // ←/→ step through turns, but NOT while typing in the search box — there they are the
+        // caret keys, and stealing them makes the field unusable for anything but one-shot queries.
+        const tag = evt.target && evt.target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
         if (evt.key === "ArrowRight" || evt.key === "ArrowLeft") {
           evt.preventDefault();
           stepBy(evt.key === "ArrowRight" ? 1 : -1);
