@@ -112,22 +112,55 @@ def test_the_endpoint_string_is_read_under_error_as_well_as_endpoint_error():
     assert draft_cause({"ok": False, "error": ""}) == CAUSE_ENDPOINT
 
 
-def test_the_kits_TRUTHINESS_test_is_not_adopted_along_with_its_key_set():
-    """The half of `payload_cause` this project deliberately does NOT take, pinned so a future
-    "collapse into the kit" cannot quietly regress it.
+def test_an_endpoint_error_that_STRINGIFIED_TO_NOTHING_survives_the_delegation():
+    """The guard that outlived the local implementation it was written to protect.
 
-    Upstream reads `payload.get("endpoint_error") or payload.get("error")`. Six common transport
+    `draft_cause` used to derive the cause itself, specifically so it could test the endpoint key
+    with `is not None` where upstream's `payload_cause` used TRUTHINESS. Six common transport
     failures stringify to `''` (measured: `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`,
-    `TimeoutError`, `OSError`, `RemoteDisconnected`), so truthiness sends every one of them down the
-    validator branch — the exact misclassification `payload_cause`'s own docstring exists to prevent.
-    Aliasing `draft_cause` to the kit today would fix the rarer key-name case and regress the common
-    ones. Take the key set, keep the `is not None` test.
+    `TimeoutError`, `OSError`, `RemoteDisconnected`), so truthiness sent every one of them down the
+    validator branch — a dropped connection recorded as a content decline.
+
+    That defect was reported and fixed upstream (`6d010447`), a differential over all 81 cause-less
+    payload shapes then showed zero disagreement, and the local copy was collapsed into a call. This
+    assertion did NOT go with it: it now points through the delegation at the same behaviour, which
+    makes it a tripwire on an upstream REGRESSION rather than on a local edit. A guard is worth
+    keeping exactly when the thing it guards can still break somewhere you do not control.
     """
-    for key in ("endpoint_error", "error"):
-        payload = {"ok": False, key: ""}
-        assert draft_cause(payload) == CAUSE_ENDPOINT, key
-        # What upstream's truthiness form would return for the same payload:
-        assert not (payload.get("endpoint_error") or payload.get("error"))
+    import http.client
+
+    import httpx
+
+    for exc in (
+        httpx.ConnectTimeout(""), httpx.ReadTimeout(""), httpx.ConnectError(""),
+        TimeoutError(), OSError(), http.client.RemoteDisconnected(),
+    ):
+        assert str(exc) == "", f"{type(exc).__name__} is assumed to stringify empty"
+        for key in ("endpoint_error", "error"):
+            assert draft_cause({"ok": False, key: str(exc)}) == CAUSE_ENDPOINT, (key, exc)
+
+
+def test_draft_cause_delegates_the_derivation_rather_than_copying_it():
+    """One definition of the classification in the workspace, not two (invariant 11).
+
+    Asserted over the payload shapes rather than by reading the source: what matters is that the two
+    cannot disagree, and an identity check on the function object would pass for a wrapper that
+    reimplemented the body underneath.
+    """
+    from itertools import product
+
+    from rlm_kit.trace import payload_cause
+
+    fields = {
+        "ok": (True, False, None),
+        "circuit_broken": (True, False, None),
+        "endpoint_error": ("502", "", None),
+        "error": ("502", "", None),
+    }
+    keys = list(fields)
+    for combo in product(*(fields[k] for k in keys)):
+        payload = dict(zip(keys, combo))
+        assert draft_cause(payload) == payload_cause(payload), payload
 
 
 def test_the_breaker_outranks_the_endpoint_because_it_is_the_stronger_claim():

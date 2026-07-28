@@ -75,11 +75,24 @@ def default_rubric(task: str = "") -> RubricCriteria:
                 name="evidence_gathered_before_drafting",
                 category="TA",
                 weight=1.0,
+                # The trailing gloss used to read "the planner read before it wrote", and that is a
+                # STRONGER claim than the fact supports — the same over-reach the studio's headline
+                # had to be corrected for. `transcripts` and `memory_index` are INPUTS on this
+                # task's signature, bound as REPL variables, and `task._INSTRUCTIONS` tells the
+                # planner to print and slice them; so a planner can read every transcript in full
+                # without calling a single read tool, and a measured run did exactly that (all three
+                # transcripts sent to the sub-LM at turns 0-2, drafting at turn 3, the first read
+                # TOOL at step 9). This description is not decoration: `rl_export.rubric_signal`
+                # carries it into the SFT bundle at
+                # `sft_turns[*].input.initial.rubric[*].description`, so an over-claim here is
+                # training input. Say what is counted, and name the blind spot in the same breath.
                 description=(
-                    "Evidence-gathering tool calls (list_memory_files / read_memory_file / "
-                    "read_transcript_chunk) preceded drafting tool calls (draft_memory_file / "
-                    "draft_skill_file), and no drafting call tripped the circuit breaker — the "
-                    "planner read before it wrote, and drafting didn't thrash."
+                    "Evidence-gathering TOOL CALLS (list_memory_files / read_memory_file / "
+                    "read_transcript_chunk) preceded drafting TOOL CALLS (draft_memory_file / "
+                    "draft_skill_file), and no drafting call tripped the circuit breaker. Counts "
+                    "tool calls only: the planner also receives `transcripts` and `memory_index` as "
+                    "REPL variables and can read them without any tool, so a late first read step "
+                    "does not by itself mean it drafted without evidence."
                 ),
             ),
             Criterion(
