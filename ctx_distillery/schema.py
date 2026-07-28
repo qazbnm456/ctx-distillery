@@ -62,9 +62,10 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT
 from rlm_kit.trace import EVENT_TOOL_CALL
 
-from .trace_io import dict_events
+from .trace_io import dict_events, draft_cause
 
 __all__ = [
     "PROMOTION_ACTIONS",
@@ -192,14 +193,12 @@ def _draft_calls(events: Sequence[dict], tool: str) -> dict[str, dict]:
 def _not_ok_problem(artifact_id: str | None, payload: dict) -> str:
     """The problem line for a drafting call that came back `ok=False` — naming the REAL cause.
 
-    `rlm_kit.tools.model.make_model_tool` sets `ok=False` for THREE distinct reasons, and its
-    `ModelToolResult` field comments say so on ADJACENT lines (`endpoint_error: Optional[str]`
-    then `circuit_broken: bool`):
+    `rlm_kit.tools.model.make_model_tool` sets `ok=False` for THREE distinct reasons:
 
-    * `circuit_broken=True` — the breaker short-circuited and the model was NEVER CALLED (`raw=""`).
-    * `endpoint_error` set — the model call failed after its transient retries. The validator never
-      ran either; `drafting._errors_with_infra` then puts the ENDPOINT's message into `errors`.
-    * neither set — the deterministic host-side validator actually looked at the text and declined.
+    * the breaker short-circuited and the model was NEVER CALLED (`raw=""`).
+    * the model call failed after its transient retries. The validator never ran either;
+      `drafting._errors_with_infra` then puts the ENDPOINT's message into `errors`.
+    * neither — the deterministic host-side validator actually looked at the text and declined.
 
     FIXED per adversarial review: this used to render all three as "failed its format check: <the
     errors>", so a bare connection failure read as ``artifact 'a1' failed its format check:
@@ -209,30 +208,26 @@ def _not_ok_problem(artifact_id: str | None, payload: dict) -> str:
     one `rubric.py`'s TA criterion already established ("tripped the circuit breaker"), so the two
     surfaces describe the same event the same way.
 
-    Only the payload's own recorded fields are consulted — no guessing from the error text.
-    `circuit_broken` is checked first because it is the strongest claim (no model call happened at
-    all); `make_model_tool` never sets both, and `test_circuit_break_outranks_endpoint_error_...`
-    pins that ORDER against a payload that (impossibly) sets both, so the precedence cannot be
-    swapped by a future tidy-up without going red.
+    Which cause it is comes from `trace_io.draft_cause` — READ off the payload rather than re-derived
+    here, and shared with `rl_export.run_metrics` so the human-visible sentence and the training
+    counter cannot describe the same call differently (`tests/test_draft_cause.py` pins that). This
+    function used to run its own copy of that chain; the two agreed, but nothing said they had to,
+    and one implementation per job is `CLAUDE.md` invariant 11. Everything that copy argued about —
+    breaker-outranks-endpoint precedence, and `endpoint_error is not None` rather than truthiness
+    because `str(exc)` is `''` for a whole family of real connection failures — is now argued once,
+    in `draft_cause`, next to the chain that decides it.
 
-    `endpoint_error` is tested with `is not None`, NOT for truthiness. rlm-kit declares it
-    `Optional[str]` and fills it with `str(exc)`, which is the EMPTY STRING for a whole family of
-    real failures — `httpx.ConnectTimeout` / `ReadTimeout` / `ConnectError`, `TimeoutError`,
-    `OSError`, `http.client.RemoteDisconnected` all stringify to `''`. Under a truthiness test each
-    of those fell through to the validator branch and was reported as ``failed its format check: no
-    detail recorded``, which is precisely the blame-the-model-for-an-infrastructure-fault sentence
-    invariant 12 exists to prevent. Reachable only through a caller-supplied `chat_fn` today (the
-    shipped CLI uses the OpenAI SDK, which always supplies a message), which bounds the severity —
-    not the correctness.
+    Only the payload's own recorded fields are ever consulted — never a guess from the error text.
     """
     detail = "; ".join(str(e) for e in (payload.get("errors") or [])) or "no detail recorded"
-    if payload.get("circuit_broken"):
+    cause = draft_cause(payload)
+    if cause == CAUSE_CIRCUIT_BROKEN:
         return (
             f"artifact {artifact_id!r} was never drafted: the drafting call tripped the circuit "
             f"breaker (too many consecutive invalid drafts), so the model was never called — "
             f"{detail}"
         )
-    if payload.get("endpoint_error") is not None:
+    if cause == CAUSE_ENDPOINT:
         return (
             f"artifact {artifact_id!r} was never drafted: the drafting model endpoint failed after "
             f"its retries, so no draft was produced and no format check ever ran — {detail}"

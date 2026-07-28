@@ -12,6 +12,57 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A drafting call's cause is now RECORDED by the source and READ by every consumer, and the two
+  places that used to derive it are one shared helper.** rlm-kit `4fcd50b2` added
+  `ModelToolResult.cause` (`"ok"` / `"invalid"` / `"endpoint"` / `"circuit_broken"`) and
+  `.validator_ran`, plus the `CAUSE_*` constants; the pin moved to it. Three changes, in order of how
+  much they matter:
+
+  1. **`tools/drafting.py` records `cause` + `validator_ran`** onto every drafting `tool_call`,
+     beside the `endpoint_error` / `circuit_broken` it already wrote, and `_errors_with_infra`
+     branches on `result.cause` instead of re-deriving from the two flags. This module is the only
+     one holding a live `ModelToolResult`; recording what it already knows beats every downstream
+     reader reconstructing it, and makes a fresh trace self-describing. Both are PROPERTIES upstream,
+     not dataclass fields — they never reach a trace unless someone puts them there.
+  2. **`rl_export._draft_cause` and `schema._not_ok_problem` no longer each derive the cause** —
+     both call the new `trace_io.draft_cause`, which PREFERS the recorded `cause` and falls back to
+     rlm-kit's own chain (`circuit_broken` → `endpoint_error is not None` → `ok`) for the traces
+     recorded before the key existed. This is the part that was a real finding rather than an
+     adoption: the two derivations AGREED on every payload shape in the suite, but nothing pinned
+     that they must, and one implementation per job is `CLAUDE.md` invariant 11. The argument came
+     from a sibling consumer of the same kit, against itself: it had made the same collapse in two
+     places and "fixed" it once already — first counting every `ok is False` as a gate rejection (a
+     real trace showed calls=3, breaks=7, rejections=10, a "rejection rate" of 3.33), then excluding
+     breaks, which looked correct while still counting an ENDPOINT failure as a gate rejection in a
+     field named for the gate. A partial fix that looks complete is the more dangerous state, because
+     nothing prompts a second look. `tests/test_draft_cause.py` pins both directions — identity (the
+     same function object; `rl_export._draft_cause` must not come back) and behaviour (over five
+     payload shapes, `_not_ok_problem`'s wording and `run_metrics`'s bucket name the same cause).
+     Verified by sabotaging each surface in turn: re-forking `schema`'s derivation with the old
+     truthiness bug reddens 2 cases, re-forking `rl_export`'s reddens 4.
+  3. `run_metrics`'s counters now count rlm-kit's constants directly, and `draft_not_ok` is the
+     complement of the `CAUSE_OK` count rather than "everything the classifier declined to label" —
+     the four causes partition the calls, so the slices sum to the aggregate as arithmetic rather
+     than as a property this module has to defend. The public metric key names are unchanged.
+
+  **Correct-by-construction, not observed — stated plainly because the sibling's report had the same
+  limit.** Their five real traces contained zero endpoint failures, so their second bug never fired
+  on real data. Ours are the same: the two real live-run traces
+  (`demo-durable-fact` / `demo-one-off-debugging`) carry six drafting calls between them, ALL
+  `ok=True`, with zero endpoint failures and zero circuit breaks. Nothing in this change fixes an
+  observed wrong number in a trace we hold; it removes the second place a future fix could drift out
+  of sync.
+
+  `rubric.trace_facts`'s `any_circuit_broken` deliberately did NOT move to the shared helper — it
+  asks "did the breaker trip anywhere in this run", a run-level existence check, not a per-call
+  classification. A comment at the fact says so, so a future reader does not "finish the job"
+  wrongly.
+
+- **`ctx_distillery/skills/memory-vs-skill-criteria.md` was reported as claiming the file is loaded
+  via `load_skills_as_tools`; it is not, and nothing changed.** The sentence is a NEGATIVE claim —
+  "not as something `ctx_distillery.task.DistillSession` reads via `load_skills_as_tools`" — and it
+  agrees with `VENDOR.md`. Recorded here so the same misreading does not get "fixed" next time.
+
 - **`apply_plan` no longer lets a raw `OSError` escape from a model-drafted skill name, and all four
   sluggers in the workspace now cap at 120 characters.** `_skill_target`'s final
   `is_symlink()`/`exists()`/`is_dir()` check sat OUTSIDE the `try/except (OSError, ValueError)` whose

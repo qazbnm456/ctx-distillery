@@ -23,6 +23,7 @@ from ctx_distillery.tools.drafting import (
     make_memory_validator,
     make_skill_validator,
 )
+from ctx_distillery.trace_io import draft_cause
 
 _GOOD_MEMORY = (
     "---\n"
@@ -353,6 +354,44 @@ def test_an_endpoint_error_is_surfaced_not_raised(snapshot, tmp_path):
         out = tool("p", "global", "e")
     assert out["ok"] is False and any("endpoint down" in e for e in out["errors"])
     assert _payloads(trace, "draft_skill_file")[0]["endpoint_error"] == "endpoint down"
+
+
+def test_every_recorded_call_names_its_own_cause_and_whether_the_validator_RAN(snapshot, tmp_path):
+    """The source records what it already knows — `CLAUDE.md` invariant 12.
+
+    This module is the only place holding a live `ModelToolResult`; every downstream reader
+    (`rl_export`, `schema`, the studio) sees a recorded payload. Reconstructing the cause from
+    `ok`/`endpoint_error`/`circuit_broken` at each of those call sites is re-deriving something this
+    function was TOLD, and the sibling consumer that got that derivation wrong twice is the argument.
+    `validator_ran` is recorded beside it because it is the direct question behind every mislabel:
+    only when it is True may a surface say the draft "failed its format check".
+
+    All four outcomes in one trace, in order, so a future author can read the shape off the test.
+    """
+    trace = str(tmp_path / "t.jsonl")
+    invalid = _chat("just prose, no frontmatter\n")
+    with TraceRecorder(trace, run_id="r0"):
+        make_draft_memory_file_tool(_chat(_GOOD_MEMORY), snapshot)("ok", "project", "e")
+        make_draft_memory_file_tool(invalid, snapshot)("invalid", "project", "e")
+
+        def boom(spec):
+            raise RuntimeError("endpoint down")
+
+        make_draft_memory_file_tool(boom, snapshot)("endpoint", "project", "e")
+
+        breaker = make_draft_memory_file_tool(invalid, snapshot)
+        for _ in range(MAX_CONSECUTIVE_INVALID + 1):
+            breaker("broken", "project", "e")
+
+    payloads = _payloads(trace, "draft_memory_file")
+    observed = [(p["cause"], p["validator_ran"], p["ok"]) for p in payloads]
+    assert observed[:3] == [("ok", True, True), ("invalid", True, False), ("endpoint", False, False)]
+    assert observed[-1] == ("circuit_broken", False, False)
+    # The recorded cause and the fields it was derived from stay CONSISTENT — a reader on either
+    # side of `trace_io.draft_cause`'s fallback gets the same answer for a fresh payload.
+    for payload in payloads:
+        assert draft_cause(payload) == payload["cause"]
+        assert draft_cause({k: v for k, v in payload.items() if k != "cause"}) == payload["cause"]
 
 
 def test_the_tools_never_write_a_file(snapshot, memory_dir):

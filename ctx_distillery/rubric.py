@@ -204,6 +204,14 @@ def trace_facts(events: list[dict]) -> dict:
         "plan_problems": list(a.problems),
         "min_read_step": min(read_steps) if read_steps else None,
         "min_draft_step": min(draft_steps) if draft_steps else None,
+        # Reads `circuit_broken` DIRECTLY, and deliberately does NOT go through
+        # `trace_io.draft_cause`. That helper answers "which ONE of the four outcomes was THIS call",
+        # a per-call classification whose whole point is that the four partition; this fact asks a
+        # different question — "did the breaker trip anywhere in this run" — which is a run-level
+        # existence check over one specific field. Routing it through the classifier would silently
+        # change its meaning for a payload the classifier resolves to a stronger cause, and would
+        # make a TA fact depend on a precedence order it has no stake in. Two questions, two
+        # readings; this is not the half of invariant 12's consolidation that was left undone.
         "any_circuit_broken": any(bool((p or {}).get("circuit_broken")) for p in draft_calls),
         "n_candidate_problems": sum(1 for c in a.candidates if c.problems),
         "n_backed_promotions": sum(

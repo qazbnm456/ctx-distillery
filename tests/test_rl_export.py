@@ -250,7 +250,7 @@ def test_run_metrics_counts_every_seat_separately():
 def test_run_metrics_tells_the_three_ok_false_causes_apart():
     """`make_model_tool` reports `ok=False` for three different things, and only one is the
     validator. Folding them into one "rejects" count taught a trainer to read a 502 as model
-    dishonesty — see `rl_export._draft_cause` and `schema._not_ok_problem`."""
+    dishonesty — see `trace_io.draft_cause` and `schema._not_ok_problem`."""
     events = [
         _run_start(),
         _tool_call("draft_memory_file", step_id=1, artifact_id="a", ok=False),
@@ -275,8 +275,10 @@ def test_run_metrics_causes_partition_the_aggregate():
     claim a reader can act on: slice, or total, never both.
 
     The last event sets `circuit_broken` AND `endpoint_error` together — something
-    `make_model_tool` never does — precisely because `_draft_cause` classifies in a chain rather
-    than as three independent predicates, so the identity holds even for a hand-written trace.
+    `make_model_tool` never does — precisely because `trace_io.draft_cause` classifies in a chain
+    rather than as three independent predicates, so the identity holds even for a hand-written trace.
+    (These payloads carry no `cause` key, so this is also the FALLBACK path under test: an old trace
+    partitions exactly as a fresh one does.)
     """
     events = [
         _run_start(),

@@ -241,6 +241,16 @@ operator-supplied data validated at load, with no upstream to track. See `ctx_di
   memory/skill body and an `artifact_id`, and never touch the memory directory or a `skill_dir` themselves.
   Two separate tool instances, one per drafting target, following `make_model_tool`'s "one tool per run,
   per-call breaker state in the closure" shape.
+- **`ModelToolResult.cause` / `.validator_ran`, and the `CAUSE_*` constants** (`rlm_kit.tools`) — the kit's
+  own NAME for which of four outcomes a drafting call was (`"ok"` / `"invalid"` / `"endpoint"` /
+  `"circuit_broken"`) and whether the domain validator actually ran. Consumed since the pin moved to
+  `4fcd50b2`, which added them. Both are PROPERTIES on `ModelToolResult`, not dataclass fields, so they
+  exist only on a live result object: `drafting.py` — the one place holding that object — records them onto
+  every drafting `tool_call`, and `trace_io.draft_cause` reads them back, deriving from
+  `circuit_broken`/`endpoint_error` only as the fallback for traces recorded before the key existed. The
+  vocabulary is imported, never restated locally, which is the whole point (`CLAUDE.md` invariants 11 and
+  12): the cause set is rlm-kit's and it is closed. `rlm_kit.tools` is dspy-free (verified), so importing
+  the constants into `schema.py` does not undo that module's reason for existing.
 - **The skills convention (`skills.py`)** — used only as the TARGET SHAPE `draft_skill_file` must produce
   (frontmatter `name`/`description`, progressive disclosure), not as a loader ctx-distillery itself calls.
   This project does not use `load_skills_as_tools`/`list_skills`/`read_skill` to give its own planner LM a
@@ -272,3 +282,7 @@ rlm-kit is public but not yet on PyPI, so it comes in via a commit-pinned git so
 (`[tool.uv.sources]` in `pyproject.toml` → GitHub, `branch = "main"`; `uv.lock` pins the exact commit).
 Never `pip install` it. When co-developing the kit locally, overlay an editable install
 (`uv pip install -e ../rlm-kit`).
+
+The pin currently sits at **`4fcd50b2`**, moved deliberately rather than drifted: that commit is what
+added `ModelToolResult.cause` / `.validator_ran` and the `CAUSE_*` constants this project now consumes
+(above). Bumping the pin is a real change — re-run all three suites, not just the root one.

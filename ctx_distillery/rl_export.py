@@ -59,11 +59,12 @@ Usage::
 from __future__ import annotations
 
 from rlm_kit.dataset import export_actions, export_sft_turns, run_label_bundle
+from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
 from rlm_kit.trace import EVENT_MAIN_STEP, EVENT_RUN_START, EVENT_SUB_CALL, EVENT_TOOL_CALL, group_by_run
 
 from .rubric import criteria_facts, default_rubric, plan_from_events, rubric_from_meta
 from .schema import PROMOTION_ACTIONS, assemble
-from .trace_io import dict_events, load_trace
+from .trace_io import dict_events, draft_cause, load_trace
 
 __all__ = [
     "DRAFTING_TOOLS",
@@ -125,46 +126,6 @@ def _tool_calls(events: list[dict], tool: str) -> list[dict]:
         for event in events
         if event.get("type") == EVENT_TOOL_CALL and (event.get("payload") or {}).get("tool") == tool
     ]
-
-
-def _draft_cause(payload: dict) -> str | None:
-    """Which of `circuit_break` / `endpoint_error` / `validator_reject` made this drafting call
-    `ok=False` — `None` if it succeeded.
-
-    The classification is a chain, not three independent predicates, so every `ok=False` call lands
-    in EXACTLY ONE bucket and the three counts sum to the aggregate by construction. `circuit_break`
-    outranks `endpoint_error` for the same reason `schema._not_ok_problem` orders them that way: it
-    is the stronger claim (the model was never called at all). The three PARTITION `ok=False`:
-    `make_model_tool` never sets `circuit_broken` and `endpoint_error` together, and the validator
-    branch sets neither — but the chain makes the partition hold even for a hand-written trace that
-    set both, which is what `test_run_metrics_causes_partition_the_aggregate` pins. (That argument
-    used to live on a `_DRAFT_CAUSES` tuple nothing read; setting it to `()` left the whole suite
-    green, so it is written here, next to the chain that actually creates the partition.)
-
-    `endpoint_error` is tested with `is not None`, NOT for truthiness — see `schema._not_ok_problem`
-    for the full argument. rlm-kit fills it with `str(exc)`, which is `''` for
-    `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`, `OSError` and
-    `RemoteDisconnected`, so truthiness counted every one of those in `draft_validator_rejects` —
-    TRAINING SIGNAL teaching a trainer to read a dropped connection as model dishonesty, which is
-    the exact harm invariant 12 names.
-
-    `validator_reject` IS A RESIDUAL, and that is a deliberate choice worth stating rather than a
-    silent default: it means "neither infrastructure field was set". For every payload this project
-    writes that is EXACT — `drafting.py` records `endpoint_error` and `circuit_broken` on every
-    drafting `tool_call` (`None` when unset), so "neither set" genuinely means the host-side
-    validator ran and declined. The residual only becomes a CLAIM for a payload from some other
-    producer that omits both keys, and a three-way partition over rlm-kit's closed cause set has
-    nowhere else to put one. A fourth cause appearing upstream would land here too; that is the
-    price of the partition, and it is the reason `run_metrics` also exports the `draft_not_ok`
-    aggregate separately rather than only the slices.
-    """
-    if payload.get("ok"):
-        return None
-    if payload.get("circuit_broken"):
-        return "circuit_break"
-    if payload.get("endpoint_error") is not None:
-        return "endpoint_error"
-    return "validator_reject"
 
 
 def run_labels(events: list[dict]) -> dict:
@@ -230,8 +191,8 @@ def run_metrics(events: list[dict]) -> dict:
 
     The four `draft_*` failure counts follow the same logic one level down, and getting them wrong
     was worse than hiding them: `draft_not_ok` is the aggregate, and `draft_validator_rejects` /
-    `draft_endpoint_errors` / `draft_circuit_breaks` are its disjoint parts (`_draft_cause`). A
-    trainer reading `draft_endpoint_errors` learns the run hit flaky infrastructure; one reading
+    `draft_endpoint_errors` / `draft_circuit_breaks` are its disjoint parts. A trainer reading
+    `draft_endpoint_errors` learns the run hit flaky infrastructure; one reading
     `draft_validator_rejects` learns the DRAFTER produced bad text. Folding both into a single
     "rejects" — which is what this surface used to do — would teach a trainer to read a 502 as model
     dishonesty, a reward signal pointed at the wrong thing entirely.
@@ -240,7 +201,7 @@ def run_metrics(events: list[dict]) -> dict:
     cap = _resolve_max_iterations(events)
     steps = sum(1 for event in events if event.get("type") == EVENT_MAIN_STEP)
     drafts = [payload for tool in DRAFTING_TOOLS for payload in _tool_calls(events, tool)]
-    causes = [cause for cause in map(_draft_cause, drafts) if cause is not None]
+    causes = [draft_cause(payload) for payload in drafts]
     stamps = [event["ts"] for event in events if isinstance(event.get("ts"), (int, float))]
     return {
         "steps": steps,
@@ -249,20 +210,18 @@ def run_metrics(events: list[dict]) -> dict:
         "read_transcript_chunk_calls": len(_tool_calls(events, "read_transcript_chunk")),
         "draft_memory_file_calls": len(_tool_calls(events, "draft_memory_file")),
         "draft_skill_file_calls": len(_tool_calls(events, "draft_skill_file")),
-        # `draft_not_ok` is the AGGREGATE (every `ok=False` drafting call, whatever the cause); the
-        # three below are its DISJOINT parts and sum back to it exactly — a containment relation, so
-        # a reader can slice or total without double-counting. It was named `draft_rejects`, with a
-        # comment claiming the breaks were "a subset of the first's *cause*, not of its count" —
-        # which the very test beside it disproved (two calls, one plain `ok=False`, one `ok=False` +
-        # `circuit_broken`, gave `draft_rejects == 2` and `draft_circuit_breaks == 1`: the break WAS
-        # inside the total). Both halves of that were wrong to ship: the name said "reject" of three
-        # causes only one of which is a rejection, and the comment contradicted a green test.
-        # Spelled out one seat at a time, the same reason the per-tool counts above are: the cause
-        # set is CLOSED (it is rlm-kit's, not ours), so naming each is the honest encoding.
-        "draft_validator_rejects": causes.count("validator_reject"),
-        "draft_endpoint_errors": causes.count("endpoint_error"),
-        "draft_circuit_breaks": causes.count("circuit_break"),
-        "draft_not_ok": len(causes),
+        # `draft_not_ok` is the AGGREGATE (every drafting call that yielded no usable draft, whatever
+        # the cause); the three below are its DISJOINT parts and sum back to it exactly — a
+        # containment relation, so a reader can slice or total without double-counting. That holds
+        # because `draft_cause` returns exactly one of rlm-kit's four CLOSED causes per payload, so
+        # `CAUSE_OK` and its three complements PARTITION the calls; the counts are then arithmetic,
+        # not a claim this module has to defend. It was named `draft_rejects`, and "reject" named
+        # three causes only one of which is a rejection — the harm invariant 12 exists to prevent.
+        # Spelled out one seat at a time, the same reason the per-tool counts above are.
+        "draft_validator_rejects": causes.count(CAUSE_INVALID),
+        "draft_endpoint_errors": causes.count(CAUSE_ENDPOINT),
+        "draft_circuit_breaks": causes.count(CAUSE_CIRCUIT_BROKEN),
+        "draft_not_ok": len(causes) - causes.count(CAUSE_OK),
         "sub_calls": sum(1 for event in events if event.get("type") == EVENT_SUB_CALL),
         "elapsed_s": round(max(stamps) - min(stamps), 3) if len(stamps) >= 2 else None,
         "hit_iteration_cap": steps >= cap,

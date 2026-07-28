@@ -21,6 +21,13 @@ Three project invariants live here:
   attribute, so a dict-returning validator would report every draft as `ok=False` and trip the
   circuit breaker after three calls, silently. The dataclass makes that impossible.
 
+**The recorded payload names its own CAUSE.** Each `tool_call` carries `cause` / `validator_ran`
+straight off the live `ModelToolResult` (rlm-kit `4fcd50b2`), beside the `endpoint_error` /
+`circuit_broken` fields it already recorded. This module is the only place with the live object, so
+recording what it already knows beats every downstream reader reconstructing it — `CLAUDE.md`
+invariant 12. The derivation still exists, in `trace_io.draft_cause`, purely as the fallback for
+traces recorded before this key did.
+
 Validation is STRUCTURAL only — is the draft well-formed and non-colliding — never semantic. Whether
 a memory is worth keeping is the human reviewer's call.
 """
@@ -31,6 +38,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
+from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT
 from rlm_kit.tools.model import ChatFn, make_model_tool
 from rlm_kit.trace import record_tool_call
 
@@ -250,17 +258,20 @@ def _spec_for_skill(procedure: str, scope: str, evidence: str) -> str:
 def _errors_with_infra(result) -> list[str]:
     """`errors`, with an INFRASTRUCTURE failure's own message substituted when it recorded none.
 
-    `endpoint_error` is tested with `is not None` for the reason `schema._not_ok_problem` spells
-    out: rlm-kit sets it to `str(exc)`, which is `''` for `httpx.ConnectTimeout`/`ReadTimeout`/
-    `ConnectError`, `TimeoutError`, `OSError` and `RemoteDisconnected`. Truthiness silently
-    reclassified every one of those as a validator decline. The `or` fallback still needs the same
-    care — an empty `endpoint_error` names the failure no better than nothing does, so an empty
-    string gets a description rather than being echoed as one.
+    Branches on `result.cause` — rlm-kit's own name for which of the four outcomes this is — rather
+    than re-deriving it from `circuit_broken` / `endpoint_error`. That is the kit's stated advice
+    ("read one of them before writing any string or label that attributes a failure"), and it means
+    the message written here and the `cause` recorded beside it cannot disagree by construction. The
+    `is not None`-vs-truthiness care that used to live in this docstring now lives ONCE, in
+    `ModelToolResult.cause` upstream and `trace_io.draft_cause` on the read side.
+
+    The `or` fallback still needs its own care: an empty `endpoint_error` names the failure no better
+    than nothing does, so an empty string gets a description rather than being echoed as one.
     """
     errors = list(result.errors)
-    if result.circuit_broken:
+    if result.cause == CAUSE_CIRCUIT_BROKEN:
         return errors or ["circuit breaker: too many consecutive invalid drafts"]
-    if result.endpoint_error is not None:
+    if result.cause == CAUSE_ENDPOINT:
         return errors or [
             result.endpoint_error or "the drafting model endpoint failed and recorded no message"
         ]
@@ -314,6 +325,8 @@ def make_draft_memory_file_tool(
             reasoning=result.reasoning,
             endpoint_error=result.endpoint_error,
             circuit_broken=result.circuit_broken,
+            cause=result.cause,
+            validator_ran=result.validator_ran,
         )
         return {"artifact_id": artifact_id, "ok": result.ok, "errors": errors, "draft": draft}
 
@@ -362,6 +375,8 @@ def make_draft_skill_file_tool(
             reasoning=result.reasoning,
             endpoint_error=result.endpoint_error,
             circuit_broken=result.circuit_broken,
+            cause=result.cause,
+            validator_ran=result.validator_ran,
         )
         return {"artifact_id": artifact_id, "ok": result.ok, "errors": errors, "draft": draft}
 

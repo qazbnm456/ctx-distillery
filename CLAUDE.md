@@ -463,8 +463,9 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     (statically, via `ast`, so the `__init__` docstring that NAMES `apply_plan` while promising
     never to call it isn't itself flagged).
 11. **Trace-reading logic has ONE implementation per job, shared across all three members — never a
-    per-member copy. THREE functions are covered: `rubric.plan_from_events` (plan-from-trace
-    reconstruction), `trace_io.load_trace`/`dict_events` (the non-dict shape guard), and
+    per-member copy. FOUR functions are covered: `rubric.plan_from_events` (plan-from-trace
+    reconstruction), `trace_io.load_trace`/`dict_events` (the non-dict shape guard),
+    `trace_io.draft_cause` (a recorded drafting call's outcome, see invariant 12), and
     `render.render_plan` (the human/judge-legible plan rendering).** The same rule applied OUTSIDE
     the trace path once: `ctx_distillery/regex_walk.py` is the ONE `re`-parse-tree walk, shared by
     `scripts/derive_liveness_samples.py` (`sample_for`, which generates the liveness fixture) and
@@ -496,6 +497,20 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     `ValidationError`-degrade fix below has already needed applying to two copies once; a third copy
     means a third place a future fix can drift out of sync.
 
+    The fourth: **`trace_io.draft_cause` is the ONE cause classifier**, and it is the only one of the
+    four that was found by an argument rather than by a bug. `rl_export._draft_cause` and
+    `schema._not_ok_problem` each derived a drafting call's cause from the same two payload fields,
+    in two modules. They AGREED on every payload shape the suite covered — the collapse invariant 12
+    describes was already fixed in both — but nothing PINNED that they must, and a sibling consumer
+    of the same kit reported getting the identical classification wrong twice INDEPENDENTLY, the
+    second time in a "fix" that looked complete while still counting an endpoint failure as a gate
+    rejection. A partial fix that looks complete is the more dangerous state, because nothing prompts
+    a second look. So the two now call one function, and `tests/test_draft_cause.py` pins BOTH
+    directions: identity (same function object, and `rl_export._draft_cause` must not come back) and
+    behaviour (over the five payload shapes, the problem line's wording and the metric's bucket name
+    the same cause — verified by sabotaging each surface in turn and watching it go red).
+    `rubric.trace_facts`'s `any_circuit_broken` is deliberately NOT folded in; see invariant 12.
+
     The third: **`render.render_plan` is the ONE plan rendering**, promoted from `eval/`'s `score.py`
     (where it was written for the judge prompt) when `ctx-distillery show` needed the identical text —
     a reviewer deciding what to approve should read exactly what the judge reads. `eval/score.py`
@@ -505,28 +520,54 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     run-level problems line, so a run that died before SUBMIT rendered — to a reviewer and to the
     judge — as a bare "proposed no candidates" that never said why. Fixed once, in the one place.
 
-12. **A drafting call's `ok=False` has THREE causes, and no surface may name the validator unless it
-    knows the validator ran.** `rlm_kit.tools.model.make_model_tool` sets `ok=False` when (a) the
-    deterministic host-side validator declined the text, (b) the model ENDPOINT failed after its
-    transient retries (`endpoint_error` set, `raw=""` — the validator never ran), or (c) the CIRCUIT
-    BREAKER short-circuited (`circuit_broken=True`, `raw=""` — the model was never even called). Its
-    own `ModelToolResult` field comments say so on ADJACENT lines (verified: `endpoint_error` and
-    `circuit_broken` are declared one after the other — this said "three lines apart"). `drafting.py`
-    records
-    `endpoint_error` and `circuit_broken` on every `tool_call` event, so the cause is ALWAYS
-    recoverable from the trace — there is no excuse for a surface to guess. Collapsing them into one
-    validator-flavoured label rendered a bare connection failure as ``artifact 'a1' failed its format
-    check: Connection refused``: it blames the model for an infrastructure fault in the text a human
-    reads before deciding what to apply, and in `rl_export` it is TRAINING SIGNAL that would teach a
-    trainer to read a 502 as model dishonesty. The split, and the deliberate exception:
-    `schema._not_ok_problem` (the human/judge-visible problem line) and `rl_export.run_metrics`
-    (`draft_validator_rejects` / `draft_endpoint_errors` / `draft_circuit_breaks`, disjoint and
-    summing exactly to the `draft_not_ok` aggregate, via `rl_export._draft_cause`'s CHAIN) name the
-    real cause; `AssembledCandidate.draft_ok` and `run_labels`'s `n_draft_not_ok` deliberately do
-    NOT, because they answer "did this call yield usable bytes", which is the same answer either way
-    — so their docstrings say THAT and never mention the validator. Use `rubric.py`'s TA vocabulary
-    ("tripped the circuit breaker") wherever the breaker is described, so the surfaces agree. Two
-    surfaces still say "format check" for a cause-blind `draft_ok is False`
+12. **A drafting call's outcome is READ from a named `cause`, never re-reasoned per call site, and no
+    surface may name the validator unless it knows the validator ran.**
+    `rlm_kit.tools.model.make_model_tool` sets `ok=False` when (a) the deterministic host-side
+    validator declined the text, (b) the model ENDPOINT failed after its transient retries
+    (`endpoint_error` set, `raw=""` — the validator never ran), or (c) the CIRCUIT BREAKER
+    short-circuited (`circuit_broken=True`, `raw=""` — the model was never even called). Collapsing
+    them into one validator-flavoured label rendered a bare connection failure as ``artifact 'a1'
+    failed its format check: Connection refused``: it blames the model for an infrastructure fault in
+    the text a human reads before deciding what to apply, and in `rl_export` it is TRAINING SIGNAL
+    that would teach a trainer to read a 502 as model dishonesty.
+
+    **Since rlm-kit `4fcd50b2` the cause has a NAME, and this project uses it end to end.**
+    `ModelToolResult` exposes `cause` (`"ok"` / `"invalid"` / `"endpoint"` / `"circuit_broken"`, the
+    `CAUSE_*` constants exported from `rlm_kit.tools`) and `validator_ran` as PROPERTIES — not
+    dataclass fields, so they exist only on a LIVE result object and never arrive in a trace by
+    themselves. Hence two halves, and both are required:
+
+    * **Record it at the source.** `tools/drafting.py` holds the live result, so it records `cause`
+      and `validator_ran` onto every drafting `tool_call` beside `endpoint_error`/`circuit_broken`,
+      and `_errors_with_infra` branches on `result.cause` rather than re-deriving. A payload that
+      SAYS what happened beats every downstream reader reconstructing it.
+    * **Read it, with a fallback for old traces.** `trace_io.draft_cause(payload)` PREFERS a recorded
+      `cause` (ignoring any value outside the closed vocabulary) and otherwise derives it —
+      `circuit_broken` → `endpoint_error is not None` → `ok` — reproducing `ModelToolResult.cause`'s
+      own chain exactly, so a pre-`4fcd50b2` trace classifies identically to a fresh one. That
+      matters because `rl_export`, `schema` and `studio/` all read historical traces. `endpoint_error`
+      is tested with `is not None`, NOT truthiness: rlm-kit fills it with `str(exc)`, which is `''`
+      for `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`, `OSError` and
+      `RemoteDisconnected`.
+
+    `draft_cause` is the ONE implementation (invariant 11): `schema._not_ok_problem` (the
+    human/judge-visible problem line) and `rl_export.run_metrics` (`draft_validator_rejects` /
+    `draft_endpoint_errors` / `draft_circuit_breaks`, disjoint and summing exactly to the
+    `draft_not_ok` aggregate) both call it, and neither derives anything itself. Never reintroduce a
+    per-call-site derivation, and never invent a parallel cause vocabulary — the set is rlm-kit's,
+    and it is CLOSED.
+
+    **`rubric.trace_facts`'s `any_circuit_broken` stays a direct `circuit_broken` read, and folding
+    it in would be wrong.** It asks a different question — "did the breaker trip anywhere in this
+    run", a run-level existence check over one field — not "which one of four outcomes was this
+    call". A comment at the fact says so, so a future reader does not "finish the job" by routing a
+    TA fact through a precedence order it has no stake in.
+
+    The deliberate exception stands: `AssembledCandidate.draft_ok` and `run_labels`'s
+    `n_draft_not_ok` are cause-BLIND, because they answer "did this call yield usable bytes", which
+    is the same answer either way — so their docstrings say THAT and never mention the validator. Use
+    `rubric.py`'s TA vocabulary ("tripped the circuit breaker") wherever the breaker is described, so
+    the surfaces agree. Two surfaces still say "format check" for a cause-blind `draft_ok is False`
     (`apply._blocking_problem` and the studio's `applyBlocker`) — that is currently harmless because
     `assemble` always attaches the cause-naming `problems` line and both check `problems` FIRST, so
     the string is unreachable for real assembled data; if either ever becomes reachable, it needs the

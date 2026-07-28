@@ -187,8 +187,9 @@ def test_a_circuit_break_outranks_an_endpoint_error_in_the_problem_line():
 
     `circuit_broken` wins because it is the stronger claim (the model was never called at all).
     `make_model_tool` never sets both, so only a hand-written payload gets here; the point is that
-    the ORDER is a decision this module states, and `rl_export._draft_cause`'s twin chain is already
-    pinned the same way by `test_run_metrics_causes_partition_the_aggregate`.
+    the ORDER is a decision, and it is now stated ONCE — in `trace_io.draft_cause`, which
+    `_not_ok_problem` and `rl_export.run_metrics` both call. This pins the problem-line end of it;
+    `tests/test_draft_cause.py` pins that the two ends cannot come apart.
     """
     events = [_tool_call("draft_memory_file", "a1", draft="", ok=False,
                          errors=["both"], endpoint_error="502", circuit_broken=True)]
