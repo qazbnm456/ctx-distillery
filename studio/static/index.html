@@ -10,12 +10,11 @@
   <header class="app-header">
     <div class="wordmark"><span class="mark">▣</span> ctx-distillery <span class="dim">studio</span></div>
     <div class="header-right">
-      <span class="chip" id="traces-dir-chip"><span class="role-name">traces</span><span class="role-model" id="traces-dir-value"></span></span>
       <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark" aria-label="Toggle theme">☾</button>
     </div>
   </header>
 
-  <main class="layout">
+  <main class="layout no-meta" id="layout">
     <section class="rail">
       <div class="panel load-panel">
         <div class="panel-label">▾ Load a run</div>
@@ -24,7 +23,13 @@
           <button id="load" class="btn btn-primary">Load <span class="arrow">▶</span></button>
         </div>
         <datalist id="runs"></datalist>
+        <!-- The traces DIRECTORY lives here, folded into the run count, not in the header. It is a
+             DIAGNOSTIC: it answers "why is my run not listed", and that question is asked while
+             looking at exactly this panel. A permanent header chip spent the most valuable strip on
+             the page on a fact needed once, and — being a path in a slot sized for a model name —
+             could not even show its identifying end. One sentence, at the point of use. -->
         <div class="hint" id="runs-hint"></div>
+        <p class="tracesdir" id="traces-dir" hidden></p>
       </div>
 
       <!-- The candidate LIST is the review surface, so it sits above the replay feed and takes the
@@ -33,9 +38,29 @@
            one meant scrolling the panel to it, then scrolling INSIDE its own box, whereupon the
            wheel escaped back to the panel and jumped past it. List here, one detail there. -->
       <div class="panel cand-panel">
-        <div class="panel-label">▾ Candidates <span class="dim" id="cand-count"></span></div>
+        <!-- The panel's title says what the panel is FOR. "Candidates (10)" named the contents and
+             left the reader to guess the verb; the whole console exists to get someone to a correct
+             `ctx-distillery-apply --approve …`, so the list says so and then builds it. -->
+        <div class="panel-label">▾ Candidates — tick what to apply <span class="dim" id="cand-count"></span></div>
         <div class="cand-empty" id="cand-empty">Load a run to see its assembled plan.</div>
-        <div class="cand-list" id="cand-list" role="listbox" aria-label="Plan candidates"></div>
+        <!-- Set by clicking a transcript in the stage's EVIDENCE zone. It narrows what is LISTED and
+             nothing else: ticks and the open candidate survive it, because a filter is a way of
+             looking, not a way of choosing. -->
+        <div class="cand-filter" id="cand-filter" hidden>
+          <span id="cand-filter-label"></span>
+          <button type="button" id="cand-filter-clear" aria-label="Clear filter">✕</button>
+        </div>
+        <div class="cand-list" id="cand-list" aria-label="Plan candidates"></div>
+        <!-- The command, assembled from the ticks. The indices are zero-based because that is what
+             `--approve` consumes; nobody has to know that, because nobody types them. -->
+        <div class="apply-cmd" id="apply-cmd" hidden>
+          <div class="ac-head">
+            <span id="ac-count"></span>
+            <button type="button" class="ac-copy" id="ac-copy">copy</button>
+          </div>
+          <code class="ac-line" id="ac-line"></code>
+          <div class="ac-note" id="ac-note"></div>
+        </div>
       </div>
 
       <div class="panel feed-panel">
@@ -56,7 +81,10 @@
           <button type="button" data-view="draft">Draft</button>
         </div>
       </div>
-      <div class="plan-empty" id="plan-empty">Load a run, then pick a candidate.</div>
+      <div class="stage-placeholder" id="plan-empty">
+        <span class="glyph">◫</span>
+        <span>Load a run, then pick a candidate.</span>
+      </div>
       <div class="stage-body" id="stage-body"></div>
     </section>
 

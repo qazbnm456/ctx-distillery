@@ -44,7 +44,7 @@ from ctx_distillery.rubric import plan_from_events, rubric_from_meta, trace_fact
 from ctx_distillery.schema import assemble
 from ctx_distillery.trace_io import load_trace
 
-from .iterations import build_iterations
+from .iterations import _project_label, build_iterations
 from .mapper import to_event
 
 # The workspace ROOT that owns this studio/ member (parents[2] of studio/ctx_distillery_studio/app.py).
@@ -208,6 +208,16 @@ def get_run(run_id: str) -> JSONResponse:
     # bug because no fixture trace carries `meta["rubric"]`, so the list was always empty and the
     # conversion never ran. It took a real trace to fail. An explicit allowlist also means a future
     # field on `Criterion` cannot ride into an HTTP response unnoticed.
+    # The project's BASENAME, via `iterations._project_label` — the one implementation, whose
+    # docstring carries the reason: `meta["project_dir"]` is a real absolute path in the operator's
+    # home and is never surfaced. The console needs it to tell a reviewer WHERE to run the apply
+    # command it builds, which is a safety property: `--project .` copied into the wrong directory
+    # writes into the wrong project.
+    meta: dict = {}
+    for event in events:
+        if event.get("type") == "run_start":
+            meta = (event.get("payload") or {}).get("meta") or {}
+            break
     criteria = [
         {
             "name": getattr(c, "name", ""),
@@ -221,6 +231,14 @@ def get_run(run_id: str) -> JSONResponse:
             "plan": dataclasses.asdict(assembled),
             "rubric_facts": facts,
             "rubric_criteria": criteria,
+            "project": _project_label(meta.get("project_dir")),
+            # The ordered identity of each `transcripts[i]`, straight from `run_start.meta`. This is
+            # what turns a candidate's `key_fields["transcripts"]: [1, 2]` — two bare integers that
+            # the plan panel could not explain at all — into "session b2d5ba2e, session cd68fdc4".
+            # Identifiers only, by construction (`adapters.base.TranscriptId`), so there is nothing
+            # here for redaction to do. Absent on a trace older than the field: the console then
+            # renders the indices as-is rather than inventing names for them.
+            "transcript_index": meta.get("transcript_index") or [],
         }
     )
 
