@@ -12,6 +12,19 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **FIXED — the new `app.test.js` failed on CI while passing locally, and the CI job now spans the
+  version boundary that caused it.** The stub DOM wrote `global.navigator = {}`; `navigator` became a
+  READ-ONLY global in Node 21, so every test in the file threw `Cannot set property navigator of
+  #<Object> which has only a getter` on the runner's Node 24 and none of them did on a local Node 16.
+  The stub now defines it only when the runtime has none, via `Object.defineProperty`.
+
+  The job's own comment is the more interesting half. It read *"No setup-node: the ubuntu runner
+  ships node, and these tests are plain CommonJS — no npm, no package.json, no node_modules"*. Every
+  clause of that is true, and it answers the wrong question: it is about installing DEPENDENCIES, not
+  about pinning a RUNTIME. An unpinned runner version drifts with the image — the same hazard this
+  repo already pins `ruff@0.16.0` against, for the same reason. `studio-static` is now a `[20, 24]`
+  matrix, chosen to straddle the Node 21 boundary rather than to be thorough for its own sake.
+
 - **The studio's review surface, reworked across three passes and two live runs.** It was replaying a
   trace correctly and explaining almost none of it. Each change below is a defect the console had,
   found by reading a real run rather than by taste:
