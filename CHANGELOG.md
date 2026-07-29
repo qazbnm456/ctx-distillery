@@ -104,8 +104,6 @@ never applies anything itself.
   `signature`, and across 60 session files 2,384 thinking blocks had 0 with content. The renderer is
   correct; the gap is upstream, and is now stated instead of hiding inside "deliberately LOSSY".
 
-## [0.1.0] - 2026-07-29
-
 - **Subagent-transcript distillation, OPT-IN** (`ClaudeCodeAdapter.for_project(...,
   include_subagents=True)` / `ctx-distillery distill --include-subagents`). The corpus this was
   designed against is 875 subagent transcripts across 11 projects; three of the findings below are
@@ -1049,7 +1047,8 @@ never applies anything itself.
   into this file, plus two facts specific to this repo: the two workspace members carry their OWN
   `version` (both `0.1.0`) and NOTHING checks them; and the changelog rule that a new version is a
   RENAME of `[Unreleased]` plus a fresh empty one ABOVE it, never a section added under a shipped
-  one. (That rule was first exercised by the `0.1.0` cut this section heads.)
+  one. (0.1.0 is NOT cut — a heading was added once and reverted; a version number is a claim
+  about the software, and this project has not reached a working first version.)
 - **`pytest-asyncio` / `asyncio_mode = "auto"` DECLINED, recorded as a decision** (`CLAUDE.md`
   `## Verify`). All three siblings carry them; all three of this repo's suites have ZERO async tests,
   and the four async call sites are driven from synchronous tests through explicit `asyncio.run(...)`,

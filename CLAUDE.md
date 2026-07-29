@@ -615,15 +615,25 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   (`eval/ctx_distillery_eval/__init__.py`, `studio/ctx_distillery_studio/__init__.py`), so a check
   is writable; none exists. They are independent numbers; don't
   assume bumping the root moved them, and don't assume they must move together.
-- **0.1.0 IS CUT** (`## [0.1.0] - 2026-07-29`), with an empty `## [Unreleased]` above it. That
-  ordering is the rule: a new version is a RENAME of `[Unreleased]` plus a fresh empty one ABOVE it,
-  never a section added underneath a shipped one — getting it backwards files the project's history
-  under a version that never shipped. **`[0.1.0]` and everything below it are now SHIPPED HISTORY:
-  correct a wrong claim there by superseding it in a newer section, not by editing it in place.**
-  That distinction did not exist while `[Unreleased]` was the only heading — until the cut, an
-  earlier entry and a later one correcting it were two drafts of the SAME release note, and carrying
-  both is what made this file 27 lines per entry against the siblings' 8-14. They were collapsed
-  before the cut, which is the right order and the reason to do it at all.
+- **0.1.0 IS NOT CUT, and cutting it is the OWNER'S call, not a tidiness move.** `CHANGELOG.md` has
+  `## [Unreleased]` as its ONLY version heading. When a version is cut it is a RENAME of that heading
+  plus a fresh empty `## [Unreleased]` ABOVE it — never a section added underneath a shipped one,
+  which would file the project's whole history under a version that never shipped.
+
+  **It was cut once, prematurely, and reverted; the reasoning error is worth keeping.** The argument
+  ran: this file is bloated → the bloat is one uncut `[Unreleased]` → so cut it. Every step is true
+  and the conclusion still did not follow, because a release heading is a claim about the SOFTWARE,
+  not a filing convention for its notes. The project had not reached a working first version, so the
+  heading asserted something false; a `v0.1.0` tag added to stop the doc "lying" only made the false
+  claim harder to retract. **A version number is the owner's statement that something is usable —
+  never infer it from the state of the changelog.**
+
+  What DID survive, and was the actual fix: collapsing claim-and-correction pairs. While
+  `[Unreleased]` is the only heading, an entry and a later one correcting it are two drafts of the
+  SAME release note, and carrying both is what took this file to 27 lines per entry against the
+  siblings' 8–14. State the final position once. That is also why a wrong claim in `[Unreleased]` is
+  CORRECTED IN PLACE — the supersede-don't-edit rule applies to shipped sections, and there are
+  none.
 
 ## Known simplifications (stated, not hidden)
 
