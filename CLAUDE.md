@@ -701,6 +701,16 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   outcome says so explicitly for that case). `<project>/.claude/skills/` is where this project
   writes a project-scoped promotion, and it is now known to be picked up, subject to those two
   caveats — not merely "believed to belong there."
+
+  **Two further loading facts from the same research, neither built on, both recorded here because
+  they were about to be lost with the design document that held them.** (a) A project skill loads
+  from `.claude/skills/` in the CWD *and every parent directory up to the repo root* — an upward
+  walk, so a skill installed in a parent of where Claude Code was started is still in scope. This
+  project always writes to `<project>/.claude/skills/` and never relies on the walk. (b) A project
+  skill's `allowed-tools` frontmatter only takes effect once the workspace-trust dialog has been
+  accepted. Irrelevant to DRAFTING the file — `draft_skill_file` authors a body and nothing more —
+  and worth knowing for the human who APPLIES it, which is why it belongs beside `apply_plan`'s
+  other caveats rather than in the drafting tool's docs.
 - **A skill's `references/` and `scripts/` are out of scope.** A real skill directory may carry them;
   `draft_skill_file` authors the `SKILL.md` body only, and `apply.py` writes only that one file.
 - **Skill enumeration is opt-in on the explicit constructor.** `ClaudeCodeAdapter(memory_dir)` (what
