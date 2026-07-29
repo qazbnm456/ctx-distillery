@@ -53,7 +53,14 @@ function load() {
     Trajectory: () => ({ open() {}, reset() {}, showHandle() {} }),
     matchMedia: () => ({ matches: false }),
   };
-  global.navigator = {};
+  // NOT `global.navigator = {}`. Node 21+ defines `navigator` as a getter-only global, so assigning
+  // it throws `Cannot set property navigator of #<Object> which has only a getter` — every test in
+  // this file failed on CI's Node 24 while passing on a local Node 16. Only define it when the
+  // runtime has none, and via `defineProperty` so a future read-only global is not assigned either.
+  // `app.js` touches `navigator.clipboard` in the copy handler alone, which no test here clicks.
+  if (!("navigator" in globalThis)) {
+    Object.defineProperty(globalThis, "navigator", { value: {}, configurable: true });
+  }
   global.fetch = async () => ({ ok: true, json: async () => ({}) });
   global.EventSource = function () { return { addEventListener() {}, close() {} }; };
   const src = fs.readFileSync(path.join(__dirname, "..", "static", "app.js"), "utf8");

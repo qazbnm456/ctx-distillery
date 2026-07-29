@@ -90,7 +90,7 @@ jobs:
         run: uv run --python ${{ matrix.python-version }} --directory studio --package ctx-distillery-studio --extra dev python -m pytest
 
   studio-static:
-    name: studio static contracts (node)
+    name: studio static contracts (node${{ matrix.node-version }})
     runs-on: ubuntu-latest
     # DELIBERATELY ITS OWN JOB, diverging from all three sibling repos, which append this as a STEP
     # to their single studio job. Theirs is one job; ours (`studio-test` above) is a 3-version Python
@@ -101,10 +101,25 @@ jobs:
     # failure precisely in the CI UI instead of hiding a CSS regression inside "studio (py3.12)".
     # This matches how this repo already splits `test` / `eval-test` / `studio-test` / `lint` into
     # separate jobs where the siblings use steps in one.
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two versions, and the boundary between them is the point: `navigator` became a READ-ONLY
+        # global in Node 21, so `global.navigator = {}` — which a stub DOM naturally writes — throws
+        # on 24 and is fine on 20. Every test in `app.test.js` failed on CI while passing locally on
+        # Node 16, because nothing here pinned or spanned a version.
+        #
+        # This job used to say "No setup-node: the ubuntu runner ships node, and these tests are
+        # plain CommonJS — no npm, no package.json, no node_modules." All of that is still TRUE and
+        # it answered the wrong question: it is about installing DEPENDENCIES, not about pinning a
+        # RUNTIME. An unpinned runner version drifts with the image, which is the same hazard this
+        # repo already pins `ruff@0.16.0` against.
+        node-version: ["20", "24"]
     steps:
       - uses: actions/checkout@v4
-      # No setup-node: the ubuntu runner ships node, and these tests are plain CommonJS with
-      # `require("assert")` — no npm, no package.json, no node_modules anywhere in this repo.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
       - name: Studio frontend static contracts
         # toolscout's `nullglob` form, NOT the other two siblings' unguarded loop: with no
         # `*.test.js` present, `for f in studio/tests/*.test.js` runs `node 'studio/tests/*.test.js'`
