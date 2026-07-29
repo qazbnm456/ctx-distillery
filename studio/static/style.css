@@ -83,6 +83,19 @@ button { font-family:var(--mono); cursor:pointer; }
   max-width:1720px; margin:0 auto; padding:20px 24px;
   height:calc(100vh - 56px);
 }
+/* Before a run is loaded there IS no metadata, so the third column is an empty box holding the
+   stage to two thirds of the width for nothing. Collapse it: the stage takes the space until there
+   is something to put beside it. */
+.layout.no-meta { grid-template-columns:320px minmax(0,1fr); }
+.layout.no-meta .meta-col { display:none; }
+/* An empty stage states what to do, inside a shape that reads as a waiting surface rather than a
+   failure. Same dashed treatment the sibling studios use. */
+.stage-placeholder {
+  flex:1; min-height:240px; border:2px dashed var(--border-strong); border-radius:3px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+  color:var(--text-faint); text-align:center; padding:32px; font-size:.85rem;
+}
+.stage-placeholder .glyph { font-size:2.25rem; opacity:.45; line-height:1; }
 .rail { display:flex; flex-direction:column; gap:16px; min-height:0; }
 /* A panel is a BOX, never a scroll container. Scrolling belongs to ONE designated track inside it
    (`.feed`, `.cand-list`, `.stage-body`), which is the discipline every sibling studio uses and the
@@ -148,24 +161,70 @@ button { font-family:var(--mono); cursor:pointer; }
 
 /* ── candidate LIST (rail) + STAGE (middle) ────────────────────────────── */
 .stage-panel { min-width:0; }
+/* An EMPTY scroll track still claims `flex:1`, so before a run is loaded the placeholder and an
+   empty `.stage-body` split the panel and the dashed box got half a column. `:empty` takes the
+   element out of the flex flow entirely — no JS, no class to keep in sync with the render. */
+.stage-body:empty { display:none; }
 .plan-empty, .cand-empty { color:var(--text-faint); font-size:.85rem; padding:12px 4px; }
+
+/* The traces directory the server globs. It answers "why is my run not listed?", so it belongs
+   beside the run list — and it WRAPS, because a real one runs past a hundred characters and a
+   header chip or an ellipsis would show most of a path, which is the same as showing none. */
+.tracesdir {
+  margin:10px 0 0; font-size:.68rem; line-height:1.5; color:var(--text-dim);
+  background:var(--surface-2); border:1px solid var(--border);
+  border-left:2px solid var(--border-strong); border-radius:var(--radius);
+  padding:7px 9px; overflow-wrap:anywhere;
+}
+.tracesdir b {
+  display:block; color:var(--text-faint); font-weight:400; font-size:.62rem;
+  text-transform:uppercase; letter-spacing:.1em; margin-bottom:3px;
+}
 .cand-list { display:flex; flex-direction:column; gap:2px; }
 
 /* A list row is scannable in one line: index, action, and the frame stripe that says whether
    apply_plan would take it. Everything else is the stage's job. */
+/* Two controls per row, because there are two verbs: TICK it for the apply command, or OPEN it on
+   the stage. One row that did both would apply things a reviewer only meant to read. */
 .cand-item {
-  display:flex; gap:8px; align-items:baseline; width:100%; text-align:left;
-  padding:7px 8px; background:none; border:1px solid transparent; border-left-width:3px;
-  border-radius:var(--radius); color:var(--text); font-family:var(--mono); font-size:.79rem;
-  cursor:pointer;
+  display:flex; gap:8px; align-items:center; width:100%;
+  border:1px solid transparent; border-left-width:3px; border-radius:var(--radius);
 }
-.cand-item:hover { background:var(--surface-2); }
 .cand-item.on { background:var(--surface-3); border-color:var(--border-strong); }
 .cand-item.on .ci-action { color:var(--text); }
-.cand-item:focus-visible { outline:2px solid var(--signal); outline-offset:-2px; }
-.ci-index { flex:none; color:var(--text-faint); }
+.ci-pick { flex:none; margin:0 0 0 7px; accent-color:var(--signal); cursor:pointer; }
+.ci-pick:disabled { cursor:not-allowed; opacity:.35; }
+.ci-open {
+  flex:1; min-width:0; display:flex; gap:8px; align-items:baseline; text-align:left;
+  padding:7px 8px 7px 2px; background:none; border:none; border-radius:var(--radius);
+  color:var(--text); font-family:var(--mono); font-size:.79rem; cursor:pointer;
+}
+.ci-open:hover { background:var(--surface-2); }
+.ci-open:focus-visible { outline:2px solid var(--signal); outline-offset:-2px; }
 .ci-action { flex:1; min-width:0; color:var(--text-dim); overflow-wrap:anywhere; }
 .ci-mark { flex:none; font-size:.72rem; }
+
+/* The command the ticks build: the console's actual output. */
+.apply-cmd {
+  flex:none; margin-top:10px; padding:9px 10px; border:1px solid var(--border);
+  border-radius:var(--radius); background:var(--surface-2);
+}
+.ac-head {
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  font-size:.66rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint);
+}
+.ac-copy {
+  font-family:var(--mono); font-size:.66rem; padding:2px 8px; border-radius:var(--radius);
+  background:var(--surface-3); border:1px solid var(--border); color:var(--text-dim);
+}
+.ac-copy:hover { color:var(--signal); border-color:var(--signal); }
+.ac-copy:focus-visible { outline:2px solid var(--signal); outline-offset:1px; }
+.ac-line {
+  display:block; margin-top:7px; font-family:var(--mono); font-size:.72rem; color:var(--text);
+  white-space:pre-wrap; overflow-wrap:anywhere; user-select:all;
+}
+.ac-line:empty { display:none; }
+.ac-note { margin-top:7px; font-size:.66rem; color:var(--text-faint); line-height:1.5; }
 .ci-mark.bad { color:var(--bad); }
 .ci-mark.ok { color:var(--signal); }
 
@@ -209,15 +268,60 @@ button { font-family:var(--mono); cursor:pointer; }
 .chip-ok, .chip-bad { font-size:.7rem; padding:1px 7px; border-radius:999px; }
 .chip-ok { color:var(--ok); background:color-mix(in srgb, var(--ok) 16%, transparent); }
 .chip-bad { color:var(--bad); background:color-mix(in srgb, var(--bad) 16%, transparent); }
-/* One row per key field. The old form was `JSON.stringify(key_fields)` on one line — and the
-   longest value is `reason`, a paragraph of model prose, so the whole object collapsed into an
-   unreadable ribbon exactly where a reviewer needs to read most carefully. */
-.candidate-key-fields {
-  display:flex; gap:8px; margin-top:6px; font-size:.74rem; color:var(--text-dim);
-  word-break:break-word; align-items:baseline;
+/* The stage's Entry view: four ZONES, in the order a reviewer asks the questions. A flat key/value
+   list was the plan's storage shape, not anyone's reading order, and it rendered a paragraph of
+   prose, an absolute path and a list of integers all as the same kind of row. */
+.zone { margin-top:12px; }
+.zone:first-of-type { margin-top:10px; }
+.zone-label {
+  font-size:.62rem; text-transform:uppercase; letter-spacing:.1em; color:var(--text-faint);
+  padding-bottom:4px; border-bottom:1px solid var(--border); margin-bottom:6px;
 }
-.kf-key { flex:none; min-width:11ch; color:var(--text-faint); }
-.kf-value { min-width:0; color:var(--text-dim); word-break:break-word; overflow-wrap:anywhere; }
+.zone-row { display:flex; gap:10px; align-items:baseline; font-size:.76rem; margin:4px 0; }
+/* A transcript is a CONTROL, and has to look like one without becoming a row of buttons: underlined
+   on the accent, no box. Several sit side by side in one cell, so a bordered control would read as
+   a toolbar rather than as a list of sources. */
+.tx-link {
+  padding:0; margin-right:12px; background:none; border:none; font-family:var(--mono);
+  font-size:.76rem; color:var(--signal); text-decoration:underline;
+  text-underline-offset:3px; text-decoration-color:var(--signal-dim); cursor:pointer;
+}
+.tx-link:hover { text-decoration-color:var(--signal); }
+.tx-link:focus-visible { outline:2px solid var(--signal); outline-offset:2px; border-radius:1px; }
+/* The SET state of a toggle. Filled rather than merely brighter, because the same transcript name
+   appears on several candidates and a weight change alone is not legible across a column: the
+   reader has to be able to tell at a glance which one is doing the filtering. The bullet is the
+   affordance for the second click — it reads as "this is on, press to turn it off". */
+.tx-link.on {
+  color:var(--bg); background:var(--signal); text-decoration:none;
+  padding:1px 7px 1px 6px; border-radius:999px; font-weight:700;
+}
+.tx-link.on::before { content:"● "; font-size:.6rem; vertical-align:1px; }
+.tx-link.on:hover { background:var(--signal-dim); }
+/* The active filter. Above the list, removable, and loud enough that nobody wonders why the list is
+   short. */
+.cand-filter {
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  margin-bottom:6px; padding:4px 6px 4px 8px; border-radius:var(--radius);
+  background:var(--surface-3); border:1px solid var(--border-strong);
+  font-size:.7rem; color:var(--text-dim);
+}
+.cand-filter > span { min-width:0; overflow-wrap:anywhere; }
+.cand-filter > span.warn { color:var(--warn); }
+.cand-filter button {
+  flex:none; padding:1px 6px; background:none; border:none; color:var(--text-faint);
+  font-family:var(--mono); cursor:pointer;
+}
+.cand-filter button:hover { color:var(--text); }
+.cand-filter button:focus-visible { outline:2px solid var(--signal); outline-offset:1px; }
+.zr-key { flex:none; min-width:11ch; color:var(--text-faint); }
+.zr-value { min-width:0; color:var(--text); word-break:break-word; overflow-wrap:anywhere; }
+/* The planner's own prose. It reads as a paragraph because it IS one; squeezing it into the value
+   column of a key/value row was what made the most-read field the least readable. */
+.zone-prose {
+  margin:0; font-size:.78rem; color:var(--text-dim); line-height:1.6; overflow-wrap:anywhere;
+}
+
 /* `white-space:pre-wrap` alone wraps at WHITESPACE only, so a drafted body containing one
    attacker-length unbroken token (a base64 blob, a 5000-char path) blew straight through the
    column and gave the whole PAGE a horizontal scrollbar. `overflow-wrap:anywhere` is the fix and it
@@ -235,6 +339,10 @@ button { font-family:var(--mono); cursor:pointer; }
 /* ── rubric panel ───────────────────────────────────────────────────────── */
 .rubric-panel { min-width:0; }
 .rubric-empty { color:var(--text-faint); font-size:.85rem; }
+/* Same shape of bug one column over: `renderRubricBody` empties this node rather than removing it,
+   and a zero-height flex ITEM still earns the column's `gap:14px`. The whole meta column sat 14px
+   low with nothing visible above it to explain why. */
+.rubric-empty:empty { display:none; }
 /* The meta column: the sibling studios' `.module` card, lifted with their exact values. The old
    form was a single flat panel of `key ......... JSON.stringify(value)` rows, which rendered ten
    INTEGERS as right-aligned prose — no number styling, no grouping weight, nothing to scan. */
@@ -243,16 +351,24 @@ button { font-family:var(--mono); cursor:pointer; }
   -webkit-mask-image:linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 10px), transparent);
           mask-image:linear-gradient(to bottom, transparent, #000 12px, #000 calc(100% - 10px), transparent);
 }
-/* `.module` carries `overflow:hidden` (corner clipping), which flips its flex automatic min-size to
-   0 — inside this fixed-height column the modules would COMPRESS to fit (content crushed, nothing
-   left to scroll) instead of overflowing. Pin them at content height; the COLUMN is the scroller.
-   Same note the siblings carry, same reason. */
+/* Pin the modules at content height; the COLUMN is the scroller. Without this, inside a
+   fixed-height flex column they COMPRESS to fit — content crushed, nothing left to scroll.
+   `flex-shrink:0` is the whole guard. An earlier version of this note credited `.module`'s
+   `overflow:hidden` (which flips a flex item's automatic min-size to 0) as part of the mechanism;
+   that declaration is gone now — it was clipping the telemetry popover — and nothing here changed,
+   because the shrink was never what `overflow` was doing. */
 .meta-col .module { flex-shrink:0; }
 .module {
   background:var(--surface-1); border:1px solid var(--border); border-radius:var(--radius);
-  overflow:hidden;
+  /* NOT `overflow:hidden`. It was here so the cap's square top corners were clipped by the module's
+     radius — the cap now carries that radius itself, which is the same result without turning the
+     module into a clipping context. It WAS one: the telemetry popover rendered correctly and was
+     then cut away entirely, so hovering a stat did nothing. */
 }
-.module-cap { height:3px; background:linear-gradient(90deg, var(--signal), transparent); }
+.module-cap {
+  height:3px; background:linear-gradient(90deg, var(--signal), transparent);
+  border-radius:var(--radius) var(--radius) 0 0;
+}
 /* head = title + a HEADLINE, cve-reverser's `.module-head h4` + emblem shape. The headline is a
    FACT, never a verdict: this rubric is reward-free and decides nothing met/unmet (CLAUDE.md), so a
    pass/fail emblem is exactly the thing it may not grow. "read -> draft" is an observation about
@@ -286,8 +402,20 @@ button { font-family:var(--mono); cursor:pointer; }
 .kv > code.zero { color:var(--text-faint); }
 .kv > code.bad { color:var(--bad); }
 .kv > code.ok { color:var(--signal); }
-/* What the category ASKS. Sits ABOVE the facts, because a reader who does not already know the
-   rubric cannot interpret `min_draft_step: 1` after the fact. */
+/* The criterion's text, behind a disclosure — reference material, not the card's content. Closed it
+   costs one line; open it reads like the prose it is. */
+.module-why { margin:0 0 9px; }
+.module-why > summary {
+  cursor:pointer; font-size:.66rem; text-transform:uppercase; letter-spacing:.06em;
+  color:var(--text-faint); list-style:none;
+}
+.module-why > summary::-webkit-details-marker { display:none; }
+.module-why > summary::before { content:"▸ "; }
+.module-why[open] > summary::before { content:"▾ "; }
+.module-why > summary:hover { color:var(--text-dim); }
+.module-why > summary:focus-visible { outline:2px solid var(--signal); outline-offset:2px; }
+.module-why > p:first-of-type { margin-top:7px; }
+/* What the category ASKS. */
 .module-desc {
   margin:0 0 9px; font-size:.7rem; color:var(--text-faint); line-height:1.5; overflow-wrap:anywhere;
 }
@@ -302,6 +430,50 @@ button { font-family:var(--mono); cursor:pointer; }
   margin:8px 0 0; font-size:.7rem; color:var(--warn); line-height:1.5; overflow-wrap:anywhere;
 }
 .rubric-list { display:flex; flex-direction:column; gap:14px; }
+
+/* Run telemetry: one number large enough to read without hunting for it, then the counts. The
+   elapsed figure gets display size because it is the only one that answers "was this cheap or
+   expensive", which is the question a reviewer brings to this column first. */
+.t-elapsed {
+  font-size:1.75rem; font-weight:700; letter-spacing:.02em; color:var(--text);
+  font-variant-numeric:tabular-nums; line-height:1.1;
+}
+.t-note { margin:6px 0 10px; font-size:.66rem; color:var(--text-faint); line-height:1.5; }
+.t-elapsed + .stat-grid { margin-top:10px; }
+/* Stat cells restored for THIS module only. They were removed from the rubric because those facts
+   are heterogeneous and two of them are ORDINALS, where a big bold number states something false.
+   Telemetry is four counts and a duration: all magnitudes, all comparable, which is exactly what
+   the cell grid is for. */
+/* Each stat explains ITSELF on hover. The native `title` stays as a fallback (touch, and copying
+   the text), but a browser tooltip arrives after a second, unstyled, and truncates — for a field
+   whose whole problem is that a bare count says nothing, that is too slow to be the answer.
+   The popover is anchored to the GRID, not the cell, so it spans the module's width and can never
+   overflow horizontally out of the meta column, which scrolls and therefore clips. */
+.stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; position:relative; }
+.stat {
+  background:var(--surface-3); border-radius:var(--radius); padding:7px 9px; min-width:0;
+  border:1px solid transparent; cursor:help; transition:border-color 120ms var(--ease);
+}
+.stat:hover, .stat:focus-within { border-color:var(--signal); }
+.stat .sl { border-bottom:1px dotted var(--border-strong); display:inline-block; }
+.stat:hover .sl { border-bottom-color:var(--signal); color:var(--signal); }
+.stat-pop {
+  display:none; position:absolute; left:0; right:0; top:100%; margin-top:6px; z-index:20;
+  background:var(--surface-2); border:1px solid var(--signal); border-radius:var(--radius);
+  box-shadow:0 8px 24px rgba(0,0,0,.45); padding:9px 11px;
+  font-size:.72rem; line-height:1.5; color:var(--text-dim); text-transform:none; letter-spacing:0;
+}
+.stat-pop b {
+  display:block; font-size:.66rem; color:var(--signal);
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px;
+}
+.stat:hover .stat-pop, .stat:focus-within .stat-pop { display:block; }
+.stat .sv { font-size:1.05rem; font-weight:700; font-variant-numeric:tabular-nums; }
+.stat .sl {
+  font-size:.62rem; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint);
+  overflow-wrap:anywhere;
+}
+.stat.zero .sv { color:var(--text-faint); }
 
 /* ── trajectory drawer (DESIGN.md §5.7) ─────────────────────────────────── */
 /* Same tokens as everything above — no new colour, no new radius, no vendored asset. The drawer is

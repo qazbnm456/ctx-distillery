@@ -12,6 +12,48 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The studio's review surface, reworked across three passes and two live runs.** It was replaying a
+  trace correctly and explaining almost none of it. Each change below is a defect the console had,
+  found by reading a real run rather than by taste:
+  * **Plan review is a rail LIST + a middle STAGE.** The middle column rendered all ten candidates
+    with every drafted body inline — 32,091 characters, each `<pre>` capped at 260px with its own
+    scrollbar, inside a panel that also scrolled, so reading candidate 5 threw you to candidate 6.
+  * **One scroll track per panel**, plus the siblings' `mask-image` fade that distinguishes a list
+    that ENDS from one that continues.
+  * **Ticks build the apply command.** The console exists to get a reviewer to a correct
+    `ctx-distillery-apply --approve …`; it now assembles that from checkboxes, WITHOUT `--confirm`
+    (invariant 8: this must never be the thing that applied a plan) and naming the project directory
+    to run it from. `keep` and blocked candidates are disabled with the reason — `apply_plan` returns
+    `STATUS_NOOP` for a keep, so a tick invents an action the writer does not have.
+  * **The stage's Entry view is four ZONES** (proposes / evidence / why / if applied), because
+    `key_fields` is FREE-FORM and two real runs used entirely different keys. Transcript indices
+    resolve to identities through `transcript_index` — `[1]` was unexplainable before that field
+    existed — including inside PROSE, under a rule narrow enough that a bare `[3]` is never a link.
+  * **Trajectory: WIDTH IS TIME.** One of nine calls took 242.6s of 313.4s on a real run; a column of
+    equal-height rows cannot show that. Plus turn-boundary buttons and a search over each turn's
+    reasoning + code + output (one turn's REPL echo ran 16,038 characters).
+  * **The meta column stopped stating more than its facts measure.** `draft -> read` and `0 / 3 read`
+    both rendered TOOL-CALL counts as conclusions about the planner, whose main evidence path is the
+    `transcripts` REPL variable that neither fact can see. Fact rows are labelled rather than
+    de-underscored ("n non keep" is a variable name, not a label), criteria descriptions are SERVED
+    from the run's own meta rather than copied, and run telemetry moved out of the drawer.
+  * **`TRACES` left the header.** A diagnostic occupying the most valuable strip on the page, in a
+    slot copied from siblings where it holds a short model name — so a path truncated to
+    `/Users/operator/Documents/…`, losing the only segment anyone reads it for.
+- **FIXED — three bugs found while integrating that work, none of which a green suite would catch.**
+  * An **infinite loop**: `appendProseWithLinks` and `transcriptsCitedBy` drove the same module-level
+    `/g` regexes with `exec`, and the render is re-entrant, so a shared `lastIndex` restarted the
+    outer loop forever — a 4 GB heap exhaustion, not a slow page. Invisible on the first run, whose
+    evidence is integer lists, so the loop never had a body to re-enter from. Now `matchAll`.
+  * `syncMeta()` sat **after a `return`** in `renderRubric` — unreachable. The meta column still
+    expanded, but only because `loadTelemetry` calls it too, so the layout was correct exactly when
+    the `/iterations` fetch happened to succeed; its `catch` is a deliberate silent early return.
+  * A **race**: `loadConfig()` and `loadRunsList()` were fired together, the second renders from
+    state the first sets, and nothing re-renders it — losing was silent and permanent. Now sequenced.
+  `studio/tests/app.test.js` is new and exists because of these: `static-contract.test.js` reads
+  `app.js` as TEXT and `trajectory.test.js` covers the drawer, so the plan-review path — the
+  console's actual product — had no behavioural coverage at all.
+
 - **Reported and fixed a `payload_cause` defect UPSTREAM, then collapsed this project's copy into
   it.** rlm-kit's `trace.payload_cause` documents itself as the read-side mirror of
   `ModelToolResult.cause`, and the two disagreed on the case that matters most: the write side has

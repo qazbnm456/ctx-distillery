@@ -127,37 +127,32 @@ fields, in `--text-faint`.
 
 ### 5.1 Header
 `▣ ctx-distillery studio` wordmark (`▣` in `--signal`, "studio" in `--text-faint`). Sticky, 56px,
-one hairline bottom border. Right side: **one chip only** — `TRACES` + the directory from
-`GET /v1/config`, shown as its **last two path segments** (`…/ctx-distillery/traces`) with the full
-value on the chip's `title` — then the theme toggle (`☾`).
+one hairline bottom border. Right side: **the theme toggle (`☾`) and nothing else.**
 
-*Why not the siblings' `22ch` head-truncation.* Their chip holds a MODEL NAME: short, and identified
-by its head. This one holds a PATH — 43 characters on the machine this was built against — so head
-truncation rendered `/Users/operator/Documents/…`, hiding the only segment a reader is checking. Two
-segments rather than one because the last is almost always `traces`, the same word for every project.
-
-*Not copied:* the siblings' three model-role chips (`planner / analyst / classifier`). This project's
-model is an INJECTED `chat_fn`, not an env-var-selected role trio, and `/v1/config` returns
-`{"traces_dir": ...}` and nothing else. The traces directory is what genuinely varies by deployment
-and what a "why is my run not in the list" user needs to see, so it takes the slot. **Never render a
-model name here** — the server does not know one, and inventing the chip would be fabricating a field
-the response lacks. (The Trajectory drawer's Init pane DOES show `planner` / `drafter`, and that is
-not a loophole: those are recorded facts about one past run, read out of that run's own
-`run_start.meta`, and they render as ordinary `kv` rows — never as a header chip, and never on a page
-state where no run is loaded.)
+*The `TRACES` chip was removed, and the reasoning generalises.* It was a DIAGNOSTIC — it answers
+"why is my run not listed", a question asked about once per session — occupying the most valuable
+strip on the page permanently. Worse, the slot was copied from the siblings, where it holds a MODEL
+NAME: short, and identified by its head. This one held a PATH, so `max-width:22ch` truncated it to
+`/Users/operator/Documents/…`, dropping the only segment anyone reads a traces path for. **A borrowed
+component carries the content-shape assumptions of the thing it was borrowed for.** It now lives in
+§5.2, at the point of use.
 
 ### 5.2 Load box (left rail, top)
-`▾ LOAD A RUN`. One row: a mono text input bound to a `<datalist>` filled from `GET /v1/runs`
-(placeholder `pick or type a run id…`, `spellcheck="false"`), and a **Load ▶** button — the only
-`--signal`-filled control on the page. Enter in the input activates it. Below, a `.hint` line
-reporting `N run(s) available`, or `no trace files found — check /v1/config's traces_dir`, or
-`could not reach /v1/runs`. The hint is diagnostic on purpose: the two ways this page looks broken
-are a wrong `CTXD_TRACES_DIR` and a dead server, and it distinguishes them.
+`▾ LOAD A RUN`: a `datalist`-backed input over `GET /v1/runs` plus a `Load ▶` primary button. Enter
+submits. Below it a one-line hint carrying the RUN COUNT alone, and below that the traces directory
+as its own labelled, WRAPPING block (`.tracesdir`, hidden until known).
 
-*Not copied:* there is **no primary action button** in the sibling sense (Classify / Solve), no
-`POST /v1/*`, no run-id preview, and no `run-core.js`. There is no live-drive endpoint at all — see
-`README.md`'s "Scope: replay-only, v1" for the three reasons and the reopening conditions. **Load is
-the primary action, and it is a read.**
+*Two decisions, and the second overrules the first.* The location reads best folded into the count
+as one sentence, and `homeRelative()` keeps it short by folding `$HOME` to `~` (which also stops a
+screenshot leaking the operator's username). But a traces directory OUTSIDE `$HOME` — a temp dir, a
+mounted volume — runs past a hundred characters, and inside a sentence in a 320px rail that is
+unreadable however it is folded. So the sentence keeps the count and the path gets a block that can
+wrap; the unfolded value stays on `title` for a copy-paste.
+
+*The two loaders are SEQUENCED* (`loadConfig().then(loadRunsList)`), not fired together. The block is
+rendered from `TRACES_DIR`, which the other fetch sets, and nothing re-renders it — two unawaited
+requests racing over one piece of state, where losing is silent and permanent. Both are tiny and
+local, so config usually wins and the bug would only appear somewhere else.
 
 ### 5.3 Replay feed (left rail, fills remaining height)
 `▾ REPLAY FEED` + a status word (`replaying…` → `done`, or `connection closed`). A scroll container,
@@ -201,11 +196,50 @@ wheel hands off mid-gesture — the reader is thrown past what they were reading
 the top/bottom `mask-image` fade, which is what distinguishes a list that ENDS from one that
 CONTINUES. Pinned by `static-contract.test.js`.
 
-**Rail, middle — `▾ CANDIDATES (n)`.** One `.cand-item` per `AssembledCandidate`: index · action ·
-the artifact's short name · a single glyph carrying the only thing a list is scanned for (`⚠` when
-`apply_plan` would refuse it, `◆` when it is a backed promotion). The left stripe repeats the §2
-frame state **from the same derived value the stage uses**, so rail and stage cannot disagree.
-`↑`/`↓` step through the list; the selection scrolls into view.
+**Rail, middle — `▾ CANDIDATES — TICK WHAT TO APPLY (n)`.** The title names the panel's JOB, not its
+contents: this console exists to get a reviewer to a correct `ctx-distillery-apply --approve …`, and
+"Candidates (10)" left them to guess the verb.
+
+One `.cand-item` per `AssembledCandidate`, carrying **two controls because there are two verbs**: a
+checkbox that puts it in the apply command, and the rest of the row, which opens it on the stage.
+One control doing both is how a reviewer applies something they only meant to read. The row shows
+action · the artifact's short name · one glyph for the only thing a list is scanned for (`⚠` refused,
+`◆` backed). The left stripe repeats the §2 frame state **from the same derived value the stage
+uses**, so rail and stage cannot disagree. `↑`/`↓` step through the VISIBLE rows (see the filter
+below); the selection scrolls into view.
+
+*The zero-based INDEX is not shown, and that is the point.* It is what `--approve` consumes, so
+renumbering it from 1 would break the mapping — but nobody needs to read it either, because the
+command below is assembled from the ticks. Printing it only invited "why does this start at 0" for
+a number nobody types.
+
+**The apply command** (`.apply-cmd`) assembles under the list from the ticks, with a copy button:
+
+    ctx-distillery-apply <traces>/<run-id>.jsonl --project . --approve 0,5
+
+**Without `--confirm`, deliberately.** That flag is what writes, and a copyable one-liner that writes
+on first paste would make this console the thing that applied a plan — which invariant 8 says it must
+never be. The note says it is a dry run, and names the project directory to run it from (the
+BASENAME, via `iterations._project_label`, whose docstring carries the reason the full path is never
+surfaced): `--project .` pasted in the wrong directory writes into the wrong project.
+
+**`keep` is not tickable, and neither is a blocked candidate.** `apply_plan` returns `STATUS_NOOP`
+for a keep — "there is nothing to apply" — so a tick for it invents an action the writer does not
+have, and the word already means "leave this alone". Both cases DISABLE the box rather than hiding
+it, with the reason on the row: a row that silently cannot be chosen reads as an oversight. The
+predicate is `notApplicable()`, keyed on what `apply_plan` would actually DO, which is the only
+honest basis for offering the control.
+
+**The transcript filter.** Clicking a transcript in the stage's EVIDENCE zone narrows the list to
+candidates citing it; several can be active at once and they combine with **AND**, stated in the chip
+(`citing BOTH …` / `citing ALL 3 …`). AND rather than OR because on real data each transcript is
+already cited by most of the plan (9, 7 and 4 of 10 candidates on one run), so OR broadens to
+everything and discriminates nothing — while AND answers the question the planner's own instructions
+care about: which candidates draw on more than one conversation.
+
+*A filter is a way of LOOKING, not a way of choosing.* Ticks and the open candidate survive it, or
+the apply command would change as the reviewer changed where they were looking. That leaves one
+hazard, so the chip says it outright: `— 2 ticked candidates hidden`, in `--warn`.
 
 *Why a list and not the old inline stage.* The middle column used to render every candidate with its
 drafted body expanded. Measured on a real run: **32,091 characters of draft across 10 candidates**,
@@ -214,14 +248,45 @@ candidate 5 meant scrolling the panel to it, scrolling inside its box, and being
 6 the moment the wheel escaped. List here, one detail there: the siblings' rail → stage relationship.
 
 **Middle stage — the selected candidate, one at a time.** Head: `▾ [N] <action>` plus an
-`Entry | Draft` switch (hidden when there is no draft). *Entry* view: the head row (`#N` · action
-pill · `artifact_id` · a `draft ok` / `draft failed` chip when `draft_ok` is not null), then
-`key_fields` **one row per field** — never `JSON.stringify` of the whole object, because the longest
-value is `reason`, a paragraph of model prose, and the object collapsed into an unreadable ribbon
-exactly where a reviewer must read most carefully — then any per-candidate `problems`, then the `⚠`
-refusal marker when the candidate is **blocked** (§2), last, so it reads as the verdict on
-everything above it. *Draft* view: the drafted bytes in a `<pre>`, `white-space:pre-wrap`,
-`overflow-wrap:anywhere`, filling the stage's own scroll track (**no second scroller** — see above).
+`Entry | Draft` switch (hidden when there is no draft). *Draft* view: the drafted bytes in a `<pre>`,
+`white-space:pre-wrap`, `overflow-wrap:anywhere`, filling the stage's own scroll track (**no second
+scroller** — see above).
+
+*Entry* view is **four ZONES, in the order a reviewer asks the questions** — PROPOSES, EVIDENCE, WHY,
+IF APPLIED — with anything unrecognised under OTHER. It was a flat list of `key_fields` rows, which
+is the plan's STORAGE shape rather than anyone's reading order, and `key_fields` is **free-form: the
+planner invents the keys.** Two real runs proved how far apart they can be: one wrote
+`transcripts: [0, 1, 2]`, `reason`, `target_path`; the other invented `sources`, `topic`,
+`procedure`, `related_open_item`. So the zones group by the QUESTION a field answers, each field
+renders in the shape it deserves, and OTHER exists because a free-form field must never vanish.
+
+* **PROPOSES** is synthesised, not copied: the plan carries an action and an artifact id, never a
+  sentence saying what it wants, and stitching those together is this console's job.
+* **EVIDENCE** resolves transcript indices to identities via `transcript_index` — `[1]` becomes
+  `session b2d5ba2e`, or `subagent a00d251c of 30f8147f`. Until that field existed nothing anywhere
+  could map an index back to a file, so `transcripts: [1, 2]` explained nothing at all. Each is a
+  CONTROL (see the filter above); the SET one is a filled pill, because the same name appears on
+  several candidates and a weight change alone is not legible down a column.
+* **WHY** gets prose treatment, because `reason` IS a paragraph. Squeezing it into the value column
+  of a key/value row made the most-read field the least readable.
+* **IF APPLIED** shows `target_path` as its file NAME, full path on `title`: the verbatim value is
+  mostly a home directory, repeated on every row, and identifies the machine.
+* Then any per-candidate `problems`, then the `⚠` refusal marker when the candidate is **blocked**
+  (§2), LAST, so it reads as the verdict on everything above it.
+
+**Transcript references inside PROSE are linkified too, under a deliberately narrow rule.** The
+second run wrote its evidence as `sources: "transcripts[2],[12] (siblings under session 30f8147f,
+not independent of each other)"`. A run must OPEN with the word `transcript(s)[N]`; only then do
+`,[N]` / `-[N]` continuations join it. A bare `[N]` is never matched — it could be a footnote or an
+array index, and **a wrong link is worse than no link: it invites filtering by evidence that was
+never claimed.** A range links only the indices actually written (`[23]-[26]` gives 23 and 26, not
+24 and 25), and the number is RANGE-CHECKED before it becomes clickable, because it is model-supplied
+and a hallucinated `transcripts[99]` must read as the prose it is.
+
+*Use `String.matchAll`, never a shared `/g` regex with `exec`.* The render is re-entrant — linkifying
+one candidate's prose asks which OTHER candidates cite the same transcript, scanning their prose with
+the same objects — so a mutable `lastIndex` made the outer loop restart forever: a 4 GB heap
+exhaustion, not a slow page. Pinned by `tests/app.test.js`.
 
 Written with **`el.textContent` ONLY, never `innerHTML`**: a drafted memory/skill body is untrusted
 model output, not markup to render. Absolute across every file under `static/`. It is also why this
@@ -231,10 +296,45 @@ Run-level `problems` pin under the candidate LIST, not inside the stage — they
 not to whichever candidate happens to be selected. Empty states: `Load a run, then pick a
 candidate.` → `Loading…` → either the stage or `this run's plan proposed no candidates.`
 
-**Right column — meta modules, one per ATLAS category.** `.meta-col` of `.module` cards, each with
-the siblings' 3px `--signal → transparent` `.module-cap`, an `<h4>` title, and a right-side
-**headline**. Body: the criterion's own `description`, then one `.kv` row per fact (name left, value
-right, mono, `tabular-nums`).
+**Right column — RUN TELEMETRY, then one module per ATLAS category.** `.meta-col` of `.module`
+cards, each with the siblings' 3px `--signal → transparent` `.module-cap`, an `<h4>` title, and a
+right-side **headline**. **The column collapses entirely** (`.layout.no-meta`) until `#rubric-list`
+has children, so an unloaded stage takes the width the metadata does not yet need; the toggle is
+`syncMeta()`, called from every place the column's contents change and nowhere else.
+
+*Telemetry sits FIRST*: what the run COST and what it did, which previously lived only inside the
+Trajectory drawer — a reviewer had to open a bottom sheet to learn that a 10-candidate plan took five
+minutes. An elapsed HEADLINE at display size (the only figure answering "was this cheap or
+expensive"), then four counts. Every field degrades to an em dash rather than to zero: this endpoint
+answers "what does the trace say", and a trace that says nothing must not render as a run that did
+nothing. Each cell carries a styled `.stat-pop` on hover OR keyboard focus — a native `title` arrives
+after a second, unstyled and truncated, which for a field whose whole problem is that a bare count
+says nothing is too slow to be the fix. `title` stays as the touch and copy-text fallback.
+
+*`.module` is NOT a clipping context.* It carried `overflow:hidden` so the cap's square top corners
+were clipped by the module's radius; the cap now carries that radius itself, same result. The clip
+was cutting the telemetry popover away entirely. An earlier note credited that `overflow` with
+keeping modules from compressing inside the fixed-height column — it does not: `flex-shrink:0` on
+`.meta-col .module` is the whole guard, and every module renders into that column.
+
+Below telemetry, one module per category. Body: the criterion's own `description` behind a
+`▸ what this asks` disclosure, then one `.kv` row per fact. Two always-open paragraphs above every
+card made the column mostly prose, and a reader scanning four cards for four numbers read past all
+of it every time; with the row labels saying what they count, the text is reference material.
+
+**Fact rows are LABELLED, not de-underscored.** `key.replace(/_/g, " ")` gives "n non keep", which is
+a variable name with the underscores taken out. The siblings use plain nouns for their stat cells
+("turns", "servers", "tool calls"), and the harder half here is that stripping `n_` is not enough:
+`non_keep` counts "candidates proposing a CHANGE", which its own key never says. The raw key goes on
+the row's `title`, for a reader cross-referencing the trace.
+
+**No `.stat` cells in the rubric modules, and that is not an inconsistency.** Telemetry is four
+counts and a duration: all magnitudes, all comparable, which is exactly what a cell grid is for. The
+rubric facts are heterogeneous, and two of them are ORDINALS — `min_draft_step: 1` is "the first
+draft happened at step 1", not a quantity, so a big bold number in a comparison grid states something
+false about it, and splitting it from `min_read_step` destroys the only thing TA asks: which came
+first. **The same component is right in one panel and wrong in the other, decided by the data's type
+rather than by visual consistency.**
 
 *The description is SERVED, never copied.* `GET /v1/runs/{id}` returns `rubric_criteria`, recovered
 from the run's own `run_start` meta by `rubric.rubric_from_meta`. Four descriptions transcribed into
@@ -451,8 +551,9 @@ into a score, a bar, or a grade · don't key anything on `candidate.artifact_id`
 plan's CLAIM and the exact thing this design exists to distrust.
 
 ## 8. Acceptance (in a browser)
-1. First screen is unmistakably this product: `▣ ctx-distillery studio` in mono, a single `TRACES`
-   chip showing a real directory, and a Load box — no hero, no marketing.
+1. First screen is unmistakably this product: `▣ ctx-distillery studio` in mono, a Load box naming a
+   real traces directory, and a COLLAPSED meta column (two tracks, not three) — no hero, no
+   marketing, and no header chip.
 2. Loading a run id from the `<datalist>` fills the **Replay feed** bottom-up, the status goes
    `replaying…` → `done`, the PLAN renders only after `done`, and the `◫ Trajectory` handle appears
    at the bottom right (it was hidden before any run was loaded).
@@ -464,8 +565,18 @@ plan's CLAIM and the exact thing this design exists to distrust.
    also outlines its linked timeline entries.
 4. A `promote_to_memory` candidate whose drafting call succeeded shows a `--signal` stripe in the
    rail LIST and a `◆`; selecting it heads the stage `▾ [N] promote_to_memory`, the `Entry` view
-   shows the `draft ok` chip and one row per `key_fields` entry, and the `Draft` switch shows its
-   **verbatim drafted markdown+frontmatter**. Exactly ONE scrollbar is reachable in that column.
+   renders the four ZONES with EVIDENCE naming real sessions (or `subagent … of …`), and the `Draft`
+   switch shows its **verbatim drafted markdown+frontmatter**. Exactly ONE scrollbar is reachable in
+   that column.
+4b. **Ticking builds a command.** Tick two promotions and the block under the list reads
+   `ctx-distillery-apply … --approve <i>,<j>` with a working `copy`, no `--confirm`, and a note
+   naming the project directory. A `keep` row's box is DISABLED and says why; so is a blocked one.
+4c. **A transcript is a control.** Clicking one in EVIDENCE fills it as a pill and shortens the list
+   to citing candidates; clicking a second says `citing BOTH …`; `✕` clears. If a ticked candidate
+   is hidden by the filter, the chip says so in `--warn`. `↑`/`↓` walk only the visible rows.
+4d. **Two runs, two shapes.** Load a run whose evidence is integer lists and one whose evidence is
+   prose (`transcripts[2],[12] (…)`): both render links, neither hangs, and a bare `[3]` elsewhere in
+   the same prose is NOT a link.
 5. A candidate the apply step would refuse shows the full `--bad` frame, its `problems` lines and the
    `⚠` marker, and stays ON SCREEN. Check **both** shapes: (a) an `artifact_id` matching no drafting
    call, and (b) a promotion whose assembled draft is EMPTY though it carries no `problems` and may

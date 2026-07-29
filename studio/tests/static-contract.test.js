@@ -58,9 +58,11 @@ test("every model-supplied field wraps attacker-length tokens", () => {
   // whole page a horizontal scrollbar.
   //
   // The list is SELECTORS, so it goes stale silently when a surface is restyled: `.rubric-fact-value`
-  // became `.kv > code` in the meta-column rework and this assertion is what noticed. Whenever a
-  // class here is renamed, move the entry — do not drop it, and do not let the loop shrink.
-  for (const sel of [".fr-fields", ".candidate-key-fields", ".kf-value", ".kv > code"]) {
+  // became `.kv > code` in the meta-column rework, and `.candidate-key-fields` / `.kf-value` became
+  // `.zr-value` / `.zone-prose` when the stage was rebuilt into zones. Both times this assertion is
+  // what noticed. Whenever a class here is renamed, MOVE the entry — do not drop it, do not let the
+  // loop shrink, and do not keep a dead CSS rule alive just to satisfy the old name.
+  for (const sel of [".fr-fields", ".zr-value", ".zone-prose", ".kv > code"]) {
     const pattern = sel.replace(/[.>]/g, (c) => "\\" + c).replace(/\s+/g, "\\s*");
     const rule = css.match(new RegExp("(^|\\n)" + pattern + "\\s*\\{([^}]*)\\}"));
     assert.ok(rule, sel + " rule is missing");
