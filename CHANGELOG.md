@@ -35,9 +35,15 @@ never applies anything itself.
   into the SFT bundle at `sft_turns[*].input.initial.rubric[*].description`, so the wording is read
   by a model being trained. It now names the unit and the blind spot in the same breath, pinned by a
   test. (It never reached the eval judge — `judge.py` is rubric-free by design.)
-- **rlm-kit pin `4fcd50b2` → `6d010447`.** Brings the fix above plus `export_actions`' `outcome.cause`
-  / `outcome.error`, which is ADDITIVE — `rl_export` reads neither, and its own per-cause metrics
-  keep coming from `draft_cause`.
+- **rlm-kit pin `4fcd50b2` → `fe00f401`.** Brings the classifier fix above, `export_actions`'
+  `outcome.cause` / `outcome.error` (ADDITIVE — `rl_export` reads neither, and its own per-cause
+  metrics keep coming from `draft_cause`), and the ROOT-CAUSE fix that followed: `make_model_tool`
+  now records the exception TYPE when `str(exc)` is empty, so `endpoint_error` can no longer be
+  present-but-falsy at all. Fixing the classifier stopped the misreading; this removes what made the
+  misreading possible, and every consumer's error text gains a name where it had an empty string.
+  Swept across all eight sibling projects: two carried the misreading through the shared helper,
+  one had reproduced it independently in its own code, two were never exposed, and
+  one had its `SystemExit` message reduced to a bare CVE id and a colon by it.
 
 - **The studio's plan review is now a rail LIST + a middle STAGE, the sibling studios' shape.** The
   middle column used to render all ten candidates with every drafted body expanded: measured on a
