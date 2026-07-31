@@ -12,6 +12,40 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **`make check` is now the one verification entrypoint, and a `Makefile` is not a hole in invariant
+  1.** Full verification was FIVE commands across four suites plus lint, existing only as ~40 lines of
+  `CLAUDE.md ## Verify` prose whose lead-in still said "Run BOTH" — an undercount since the `eval/`,
+  `studio/` and node suites landed. `tests/test_no_write_capability.py` scans `ctx_distillery/**.py`,
+  so a Makefile is outside it by construction and nothing on the RLM path can reach it. One
+  divergence from the documented commands, and it is a real failure the file fixes: `make test` runs
+  `uv run python -m pytest -q`, because the bare `pytest -q` the docs give assumes an ACTIVATED venv
+  and otherwise dies with "No such file or directory".
+
+- **Invariant 10's body and three `studio/`-only simplifications moved to a nested
+  `studio/CLAUDE.md`.** Claude Code loads a directory-level `CLAUDE.md` only when reading files under
+  it, so ~93 lines that apply to that member and nothing else stopped being charged to every session
+  (root: 868 -> 802 lines, 10,784 -> 9,951 words). Two things deliberately did NOT move: the
+  normative sentence (read-only of the trace, never calls `apply_plan`, no live-drive endpoint) stays
+  in the root stub because it also constrains anyone editing `apply.py`, and **the number 10 was not
+  reassigned** — ~20 places in code, tests and CSS cite it by number, plus 13 here — so the root list
+  still runs 1–12 with 10 as a stub. Invariant 3's 166-line redaction block stayed put on purpose:
+  `redact.py` shares a directory with `apply.py`/`cli.py`/`session.py`, so a nested
+  `ctx_distillery/CLAUDE.md` would load almost always and save nothing.
+
+- **`tests/test_doc_claims.py` — docs-vs-code drift now fails a test instead of a review.** It is
+  this repo's recurring failure mode, not a hypothetical: several in-line "this bullet used to say X,
+  which was FALSE" corrections, invariant 6 recording that a stale label "has now caught this
+  invariant itself twice", and four commits in one two-week window whose whole subject was repairing
+  a doc claim. Every one was caught by a human reading carefully. Four claims are pinned to start:
+  all four workspace sluggers share one cap AND `CLAUDE.md` states that number (each member's suite
+  pinned only its OWN cap, so any of the four could move and leave the docs plus three source
+  comments quietly wrong); the `ruff` pin is spelled identically in `Makefile`, `ci.yml` and
+  `CLAUDE.md`; `--directory <member>` survives in both runners (ci.yml's own comment records that
+  omission shipping once, green, running zero of `eval/tests/`); and `[project.scripts]` is exactly
+  invariant 8's two entry points. Each check was verified by sabotage — five mutations, each turning
+  exactly one test red. Reads source as TEXT, never importing across members, so it works in a
+  plain-pip install too.
+
 - **FIXED — the new `app.test.js` failed on CI while passing locally, and the CI job now spans the
   version boundary that caused it.** The stub DOM wrote `global.navigator = {}`; `navigator` became a
   READ-ONLY global in Node 21, so every test in the file threw `Cannot set property navigator of
