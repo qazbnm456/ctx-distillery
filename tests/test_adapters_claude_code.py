@@ -14,6 +14,8 @@ from pathlib import Path
 import pytest
 
 from ctx_distillery.adapters.claude_code import (
+    CLAUDE_DIRNAME,
+    CLAUDE_MD_FILENAME,
     INDEX_LINE_MAX,
     MEMORY_TYPES,
     ClaudeCodeAdapter,
@@ -21,6 +23,7 @@ from ctx_distillery.adapters.claude_code import (
     global_skills_root,
     memory_dir_for_project,
     parent_ref,
+    project_claude_md_path,
     project_skills_root,
     project_storage_dir,
     render_transcript_events,
@@ -454,6 +457,87 @@ def test_for_project_on_a_project_with_no_storage_at_all_is_empty_not_an_error(t
     raw = adapter.ingest()
     assert raw.transcripts == []
     assert raw.memory_index == []
+
+
+def test_project_claude_md_path_finds_the_root_file(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    expected = project_dir / CLAUDE_MD_FILENAME
+    expected.write_text("# root instructions\n", encoding="utf-8")
+    assert project_claude_md_path(project_dir) == expected.resolve()
+
+
+def test_project_claude_md_path_falls_back_to_the_nested_location(tmp_path):
+    project_dir = tmp_path / "proj"
+    (project_dir / CLAUDE_DIRNAME).mkdir(parents=True)
+    nested = project_dir / CLAUDE_DIRNAME / CLAUDE_MD_FILENAME
+    nested.write_text("# nested instructions\n", encoding="utf-8")
+    assert project_claude_md_path(project_dir) == nested.resolve()
+
+
+def test_project_claude_md_path_is_none_when_neither_exists(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    assert project_claude_md_path(project_dir) is None
+
+
+def test_project_claude_md_path_prefers_root_when_both_exist(tmp_path):
+    project_dir = tmp_path / "proj"
+    (project_dir / CLAUDE_DIRNAME).mkdir(parents=True)
+    root = project_dir / CLAUDE_MD_FILENAME
+    root.write_text("# root\n", encoding="utf-8")
+    (project_dir / CLAUDE_DIRNAME / CLAUDE_MD_FILENAME).write_text("# nested\n", encoding="utf-8")
+    assert project_claude_md_path(project_dir) == root.resolve()
+
+
+def test_project_claude_md_path_follows_a_SAME_DIRECTORY_symlink(tmp_path):
+    """The `ln -s AGENTS.md CLAUDE.md` workaround this project deliberately does not special-case —
+    it works for free because the symlink's target still resolves inside `project_dir`."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    agents_md = project_dir / "AGENTS.md"
+    agents_md.write_text("# agents instructions\n", encoding="utf-8")
+    os.symlink(agents_md, project_dir / CLAUDE_MD_FILENAME)
+    assert project_claude_md_path(project_dir) == agents_md.resolve()
+
+
+def test_project_claude_md_path_refuses_a_symlink_escaping_the_project(tmp_path):
+    """A git-tracked `CLAUDE.md -> /outside/secret` in a CLONED, untrusted repo must not have its
+    target's bytes read as LM context — the same enumeration-side containment `_memory_refs`
+    already applies to `memory_dir`, found missing here by adversarial review."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    outside = tmp_path / "outside-secret.md"
+    outside.write_text("SECRET OUTSIDE CONTENT\n", encoding="utf-8")
+    os.symlink(outside, project_dir / CLAUDE_MD_FILENAME)
+    assert project_claude_md_path(project_dir) is None
+
+
+def test_project_claude_md_path_refuses_when_the_claude_directory_itself_is_a_symlink(tmp_path):
+    """Not just `CLAUDE.md` itself — a symlinked `.claude` DIRECTORY must not validate itself by
+    having its own resolution echoed back as the 'expected parent' (the exact hole a naive
+    re-resolve-the-parent check would reopen)."""
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    outside_claude_dir = tmp_path / "outside-claude-dir"
+    outside_claude_dir.mkdir()
+    (outside_claude_dir / CLAUDE_MD_FILENAME).write_text("SECRET\n", encoding="utf-8")
+    os.symlink(outside_claude_dir, project_dir / CLAUDE_DIRNAME)
+    assert project_claude_md_path(project_dir) is None
+
+
+def test_for_project_populates_project_instructions_from_a_seeded_CLAUDE_md(tmp_path, claude_home):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / CLAUDE_MD_FILENAME).write_text("# this project's own rules\n", encoding="utf-8")
+
+    adapter = ClaudeCodeAdapter.for_project(project_dir, home=claude_home)
+    assert adapter.ingest().project_instructions == "# this project's own rules\n"
+
+
+def test_for_project_defaults_project_instructions_to_empty_when_none_exists(tmp_path, claude_home):
+    adapter = ClaudeCodeAdapter.for_project(tmp_path / "no-claude-md", home=claude_home)
+    assert adapter.ingest().project_instructions == ""
 
 
 def test_the_derivation_helpers_agree_with_for_project(tmp_path, claude_home):

@@ -570,6 +570,74 @@ def test_the_driver_stamps_the_planner_prompt_version(memory_dir, tmp_path):
     assert meta["planner_prompt_version"] == PLANNER_PROMPT_VERSION
 
 
+def test_project_instructions_are_redacted_before_reaching_the_planner(memory_dir, tmp_path):
+    """A secret planted in `CLAUDE.md` must not survive into what the planner's own code actually
+    sees — same guarantee `test_run_distillation_ingests_once_redacts_and_assembles` pins for
+    transcripts, but checked through the REPL variable itself: unlike a transcript (surfaced into a
+    tool_call event by `read_transcript_chunk`, an explicit audit point), nothing records
+    `project_instructions` into the trace on its own, so the trace blob has nothing to assert on —
+    the binding dspy hands the planner's code is the only place this guarantee is observable."""
+    _configure([{"reasoning": "look", "code": "x = project_instructions"}])
+    adapter = ClaudeCodeAdapter(
+        memory_dir,
+        transcripts=["t"],
+        project_instructions="the release key is " + _SECRET + "\n",
+    )
+    held: dict = {}
+
+    def step_read(_tools, variables):
+        held["seen"] = variables.get("project_instructions")
+        return {"plan": {"candidates": []}}
+
+    asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([step_read]),
+        )
+    )
+    assert _SECRET not in held["seen"]
+    assert "[REDACTED:api_key]" in held["seen"]
+
+
+def test_project_instructions_chars_is_stamped_in_run_meta(memory_dir, tmp_path):
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    adapter = ClaudeCodeAdapter(
+        memory_dir, transcripts=["t"], project_instructions="# five words here exactly\n"
+    )
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["project_instructions_chars"] == len("# five words here exactly\n")
+
+
+def test_project_instructions_chars_is_zero_when_none_was_found(memory_dir, tmp_path):
+    """0 is an HONEST report ("no CLAUDE.md, or an empty one") — never a fabricated positive claim,
+    the same "None/absent vs. a real 0" care `transcript_index` already takes, just answerable here
+    without an ambiguity: this project always knows the true length."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            ClaudeCodeAdapter(memory_dir, transcripts=["t"]),
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["project_instructions_chars"] == 0
+
+
 def test_run_distillation_is_a_thin_wrapper_returning_exactly_the_same_plan(memory_dir, tmp_path):
     """`run_distillation`'s signature AND return type are UNCHANGED — the artifacts function was
     ADDED beside it, not folded into it, so no existing caller needed an edit."""

@@ -17,7 +17,10 @@ adapter.ingest()  ->  redact  ->  DistillSession (RLM)  ->  assemble()  ->  [a h
   as `kind="skill"` at `scope="global"`/`"project"`, and only enumerates a resolved path still
   contained by the root it came from (a symlink inside a store must not fold its outside target into
   the trusted snapshot — for the nested skill layout that means `<root>/<slug>/SKILL.md` specifically).
-  `ClaudeCodeAdapter.for_project(project_dir)` discovers the real storage; see below.
+  It also reads the project's own root `CLAUDE.md` (or `.claude/CLAUDE.md`) as
+  `RawSession.project_instructions` — read-only planner CONTEXT, never a promotion/prune target,
+  behind the same containment check. `ClaudeCodeAdapter.for_project(project_dir)` discovers the
+  real storage; see below.
 - **`redact.py`** — pattern-based host-side redaction, applied immediately after the single
   `ingest()` so the redacted list is the only text the model can reach. Three tiers, in order: 7
   hand-written patterns (the DOTALL private-key block, the lookbehind-anchored `Authorization:`
@@ -25,7 +28,8 @@ adapter.ingest()  ->  redact  ->  DistillSession (RLM)  ->  assemble()  ->  [a h
   corpus can express), then 120 anchored rules ported from gitleaks into `patterns/`, then the
   operator's own rules from `CD_REDACTIONS` (empty unless set). See `VENDOR.md` for the pin and the
   refresh command, `CLAUDE.md` invariant 3 for the reasoning, and "Tier three" below for the schema.
-- **`task.py`** — `DistillSession(RLMTask)`: the signature, the judgement-only `output_model`
+- **`task.py`** — `DistillSession(RLMTask)`: the signature (`transcripts`, `memory_index`,
+  `project_instructions` -> `plan`), the judgement-only `output_model`
   (`{action, artifact_id, key_fields}` per candidate), the instructions, and the six read-only
   tools wired from an immutable index snapshot. The `pyodide` interpreter pin is enforced in code.
 - **`tools/`** — `list_memory_files` / `read_memory_file` (progressive disclosure over the store,

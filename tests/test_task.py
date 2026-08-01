@@ -138,6 +138,18 @@ def test_the_prompt_teaches_the_draft_skill_extra_file_convention():
     assert "references/" in _INSTRUCTIONS and "scripts/" in _INSTRUCTIONS
 
 
+def test_the_prompt_teaches_the_project_instructions_convention():
+    """`project_instructions` only means something if the prompt says what it is, that it is DATA
+    never directives (the prompt-injection defense — a target project's CLAUDE.md may be authored
+    by an untrusted third party), and how to use it (redundancy + conflict checks)."""
+    assert "project_instructions" in _INSTRUCTIONS
+    assert "CLAUDE.md" in _INSTRUCTIONS
+    assert "directed at YOU" in _INSTRUCTIONS
+    assert "redundant" in _INSTRUCTIONS
+    assert "conflict" in _INSTRUCTIONS
+    assert DistillSession.signature.count("project_instructions: str") == 1
+
+
 def test_the_prompt_distinguishes_a_subagents_FINDINGS_from_its_AGREEMENT():
     """The instruction change subagent ingestion makes mandatory, and both halves of it.
 
@@ -289,7 +301,11 @@ def test_scripted_forward_pass_records_the_whole_chain(snapshot, tmp_path):
     path = str(tmp_path / "trace.jsonl")
     with TraceRecorder(path, run_id="r0", meta={"transcripts": 1}):
         result = asyncio.run(
-            task.arun(transcripts=[_TRANSCRIPT], memory_index="- [index] MEMORY.md")
+            task.arun(
+                transcripts=[_TRANSCRIPT],
+                memory_index="- [index] MEMORY.md",
+                project_instructions="",
+            )
         )
 
     assert isinstance(result, DistillPlan)
@@ -338,8 +354,36 @@ def test_a_planner_that_reads_an_unlisted_path_is_refused_mid_run(snapshot, tmp_
     )
     path = str(tmp_path / "trace.jsonl")
     with TraceRecorder(path, run_id="r0"):
-        result = asyncio.run(task.arun(transcripts=[_TRANSCRIPT], memory_index="(empty)"))
+        result = asyncio.run(
+            task.arun(transcripts=[_TRANSCRIPT], memory_index="(empty)", project_instructions="")
+        )
 
     assert [c.action for c in result.candidates] == ["keep"]
     payload = _payloads(path, "read_memory_file")[0]
     assert payload["ok"] is False and "not in this run's memory index" in payload["note"]
+
+
+def test_project_instructions_is_bound_as_a_real_repl_variable(snapshot, tmp_path):
+    """The wiring the driver depends on: `project_instructions` must actually be a REPL variable
+    the planner's own code can read, not just an argument nobody binds through to execution."""
+    _configure([
+        {"reasoning": "look at project_instructions", "code": "x = project_instructions"},
+        {"reasoning": "submit", "code": "SUBMIT(plan={...})"},
+    ])
+    held: dict = {}
+
+    def step_read(_tools, variables):
+        held["seen"] = variables.get("project_instructions")
+        return "ok"
+
+    task = _build(snapshot, interpreter=ScriptedInterpreter([step_read, {"plan": {"candidates": []}}]))
+    path = str(tmp_path / "trace.jsonl")
+    with TraceRecorder(path, run_id="r0"):
+        asyncio.run(
+            task.arun(
+                transcripts=[_TRANSCRIPT],
+                memory_index="(empty)",
+                project_instructions="# real project rules\n",
+            )
+        )
+    assert held["seen"] == "# real project rules\n"

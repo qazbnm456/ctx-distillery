@@ -131,6 +131,12 @@ async def run_distillation_artifacts(
     """
     raw = adapter.ingest()
     redacted_transcripts = [redact(t) for t in raw.transcripts]
+    # Skipped entirely when empty, not called unconditionally: `tests/test_session.py`'s
+    # `test_a_custom_redactor_is_honoured` asserts the INJECTED `redact` callable is called with
+    # EXACTLY the transcript texts — an unconditional `redact("")` on the common empty default would
+    # append a spurious call that test has nothing to do with. Redacting "" is harmless either way;
+    # this is about what the injected callable actually sees, not about safety.
+    redacted_instructions = redact(raw.project_instructions) if raw.project_instructions else ""
     memory_index = list(raw.memory_index)
 
     task = DistillSession(
@@ -140,7 +146,13 @@ async def run_distillation_artifacts(
         **kw,
     )
     rid = run_id or uuid.uuid4().hex[:12]
-    run_meta = {"transcripts": len(redacted_transcripts), "memory_artifacts": len(memory_index)}
+    run_meta = {
+        "transcripts": len(redacted_transcripts),
+        "memory_artifacts": len(memory_index),
+        # Honest provenance, always known exactly (never a None-vs-0 ambiguity the way
+        # `transcript_index` has): 0 truthfully means "no CLAUDE.md was found, or it was empty".
+        "project_instructions_chars": len(redacted_instructions),
+    }
     if raw.transcript_ids:
         # CONDITIONAL, and that is the whole point: an unconditional stamp makes `[]` mean two
         # different things — "this adapter reported no identities" and "this run had no
@@ -160,6 +172,7 @@ async def run_distillation_artifacts(
         plan = await task.arun(
             transcripts=redacted_transcripts,
             memory_index=render_memory_index(memory_index),
+            project_instructions=redacted_instructions,
         )
     # `load_trace`, not `load_events`: this trace is well-formed by construction (the recorder just
     # wrote it), so this is consistency rather than a live bug — but it means no module in the

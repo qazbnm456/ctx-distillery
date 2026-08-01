@@ -12,6 +12,52 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The planner now reads the project's own `CLAUDE.md` (or `.claude/CLAUDE.md`) as read-only
+  context, closing a real gap: this tool reasoned about promoting durable knowledge into memory
+  without ever seeing the durable knowledge the project already had written down.** Confirmed as a
+  genuine gap first — `ArtifactKind = Literal["memory", "skill", "index"]` has no fourth kind, and
+  `ClaudeCodeAdapter.ingest()`/`list_targets()` never touched a project's own root instructions
+  file. Confirmed via Claude Code's own official docs (`code.claude.com/docs/en/claude-directory`,
+  fetched directly, not inferred from a blog summary) that a project `CLAUDE.md` — or the
+  equivalent `.claude/CLAUDE.md`, which the docs state is the same thing in a different location —
+  is loaded into every session's context. **A WEAKER claim, kept visibly separate per adversarial
+  review**: that Claude Code does not natively read AGENTS.md is inferred from a web-search pass
+  (community discussion of a manual `ln -s AGENTS.md CLAUDE.md` workaround), not from the same
+  official docs page, which does not mention AGENTS.md at all — could be stale, given this is an
+  active feature request. Nothing here depends on it being right either way: a plain file read
+  follows a same-directory symlink regardless, so the workaround is picked up for free whether or
+  not AGENTS.md ever gains native support.
+
+  `RawSession` gains `project_instructions: str = ""`; `ClaudeCodeAdapter.for_project` reads it via
+  a new `project_claude_md_path` helper (root wins if both locations somehow exist — THIS
+  project's own design choice, not a documented Claude Code precedence rule, kept visibly labeled
+  as such); `session.run_distillation_artifacts` redacts it through the exact same `redact()` call
+  transcripts already go through (invariant 3, skipped only when empty — a call-count detail for
+  an existing test, not a redaction-scope carve-out) and stamps `run_meta["project_instructions_chars"]`
+  for provenance (an honest `0`, never a fabricated claim, when none was found); `DistillSession`'s
+  signature gains `project_instructions: str` as a THIRD, always-visible input (no tool needed —
+  unlike `transcripts`, nothing closes over it, so it flows only through `.arun()`); and the
+  planner's instructions tell it to treat this as a comparison point (flag redundant promotions,
+  flag contradictions as conflicts for human review) — explicitly NOT the same trust tier as this
+  project's own memory/skill files, since a target project's `CLAUDE.md` is authored by whoever
+  controls THAT repo, which may be an untrusted third party the operator is distilling; the
+  paragraph fences it as DATA to reason about, never instructions directed at the planner itself,
+  mirroring `eval/`'s own `UNTRUSTED_DATA_RULE` convention for the identical shape of fence.
+  Read-only, never a promotion/prune target — `apply.py` has no "edit an existing file in place"
+  capability anywhere, and building one is an explicit non-goal here. Not added to
+  `DistillArtifacts` or `eval/`'s judge prompt: no concrete consumer needs the redacted text outside
+  the run itself today, and adding a field with no real consumer is the premature-abstraction trap
+  this project's own conventions already warn against.
+
+  **Found by adversarial review, fixed before merge**: the first draft skipped the
+  enumeration-side containment check invariant 5 already requires for `_memory_refs`/`memory_dir`
+  — `project_claude_md_path` now refuses a resolved candidate (or a `.claude` directory itself)
+  that escapes the directory it was found in, closing the same class of hole a git-tracked
+  `CLAUDE.md -> /etc/passwd` in a cloned, untrusted repo would otherwise open, without breaking the
+  documented same-directory AGENTS.md symlink case; and the redact-unconditionally draft would have
+  broken `tests/test_session.py::test_a_custom_redactor_is_honoured`, an existing test asserting
+  the injected redactor's call count, fixed by skipping the call entirely on empty input.
+
 - **A skill promotion may now carry supplementary `references/*.md` and `scripts/*` files —
   closing a Known-simplification gap that used to say this was out of scope.** A new SIXTH
   read-only tool, `draft_skill_extra_file(artifact_id, relative_path, kind, evidence)`, drafts one
