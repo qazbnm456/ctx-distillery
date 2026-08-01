@@ -478,10 +478,14 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     **This entry is a STUB, not a gap: the number 10 is cited by ~20 places in code, tests and CSS
     plus 13 in `CHANGELOG.md`, so the list still runs 1–12. Never renumber.**
 11. **Trace-reading logic has ONE implementation per job, shared across all three members — never a
-    per-member copy. FOUR functions are covered: `rubric.plan_from_events` (plan-from-trace
+    per-member copy. FIVE functions are covered: `rubric.plan_from_events` (plan-from-trace
     reconstruction), `trace_io.load_trace`/`dict_events` (the non-dict shape guard),
-    `trace_io.draft_cause` (a recorded drafting call's outcome, see invariant 12), and
-    `render.render_plan` (the human/judge-legible plan rendering).** The same rule applied OUTSIDE
+    `trace_io.draft_cause` (a recorded drafting call's outcome, see invariant 12),
+    `trace_io.transcript_facts` (a run's own transcript composition, built from
+    `run_start_meta`/`transcript_composition` — the same guard `studio/`'s `mapper.py` used to keep
+    to itself until `eval/`'s scorecard needed it too, exactly the "a third consumer forces the
+    shared module" pattern this invariant already names elsewhere), and `render.render_plan` (the
+    human/judge-legible plan rendering).** The same rule applied OUTSIDE
     the trace path once: `ctx_distillery/regex_walk.py` is the ONE `re`-parse-tree walk, shared by
     `scripts/derive_liveness_samples.py` (`sample_for`, which generates the liveness fixture) and
     `redact._reaching_prefixes` (`reaching_prefixes`, which derives a ReDoS probe's marker). The walk
