@@ -12,7 +12,7 @@ this initiative's own motivating goal (seeing every step's
 context and results): `rlm_kit.task.record_main_trajectory` emits `main_step` UNCONDITIONALLY for
 every `RLMTask` run (not opt-in, and `DistillSession` does not disable it), and
 `rlm_kit.sub_lm.bind_recorder_to_sub_lm` emits `sub_call` for any recursive sub-LM escalation the
-root planner issues. For a judgement-only task with only five tools, the planner's OWN reasoning
+root planner issues. For a judgement-only task with only six tools, the planner's OWN reasoning
 turns are plausibly the richest part of the trace — dropping them from the live feed would have been
 a silent regression against the whole point of building a studio at all. Payload shapes confirmed
 against rlm_kit/trace.py's real `record_main_trajectory` (`turn`/`reasoning`/`code`/`output`) and
@@ -46,10 +46,13 @@ from ctx_distillery.trace_io import transcript_composition
 #: fall through to a generic scalar-field passthrough (mirroring `_scalar_fields`'s own fallback
 #: role in `diff_sentry_studio.mapper`).
 _EVIDENCE_TOOLS = ("list_memory_files", "read_memory_file", "read_transcript_chunk")
-#: The two drafting tools — deliberately WITHOUT the full `draft` text (kept out of the live feed the
-#: same way diff-sentry keeps bulky fields out of `_scalar_fields`); the full text is what
-#: `GET /v1/runs/{run_id}` returns, paired with its plan entry.
-_DRAFT_TOOLS = ("draft_memory_file", "draft_skill_file")
+#: The three drafting tools — deliberately WITHOUT the full `draft` text (kept out of the live feed
+#: the same way diff-sentry keeps bulky fields out of `_scalar_fields`); the full text is what
+#: `GET /v1/runs/{run_id}` returns, paired with its plan entry. `draft_skill_extra_file` joined the
+#: other two once it existed — without it, a live run using the sixth tool would have those calls
+#: silently DROPPED from the feed (the tool_call branch's own `return None` for anything unrecognized),
+#: not merely under-detailed.
+_DRAFT_TOOLS = ("draft_memory_file", "draft_skill_file", "draft_skill_extra_file")
 
 #: Payload keys a bespoke tool event already surfaces (or that are bulky/nested) — dropped from the
 #: generic scalar-field passthrough so an evidence-read tool_call streams meaningful short fields
@@ -143,6 +146,9 @@ def to_event(trace_event: dict) -> dict[str, Any] | None:
                 {
                     "tool": tool,
                     "artifact_id": p.get("artifact_id"),
+                    # Only `draft_skill_extra_file` ever carries this — `None` for the other two,
+                    # never fabricated as an empty string (absent is a different claim than "").
+                    "relative_path": p.get("relative_path"),
                     "ok": p.get("ok"),
                     "errors": p.get("errors") or [],
                     "circuit_broken": bool(p.get("circuit_broken")),

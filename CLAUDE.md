@@ -113,8 +113,15 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 1. **No tool ever writes or deletes anything, and the interpreter stays pinned to `pyodide`.**
    Both halves matter: never add a tool that can `open(..., "w")`, delete, or otherwise mutate a
    transcript or memory/skill file — the read-only tool set (`list_memory_files`,
-   `read_memory_file`, `read_transcript_chunk`, `draft_memory_file`, `draft_skill_file`) is
-   closed, not a starting point to extend with a writer. And never switch the sandbox off the
+   `read_memory_file`, `read_transcript_chunk`, `draft_memory_file`, `draft_skill_file`,
+   `draft_skill_extra_file`) is closed, not a starting point to extend with a writer.
+   **`draft_skill_extra_file` widened this enumeration from five tools to six** — it drafts a
+   skill's supplementary `references/`/`scripts/` files (see the Known simplifications bullet this
+   closed), and it is read-only in EXACTLY the same sense the other five are: it returns text and
+   records it to the trace, and never touches a `skill_dir` or any other path. Widening the
+   enumeration is not a weakening of "no writer, ever" — the substantive guarantee is unchanged; a
+   future addition still has to clear the same bar (text out, nothing written) to join this list,
+   not merely extend it by precedent. And never switch the sandbox off the
    explicitly-pinned `pyodide` interpreter — that pin is stated in the task, not left to the
    default, because the "no mutation" guarantee depends on never routing through a
    writable-mount config. Together these make "propose, never apply" a structural property of
@@ -128,7 +135,11 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    `draft_memory_file` or `draft_skill_file` (both `make_model_tool`-based) and recorded as a
    `tool_call` event. Assemble the real text on READ by matching that event's `artifact_id` —
    never trust the plan's own claim about what it drafted. This is what keeps a label from
-   drifting from the bytes it describes.
+   drifting from the bytes it describes. A `promote_to_skill` candidate's supplementary
+   `references/`/`scripts/` files follow the SAME rule one level down: `draft_skill_extra_file`
+   records each one as its own `tool_call`, keyed by the SAME `artifact_id` plus its own
+   `relative_path`, and `schema.assemble` re-sources them the same way — never a field on the plan
+   itself.
 3. **Sensitive transcript content is redacted host-side before it becomes LM context, in THREE
    TIERS, in that order.** Redaction is not the planner's judgement call — do it in the
    tool/ingestion layer, before any transcript text is exposed to the RLM, the same stance
@@ -302,8 +313,12 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    method: writing into `memory_dir` is ordinary host-side Python, the same reasoning
    `tools/memory_reader.py` gives for reading.
 5. **Tools close over an immutable SNAPSHOT, never a live adapter.** `run_distillation` calls
-   `adapter.ingest()` EXACTLY ONCE; that `list[ArtifactRef]` is what all five tool factories
-   receive. Nothing in `HarnessAdapter` promises `list_targets()` is cheap or stable across
+   `adapter.ingest()` EXACTLY ONCE; that `list[ArtifactRef]` is what every tool factory that needs
+   it receives — FOUR of the six (`list_memory_files`, `read_memory_file`, `draft_memory_file`,
+   `draft_skill_file`); `read_transcript_chunk` closes over the transcript list instead, and
+   `draft_skill_extra_file` needs neither (a supplementary file has no name-collision concept to
+   check the snapshot against). Nothing in `HarnessAdapter` promises `list_targets()` is cheap or
+   stable across
    calls, so a live reference would let `read_memory_file`'s allowlist shift mid-run — and it
    would create a second copy of the transcripts the driver already owns. The allowlist check is
    an EXACT `Path(path).resolve()` match against the snapshot; never make it a prefix or
@@ -423,6 +438,30 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    caller did not pass is refused too (the caller decides where a skill may be installed). Derive the
    roots with `adapters.claude_code.global_skills_root()` / `project_skills_root(project_dir)` — the
    same functions `for_project` uses, so the reader and the writer cannot disagree about a location.
+
+   **A skill's SUPPLEMENTARY `references/`/`scripts/` files get their OWN containment check too,
+   for the same reason `_skill_target` is separate from the flat memory check**: a possibly-nested
+   relative path needs its own wall, not a bent version of one built for exactly one path
+   component. `_skill_extra_target(skill_dir, relative_path)` confines a supplementary file to the
+   closed `references`/`scripts` prefix set, refuses any `.`/`..`/absolute/home-relative segment,
+   and checks `resolved.is_relative_to(resolved_skill_dir)` — a bool check that never raises, unlike
+   `Path.relative_to()` — catching a symlinked intermediate directory the same way `_skill_target`
+   already does for the skill directory and `SKILL.md` itself. `_promote_skill` runs this check for
+   EVERY supplementary file BEFORE writing anything at all, including `SKILL.md` — a candidate
+   doomed by one bad `relative_path` must never leave a half-written, DISCOVERABLE skill behind
+   (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`). Writing itself never deletes a
+   supplementary file an `overwrite` draft omits — consistent with "archives, never deletes"
+   holding everywhere in this module.
+
+   **`_skill_extra_target` checks each `relative_path` in ISOLATION, which is not the whole
+   story — a second adversarial pass on the SHIPPED code found that two individually-valid entries
+   can still conflict with EACH OTHER.** `relative_path="scripts/utils"` (a file) and
+   `relative_path="scripts/utils/helper.py"` (which needs `scripts/utils` to be a directory) both
+   pass containment alone, and writing them in sequence let `SKILL.md` and the first extra land on
+   disk before the second one's `mkdir` collided — reproduced end to end through the real
+   `assemble()` -> `apply_plan` path, exactly the half-written-discoverable-skill outcome the
+   validate-before-write pass exists to prevent. `_extra_path_conflict` closes it: checked on the
+   RESOLVED targets, before anything is written, alongside every entry's own containment check.
 
 10. **`studio/` (`ctx-distillery-studio`) is READ-ONLY of the trace file and unreachable from the
     RLM path — it is a THIRD workspace member, never a fork of the harness.** It replays a finished
@@ -673,8 +712,25 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   accepted. Irrelevant to DRAFTING the file — `draft_skill_file` authors a body and nothing more —
   and worth knowing for the human who APPLIES it, which is why it belongs beside `apply_plan`'s
   other caveats rather than in the drafting tool's docs.
-- **A skill's `references/` and `scripts/` are out of scope.** A real skill directory may carry them;
-  `draft_skill_file` authors the `SKILL.md` body only, and `apply.py` writes only that one file.
+- **A skill's `references/` and `scripts/` are BUILT, and this bullet used to say the opposite.**
+  It read *"out of scope... `draft_skill_file` authors the `SKILL.md` body only, and `apply.py`
+  writes only that one file"* — both halves are now false. `draft_skill_extra_file` (the sixth
+  read-only tool, invariant 1) drafts one supplementary file per call, sharing the `artifact_id` an
+  earlier `draft_skill_file` call minted; `schema.assemble` gathers them per `promote_to_skill`
+  candidate keyed by `relative_path` (`AssembledCandidate.extra_files`); `apply._promote_skill`
+  writes `SKILL.md` and then each supplementary file, behind its own containment check (invariant
+  9). Two things deliberately NOT built, named rather than left silent: no cross-check that a
+  drafted `SKILL.md`'s prose actually matches what was drafted via `draft_skill_extra_file` (a model
+  can write "see `scripts/setup.sh`" without ever drafting that path, and nothing catches the
+  mismatch), and no live registry validating that `draft_skill_extra_file`'s `artifact_id` argument
+  actually corresponds to a real prior `draft_skill_file` call (a typo'd id is a silently orphaned
+  `tool_call`, never written and never an error — harmless blast radius, not solved for v1).
+  `render.render_plan` shows each supplementary file beside its candidate (so `ctx-distillery show`
+  and the eval judge both see them, invariant 11), and `render.plan_as_dict` — plain
+  `dataclasses.asdict` — carries `extra_files` into `ctx-distillery show --json` and the studio's
+  `GET /v1/runs/{id}` automatically. The studio's PLAN panel does not render them VISUALLY yet
+  (`app.js` has no UI for browsing multiple files per candidate) — the data is reachable over the
+  API; a real browsing UI is a follow-up, not a requirement for the planner to propose them at all.
 - **Skill enumeration is opt-in on the explicit constructor.** `ClaudeCodeAdapter(memory_dir)` (what
   `apply.py`'s re-scan builds) enumerates no skills at all; pass `global_skills_dir=` /
   `project_skills_dir=`, or use `for_project`, which resolves the real roots. Deliberate: a bare

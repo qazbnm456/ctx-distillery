@@ -55,6 +55,8 @@ def render_plan(plan: AssembledPlan) -> str:
             lines.append(f"    key_fields={candidate.key_fields!r}")
         if candidate.draft:
             lines.append(f"    draft (ok={candidate.draft_ok}):\n{candidate.draft}")
+        for relative_path, extra in candidate.extra_files.items():
+            lines.append(f"    extra file {relative_path} (ok={extra.draft_ok}):\n{extra.draft}")
         if candidate.problems:
             lines.append(f"    problems: {candidate.problems!r}")
     if plan.problems:

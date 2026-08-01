@@ -19,10 +19,12 @@ from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
 from ctx_distillery.apply import (
     ARCHIVE_DIRNAME,
     _archive_destination,
+    _skill_extra_target,
     _skill_target,
     apply_plan,
     slugify,
 )
+from ctx_distillery.schema import AssembledExtraFile
 from ctx_distillery.session import AssembledCandidate, AssembledPlan
 
 #: The drafted bytes of one candidate skill — a real `SKILL.md` shape (`name` + `description` only;
@@ -954,6 +956,276 @@ def test_apply_plan_accepts_a_set_a_list_or_a_tuple_of_indices(memory_dir):
             path.unlink()
         outcomes = apply_plan(memory_dir, plan(promotion("api-notes")), approved)
         assert outcomes[0].status == "applied"
+
+
+# -- _skill_extra_target: containment for a skill's references/scripts files -------------------
+
+
+@pytest.mark.parametrize(
+    "relative_path", ["references/setup.md", "scripts/build.sh", "scripts/lib/util.py"]
+)
+def test_a_legitimate_extra_path_resolves_inside_the_skill_directory(tmp_path, relative_path):
+    skill_dir = tmp_path / "deploy-runbook"
+    skill_dir.mkdir()
+    target, reason = _skill_extra_target(skill_dir, relative_path)
+    assert reason == ""
+    assert target == (skill_dir / relative_path).resolve()
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "",
+        "   ",
+        "setup.md",  # no references/ or scripts/ prefix at all
+        "assets/setup.md",  # a prefix outside the closed set
+        "references/../../../etc/passwd",
+        "references/../scripts/x",
+        "../references/x.md",
+        "..",
+        ".",
+        "/etc/passwd",  # absolute
+        "~/secret",  # home-relative
+        "references\\x.md",  # backslash
+    ],
+)
+def test_an_adversarial_extra_path_is_refused_not_written(tmp_path, relative_path):
+    skill_dir = tmp_path / "deploy-runbook"
+    skill_dir.mkdir()
+    target, reason = _skill_extra_target(skill_dir, relative_path)
+    assert target is None
+    assert reason
+    assert list(skill_dir.iterdir()) == []
+
+
+def test_an_extra_path_with_an_embedded_NUL_is_refused_not_raised(tmp_path):
+    """The SAME `(OSError, ValueError)` pair `_skill_target` already catches around `.resolve()` — a
+    NUL byte raises `ValueError`, never `OSError`, and this must degrade rather than propagate."""
+    skill_dir = tmp_path / "deploy-runbook"
+    skill_dir.mkdir()
+    target, reason = _skill_extra_target(skill_dir, "references/bad\x00name.md")
+    assert target is None
+    assert "could not resolve" in reason
+
+
+@pytest.mark.parametrize("length", [300, 5000])
+def test_an_overlong_extra_filename_is_refused_at_the_write_not_the_containment_check(
+    memory_dir, tmp_path, length
+):
+    """Unlike the NUL-byte case, an over-long FILENAME (as opposed to an over-long directory
+    component) does not make `.resolve()`/`.is_relative_to()` raise on this filesystem — measured:
+    `open()` is where `OSError`(ENAMETOOLONG) actually surfaces. `_skill_extra_target` is pure
+    computation with no stat call, so it cannot catch this itself; the write loop's own
+    `except OSError` (the same isolation `_skill_target`'s equivalent case already relies on) is
+    what refuses it instead of raising out of `apply_plan` mid-batch."""
+    skills_root = tmp_path / "skills"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={
+                    f"references/{'a' * length}.md": AssembledExtraFile(
+                        relative_path=f"references/{'a' * length}.md", draft="x", draft_ok=True
+                    ),
+                }
+            )
+        ),
+        [0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "refused"
+    assert "could not write" in outcomes[0].reason
+
+
+def test_a_symlinked_references_directory_cannot_redirect_the_write_outside_the_skill(tmp_path):
+    skill_dir = tmp_path / "deploy-runbook"
+    skill_dir.mkdir()
+    outside = tmp_path / "outside-dir"
+    outside.mkdir()
+    os.symlink(outside, skill_dir / "references")
+    target, reason = _skill_extra_target(skill_dir, "references/setup.md")
+    assert target is None
+    assert "refusing to write outside" in reason
+
+
+# -- _promote_skill: writing the supplementary files -----------------------------------------
+
+
+def test_a_skill_promotion_writes_SKILL_md_and_its_supplementary_files(memory_dir, tmp_path):
+    skills_root = tmp_path / "skills"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={
+                    "references/one.md": AssembledExtraFile(
+                        relative_path="references/one.md", draft="reference body", draft_ok=True
+                    ),
+                    "scripts/setup.sh": AssembledExtraFile(
+                        relative_path="scripts/setup.sh", draft="#!/bin/sh\necho hi\n", draft_ok=True
+                    ),
+                }
+            )
+        ),
+        [0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "applied", outcomes[0].reason
+    skill_dir = skills_root / "deploy-runbook"
+    assert (skill_dir / "SKILL.md").read_text(encoding="utf-8") == SKILL_DRAFT
+    assert (skill_dir / "references" / "one.md").read_text(encoding="utf-8") == "reference body"
+    assert (skill_dir / "scripts" / "setup.sh").read_text(encoding="utf-8") == "#!/bin/sh\necho hi\n"
+    assert "2 supplementary file" in outcomes[0].reason
+
+
+def test_a_bad_extra_relative_path_refuses_the_WHOLE_candidate_before_SKILL_md_is_written(
+    memory_dir, tmp_path
+):
+    """Validate-before-write: a candidate doomed by a bad `relative_path` must never leave a
+    half-written, DISCOVERABLE skill behind (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`)."""
+    skills_root = tmp_path / "skills"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={
+                    "assets/escape.md": AssembledExtraFile(
+                        relative_path="assets/escape.md", draft="x", draft_ok=True
+                    ),
+                }
+            )
+        ),
+        [0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "refused"
+    assert "assets/escape.md" in outcomes[0].reason
+    assert not skills_root.exists(), "SKILL.md must not exist when an extra file's path is doomed"
+
+
+def test_two_extras_where_one_would_have_to_be_both_a_file_and_a_directory_are_refused_up_front(
+    memory_dir, tmp_path
+):
+    """`relative_path="scripts"` (a file, no filename under it — nothing at draft time refuses
+    THIS specific string via `apply_plan`'s own input contract, which never trusts a hand-built
+    candidate; a real `draft_skill_extra_file` call's OWN validator does refuse it) and
+    `relative_path="scripts/build.sh"` are each individually valid containment-wise, but cannot
+    BOTH exist. Found by adversarial review, reproduced end to end: `_extra_path_conflict` catches
+    this BEFORE anything is written, so `SKILL.md` is never left on disk under a `refused` outcome —
+    the guarantee `_promote_skill`'s own validate-before-write pass exists to give."""
+    skills_root = tmp_path / "skills"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={
+                    "scripts": AssembledExtraFile(relative_path="scripts", draft="oops", draft_ok=True),
+                    "scripts/build.sh": AssembledExtraFile(
+                        relative_path="scripts/build.sh", draft="echo hi", draft_ok=True
+                    ),
+                }
+            )
+        ),
+        [0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "refused"
+    assert "conflict" in outcomes[0].reason
+    assert not skills_root.exists(), "a conflicting pair must refuse BEFORE SKILL.md is ever written"
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ("scripts/utils", "scripts/utils/helper.py"),  # the exact shape found by adversarial review
+        ("references", "references/notes.md"),
+        ("scripts/lib", "scripts/lib/deep/nested.py"),
+    ],
+)
+def test_extra_path_conflicts_are_caught_regardless_of_which_entry_is_the_ancestor(
+    memory_dir, tmp_path, paths
+):
+    skills_root = tmp_path / "skills"
+    shallow, deep = paths
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={
+                    shallow: AssembledExtraFile(relative_path=shallow, draft="x", draft_ok=True),
+                    deep: AssembledExtraFile(relative_path=deep, draft="y", draft_ok=True),
+                }
+            )
+        ),
+        [0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "refused"
+    assert "conflict" in outcomes[0].reason
+    assert not skills_root.exists()
+
+
+def test_a_file_already_on_disk_from_an_EARLIER_apply_still_refuses_via_the_isolated_mkdir(
+    memory_dir, tmp_path
+):
+    """`_extra_path_conflict` only ever compares entries within the SAME call — a file already on
+    disk from a PRIOR apply (a different scenario, not a conflict between this call's own entries)
+    is what the isolated `mkdir` try/except around each extra's write still exists to catch."""
+    skills_root = tmp_path / "skills"
+    skill_dir = skills_root / "deploy-runbook"
+    (skill_dir / "scripts").parent.mkdir(parents=True)
+    # A stale FILE (not a directory) sitting where `scripts/build.sh`'s PARENT needs to be — from
+    # some earlier, unrelated write this call knows nothing about.
+    (skill_dir / "scripts").write_text("stale file from an earlier run\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text("stale SKILL.md\n", encoding="utf-8")
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={
+                    "scripts/build.sh": AssembledExtraFile(
+                        relative_path="scripts/build.sh", draft="echo hi", draft_ok=True
+                    ),
+                }
+            )
+        ),
+        [0],
+        overwrite_ids=[0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "refused"
+    assert "supplementary" in outcomes[0].reason
+
+
+def test_overwrite_does_not_delete_a_stale_extra_file_not_in_the_new_draft(memory_dir, tmp_path):
+    """Consistent with "archives, never deletes": overwriting only ever touches files present in
+    THIS candidate's `extra_files` — a previously-written extra the new draft omits is left alone."""
+    skills_root = tmp_path / "skills"
+    skill_dir = skills_root / "deploy-runbook"
+    (skill_dir / "references").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("stale SKILL.md\n", encoding="utf-8")
+    (skill_dir / "references" / "old.md").write_text("stale reference\n", encoding="utf-8")
+
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={
+                    "references/new.md": AssembledExtraFile(
+                        relative_path="references/new.md", draft="fresh reference", draft_ok=True
+                    ),
+                }
+            )
+        ),
+        [0],
+        overwrite_ids=[0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "applied", outcomes[0].reason
+    assert (skill_dir / "SKILL.md").read_text(encoding="utf-8") == SKILL_DRAFT
+    assert (skill_dir / "references" / "new.md").read_text(encoding="utf-8") == "fresh reference"
+    assert (skill_dir / "references" / "old.md").read_text(encoding="utf-8") == "stale reference\n"
 
 
 def test_apply_plan_never_mutates_the_plan_it_is_given(memory_dir):

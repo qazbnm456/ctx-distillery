@@ -7,7 +7,7 @@ across sessions, and what durable knowledge is worth promoting into a standing m
 reusable Skill. It is a judgement engine, nothing more.
 
 **Status: the planner is wired and offline-tested; the apply step exists; storage is auto-discovered;
-both are driveable from the command line.** The five read-only planning tools, the Claude Code
+both are driveable from the command line.** The six read-only planning tools, the Claude Code
 adapter, the assemble-on-read convention, the human-gated `apply_plan`, auto-discovery of Claude
 Code's real on-disk storage (transcripts + both skill scopes), and the two console scripts are
 implemented. Two sibling `uv` workspace members round it out: **`eval/`**

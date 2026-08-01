@@ -107,7 +107,7 @@ function feedRow(eventName, data) {
 
   if (eventName === "distill.plan.step") {
     // The planner's OWN reasoning turn — plausibly the richest content in the feed for a
-    // judgement-only task with five tools, so it gets its own readable line, not a JSON dump.
+    // judgement-only task with six tools, so it gets its own readable line, not a JSON dump.
     body.appendChild(el("div", "fr-line", `turn ${data.turn}${data.has_code ? " (wrote code)" : ""}`));
     if (data.reasoning) body.appendChild(el("div", "fr-reasoning", data.reasoning));
   } else if (eventName === "distill.sub_lm.call") {
@@ -1064,7 +1064,8 @@ const TELEMETRY_HELP = {
   elapsed: "Wall clock from the run's first event to its last, as recorded in the trace.",
   turns: "Planner turns: one REPL iteration each (reason, run code, read the output).",
   tools: "Read-only and drafting tool calls the planner made. Sub-LM escalations count too.",
-  drafts: "Calls to draft_memory_file / draft_skill_file: where a promotion's bytes come from.",
+  drafts: "Calls to draft_memory_file / draft_skill_file / draft_skill_extra_file: where a "
+    + "promotion's bytes (and a skill's supplementary files) come from.",
   reads: "Calls to the evidence tools. Zero is normal — `transcripts` is also a REPL variable, so "
     + "a planner can read every one of them without a tool call.",
 };
