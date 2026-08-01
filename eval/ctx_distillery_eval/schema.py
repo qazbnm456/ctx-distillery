@@ -51,6 +51,15 @@ class EvalRow(BaseModel):
     The validator below enforces the other half: an unscored row must SAY WHY. A row with no score
     and no reason is the silent-blank failure mode the whole optional-score change exists to prevent,
     so it is refused at construction rather than rendered as an empty column.
+
+    **`n_transcripts`/`transcript_sessions`/`transcript_subagents` are deliberately PER-ROW, never on
+    `EvalReport`** — the same reasoning `EvalReport`'s own docstring gives for carrying no `taskset`
+    field. `score` scores an arbitrary glob of traces, each with its own composition, so there is no
+    single meaningful "composition of this report" the way there is a single `judge_model` or
+    `prompt_version`; only a per-row fact is well-defined. Sourced from `ctx_distillery.trace_io
+    .transcript_facts` — the same guard `ctx_distillery.rubric.trace_facts()["n_transcripts"]` and
+    `ctx_distillery_studio.mapper.transcript_composition` share (invariant 11) — so all three default
+    to `None`, never a fabricated `0`, when a run's own trace never recorded them.
     """
 
     run_id: str
@@ -58,6 +67,16 @@ class EvalRow(BaseModel):
     score: EvalScore | None = None
     unscored_reason: str = Field(
         default="", description="why this run has no score — REQUIRED whenever `score` is None"
+    )
+    n_transcripts: int | None = Field(
+        default=None,
+        description="how many transcripts this run's judge saw — None if the trace never recorded it",
+    )
+    transcript_sessions: int | None = Field(
+        default=None, description="of n_transcripts, how many were main-thread sessions"
+    )
+    transcript_subagents: int | None = Field(
+        default=None, description="of n_transcripts, how many were subagent transcripts"
     )
 
     @property

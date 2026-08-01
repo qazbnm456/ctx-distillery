@@ -34,6 +34,7 @@ from __future__ import annotations
 from ctx_distillery.render import render_plan
 from ctx_distillery.rubric import plan_from_events
 from ctx_distillery.schema import assemble
+from ctx_distillery.trace_io import transcript_facts
 
 from .judge import Judge, StubJudge
 from .schema import EvalReport, EvalRow, compute_means
@@ -70,6 +71,10 @@ def score_run(
     unscored row, so without it a badly-behaved judge would raise a `ValidationError` here instead of
     degrading. `verdict.score is None` is checked alongside `ok` for the same reason — an `ok=True`
     verdict with no score is not a score.
+
+    `transcript_facts(events)` is read regardless of the verdict — a row's input-size provenance
+    (how many transcripts, and their composition) doesn't depend on whether the judge succeeded, so
+    it lands on both the scored and unscored return paths.
     """
     if judge is None:
         judge = StubJudge()
@@ -77,13 +82,24 @@ def score_run(
     assembled = assemble(events, plan)
     plan_text = render_plan(assembled)
     verdict = judge(plan_text, transcript_texts, reference)
+    facts = transcript_facts(events)
     if not verdict.ok or verdict.score is None:
         return EvalRow(
             run_id=run_id,
             trace_path=trace_path,
             unscored_reason=verdict.reason or "judge returned no score",
+            n_transcripts=facts["n_transcripts"],
+            transcript_sessions=facts["sessions"],
+            transcript_subagents=facts["subagents"],
         )
-    return EvalRow(run_id=run_id, trace_path=trace_path, score=verdict.score)
+    return EvalRow(
+        run_id=run_id,
+        trace_path=trace_path,
+        score=verdict.score,
+        n_transcripts=facts["n_transcripts"],
+        transcript_sessions=facts["sessions"],
+        transcript_subagents=facts["subagents"],
+    )
 
 
 def aggregate(

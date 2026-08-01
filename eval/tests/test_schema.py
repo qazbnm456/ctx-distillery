@@ -101,8 +101,40 @@ def test_eval_report_carries_provenance_so_a_number_is_attributable():
     assert report.judge_model == "judge-x" and report.prompt_version == "atlas-ctxd-eval-v1"
 
 
+# -- per-row transcript composition (deliberately NOT on EvalReport) -----------------------------
+
+
+def test_eval_row_transcript_composition_fields_default_to_none_not_zero():
+    """Constructed with none of the three fields — the shape every pre-existing call site and test
+    in this file already uses — they must default to `None`, never a fabricated `0`."""
+    row = EvalRow(run_id="r1", trace_path="a.jsonl", score=EvalScore(TF=5, TA=5, TG=5, PA=5))
+    assert row.n_transcripts is None
+    assert row.transcript_sessions is None
+    assert row.transcript_subagents is None
+
+
+def test_eval_row_accepts_the_transcript_composition_fields():
+    row = EvalRow(
+        run_id="r1",
+        trace_path="a.jsonl",
+        score=EvalScore(TF=5, TA=5, TG=5, PA=5),
+        n_transcripts=3,
+        transcript_sessions=2,
+        transcript_subagents=1,
+    )
+    assert (row.n_transcripts, row.transcript_sessions, row.transcript_subagents) == (3, 2, 1)
+
+
 def test_eval_report_has_no_taskset_field_because_there_is_no_taskset_concept():
     """Every sibling's report names its taskset. Ours cannot: `taskset.py` enumerates runs from
     TRACES, not tasks, and building a real taskset is the deferred `run` work (see eval/README.md).
     Adding the field before the concept exists would label a report with an unfillable value."""
     assert "taskset" not in EvalReport.model_fields
+
+
+def test_eval_report_has_no_transcript_composition_field_it_is_deliberately_per_row():
+    """A `score` glob's rows each have their own, unrelated transcript composition — there is no
+    single meaningful report-level number the way there is one `judge_model`/`prompt_version`."""
+    assert "n_transcripts" not in EvalReport.model_fields
+    assert "transcript_sessions" not in EvalReport.model_fields
+    assert "transcript_subagents" not in EvalReport.model_fields

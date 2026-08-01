@@ -1,6 +1,7 @@
 """Build a structured per-iteration breakdown of a run from its trace — the data behind the studio's
-Trajectory drawer. Pure functions (no web deps, no `ctx_distillery` import), unit-tested independently
-of the server, mirroring `mapper.py`'s own separation.
+Trajectory drawer. Pure functions (no web deps), unit-tested independently of the server, mirroring
+`mapper.py`'s own separation — `mapper.py` now carries one `ctx_distillery.trace_io` import (see
+below), but neither module imports FastAPI or anything server-shaped.
 
 A `DistillSession` run is a sequence of `main_step` REPL turns (the planner's reasoning + the Python
 code it ran + that code's output). The `tool_call` / `sub_call` events that follow a turn belong to
@@ -57,10 +58,10 @@ from __future__ import annotations
 from pathlib import PurePath
 from typing import Any
 
-# The ONE composition reader, imported rather than copied (`CLAUDE.md` invariant 11). `mapper` is
-# the same kind of module this one is — pure, web-dep-free, no `ctx_distillery` import — so this
-# adds no weight and no dependency direction that did not already exist between the two views of
-# one trace.
+# The ONE composition reader, imported rather than copied (`CLAUDE.md` invariant 11). `mapper` now
+# re-exports it from `ctx_distillery.trace_io` (a THIRD consumer, `ctx_distillery_eval`, forced the
+# move) rather than defining it locally — still pure, web-dep-free code, so this adds no weight and
+# no dependency direction that did not already exist between the two views of one trace.
 from .mapper import transcript_composition
 
 #: Per-field char cap for the bulky free-text fields (a turn's reasoning/code/output, a sub-LM

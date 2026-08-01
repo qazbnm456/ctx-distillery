@@ -166,6 +166,77 @@ def test_render_scorecard_shows_an_unscored_row_as_dashes_with_its_reason():
     assert "--" in text.splitlines()[2]
 
 
+def test_render_scorecard_shows_a_row_s_transcript_composition_when_known():
+    report = EvalReport(
+        n=1, judge_model="judge-x",
+        rows=[
+            EvalRow(
+                run_id="r0", trace_path="a.jsonl", score=EvalScore(TF=8, TA=8, TG=8, PA=8),
+                n_transcripts=3, transcript_sessions=2, transcript_subagents=1,
+            ),
+        ],
+    )
+    row_line = render_scorecard(report).splitlines()[1]
+    assert "transcripts=3 (sessions=2 subagents=1)" in row_line
+
+
+def test_render_scorecard_shows_the_bare_count_when_composition_itself_is_unrecorded():
+    """An older trace recorded `n_transcripts` before subagent ingestion added `transcript_index` —
+    the count is known, the breakdown is not, so only the bare form renders."""
+    report = EvalReport(
+        n=1, judge_model="judge-x",
+        rows=[
+            EvalRow(
+                run_id="r0", trace_path="a.jsonl", score=EvalScore(TF=8, TA=8, TG=8, PA=8),
+                n_transcripts=5,
+            ),
+        ],
+    )
+    row_line = render_scorecard(report).splitlines()[1]
+    assert "transcripts=5" in row_line
+    assert "sessions=" not in row_line
+
+
+def test_render_scorecard_omits_the_transcripts_suffix_entirely_when_unrecorded():
+    report = EvalReport(
+        n=1, judge_model="judge-x",
+        rows=[EvalRow(run_id="r0", trace_path="a.jsonl", score=EvalScore(TF=8, TA=8, TG=8, PA=8))],
+    )
+    row_line = render_scorecard(report).splitlines()[1]
+    assert "transcripts=" not in row_line
+
+
+def test_render_scorecard_shows_the_transcripts_suffix_on_an_unscored_row_too():
+    report = EvalReport(
+        n=1, n_unscored=1, judge_model="judge-x",
+        rows=[
+            EvalRow(
+                run_id="dead-run", trace_path="b.jsonl",
+                unscored_reason="judge endpoint error: connection refused",
+                n_transcripts=2, transcript_sessions=2, transcript_subagents=0,
+            ),
+        ],
+    )
+    row_line = render_scorecard(report).splitlines()[1]
+    assert "unscored: judge endpoint error: connection refused" in row_line
+    assert "transcripts=2 (sessions=2 subagents=0)" in row_line
+
+
+def test_render_scorecard_footer_never_carries_a_transcript_composition():
+    """The design constraint: composition is PER ROW, never folded into the aggregate footer."""
+    report = EvalReport(
+        n=1, judge_model="judge-x",
+        rows=[
+            EvalRow(
+                run_id="r0", trace_path="a.jsonl", score=EvalScore(TF=8, TA=8, TG=8, PA=8),
+                n_transcripts=3, transcript_sessions=2, transcript_subagents=1,
+            ),
+        ],
+    )
+    footer = render_scorecard(report).splitlines()[-1]
+    assert "transcripts=" not in footer
+
+
 def test_render_scorecard_footer_states_the_denominator_and_the_provenance():
     report = EvalReport(n=3, n_unscored=1, judge_model="judge-x", prompt_version=PROMPT_VERSION)
     footer = render_scorecard(report).splitlines()[-1]
