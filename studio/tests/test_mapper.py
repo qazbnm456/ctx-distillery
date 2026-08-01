@@ -151,6 +151,7 @@ def test_draft_created_never_leaks_the_full_draft_text():
     assert ev["data"] == {
         "tool": "draft_memory_file",
         "artifact_id": "a1",
+        "relative_path": None,  # only draft_skill_extra_file ever carries one
         "ok": True,
         "errors": [],
         "circuit_broken": False,
@@ -175,6 +176,31 @@ def test_draft_skill_file_is_also_a_draft_created_event():
     assert ev["event"] == "distill.draft.created"
     assert ev["data"]["ok"] is False and ev["data"]["circuit_broken"] is True
     assert ev["data"]["errors"] == ["bad frontmatter"]
+    assert ev["data"]["relative_path"] is None
+
+
+def test_draft_skill_extra_file_is_also_a_draft_created_event_carrying_relative_path():
+    """The sixth tool joined `_DRAFT_TOOLS` once it existed — without it, a live run using it would
+    have those calls silently DROPPED from the feed rather than merely under-detailed."""
+    ev = to_event(
+        {
+            "type": "tool_call",
+            "payload": {
+                "tool": "draft_skill_extra_file",
+                "artifact_id": "s1",
+                "relative_path": "references/runbook.md",
+                "kind": "reference",
+                "ok": True,
+                "errors": [],
+                "circuit_broken": False,
+                "draft": "secret reference body",
+            },
+        }
+    )
+    assert ev["event"] == "distill.draft.created"
+    assert ev["data"]["tool"] == "draft_skill_extra_file"
+    assert ev["data"]["relative_path"] == "references/runbook.md"
+    assert "draft" not in ev["data"] and "secret reference body" not in str(ev["data"])
 
 
 def test_an_unrecognized_tool_call_is_skipped_never_guessed_at():

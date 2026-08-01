@@ -166,7 +166,7 @@ The seven mapped families (`mapper.to_event` is the source of truth):
   recorded a transcript index, `transcripts` carries its composition too — `12 (sessions=3
   subagents=9)` — so a reviewer can see at a glance whether subagent transcripts were in scope.
 - `distill.plan.step` — **the planner's own reasoning turn**: `turn N (wrote code)` + the reasoning
-  text. For a judgement-only task with five tools this is plausibly the richest content in the trace.
+  text. For a judgement-only task with six tools this is plausibly the richest content in the trace.
 - `distill.sub_lm.call` — a recursive sub-LM escalation, `in:` / `out:`
 - `distill.evidence.read` — one of the three read-only lookups + its short scalar fields
 - `distill.draft.created` — `<tool> -> artifact_id=…` + `ok` / `circuit_broken` / `errors`. **No draft

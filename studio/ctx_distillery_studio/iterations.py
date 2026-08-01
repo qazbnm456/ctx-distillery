@@ -71,12 +71,13 @@ _CAP = 16000
 #: Matches `mapper._MAX_SCALAR`.
 _MAX_LABEL = 200
 
-#: The five tools, named rather than spelled inline, so the allowlist branches below read as a roster.
+#: The six tools, named rather than spelled inline, so the allowlist branches below read as a roster.
 _LIST_MEMORY = "list_memory_files"
 _READ_MEMORY = "read_memory_file"
 _READ_TRANSCRIPT = "read_transcript_chunk"
 _DRAFT_MEMORY = "draft_memory_file"
 _DRAFT_SKILL = "draft_skill_file"
+_DRAFT_SKILL_EXTRA = "draft_skill_extra_file"
 
 
 def _looks_like_a_path(value: str) -> bool:
@@ -153,10 +154,14 @@ def _gap(ts: float | None, prev: float | None) -> float | None:
 def _tool_entry(p: dict, gap: float | None) -> dict:
     """One `tool_call` → a UI-ready entry, built from a per-tool ALLOWLIST (see the module docstring).
 
-    The envelope field is `entry_kind`, NOT `kind`: three of the five tools record their OWN `kind`
-    in the payload (`read_memory_file` the artifact's kind, the two drafting tools `"memory"`/
-    `"skill"`), and cve-reverser's `setdefault`-onto-`{"kind": "tool"}` form silently swallows it.
-    Renaming the envelope is what lets the payload's `kind` survive verbatim.
+    The envelope field is `entry_kind`, NOT `kind`: three of the six tools record their OWN `kind`
+    in the payload (`read_memory_file` the artifact's kind, the two SKILL/memory drafting tools
+    `"memory"`/`"skill"`), and cve-reverser's `setdefault`-onto-`{"kind": "tool"}` form silently
+    swallows it. Renaming the envelope is what lets the payload's `kind` survive verbatim.
+    `draft_skill_extra_file` carries a `kind` too (`"reference"`/`"script"`, not `"memory"`/
+    `"skill"` — a different vocabulary for a different question, "what kind of supplementary file"
+    rather than "what kind of artifact"), handled in its own branch below rather than folded into
+    the `_DRAFT_MEMORY`/`_DRAFT_SKILL` one: it records a `relative_path` the other two don't have.
     """
     tool = p.get("tool")
     args = p.get("args") if isinstance(p.get("args"), dict) else {}
@@ -213,6 +218,23 @@ def _tool_entry(p: dict, gap: float | None) -> dict:
             e.update(procedure=_label(args.get("procedure")), scope=_label(args.get("scope")))
         else:
             e.update(topic=_label(args.get("topic")), memory_type=_label(args.get("memory_type")))
+    elif tool == _DRAFT_SKILL_EXTRA:
+        # Same shape as the two drafting tools above (`draft_chars` never `draft`, `errors`/
+        # `endpoint_error`/`circuit_broken` carried verbatim) plus the two fields that are THIS
+        # tool's own: `relative_path` (a skill-relative virtual path like `references/x.md` — never
+        # `_looks_like_a_path`-shaped, since it never starts with `/`/`~/`/`./`/`../`, so `_label`
+        # passes it through) and `kind` (`"reference"`/`"script"`, a different vocabulary from the
+        # artifact `kind` the other two drafting tools carry).
+        e.update(
+            label="draft skill extra file",
+            artifact_id=_label(p.get("artifact_id")),
+            relative_path=_label(p.get("relative_path")),
+            kind=_label(p.get("kind")),
+            draft_chars=_chars(p.get("draft")),
+            errors=_texts(p.get("errors")),
+            endpoint_error=_label(p.get("endpoint_error")),
+            circuit_broken=bool(p.get("circuit_broken")),
+        )
     else:
         # An UNRECOGNIZED tool contributes NO payload fields — not a generic scalar sweep, not
         # `_preview(args)`. The tool set is closed (invariant 1), so this branch means a trace from a

@@ -86,7 +86,7 @@ def _payloads(path, tool):
 # -- wiring ----------------------------------------------------------------------------------
 
 
-def test_all_five_tools_are_wired_in_order_and_repl_safe(snapshot):
+def test_all_six_tools_are_wired_in_order_and_repl_safe(snapshot):
     _configure([{"reasoning": "r", "code": "SUBMIT(plan={})"}])
     task = _build(snapshot)
     assert [t.__name__ for t in task.tools] == [
@@ -95,6 +95,7 @@ def test_all_five_tools_are_wired_in_order_and_repl_safe(snapshot):
         "read_transcript_chunk",
         "draft_memory_file",
         "draft_skill_file",
+        "draft_skill_extra_file",
     ]
     for tool in task.tools:
         assert_repl_safe(tool)
@@ -126,6 +127,15 @@ def test_the_prompt_teaches_the_promote_to_skill_scope_convention():
     assert '"global"' in _INSTRUCTIONS and '"project"' in _INSTRUCTIONS
     description = DistillCandidate.model_fields["key_fields"].description or ""
     assert "scope" in description and "promote_to_skill" in description
+
+
+def test_the_prompt_teaches_the_draft_skill_extra_file_convention():
+    """The sixth tool only works if the prompt says WHEN to call it and that it shares the main
+    draft's artifact_id — nothing else would tell the planner these files exist at all."""
+    assert "draft_skill_extra_file" in _INSTRUCTIONS
+    assert "draft_skill_file" in _INSTRUCTIONS
+    assert "SAME" in _INSTRUCTIONS and "artifact_id" in _INSTRUCTIONS
+    assert "references/" in _INSTRUCTIONS and "scripts/" in _INSTRUCTIONS
 
 
 def test_the_prompt_distinguishes_a_subagents_FINDINGS_from_its_AGREEMENT():

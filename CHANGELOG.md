@@ -12,6 +12,63 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A skill promotion may now carry supplementary `references/*.md` and `scripts/*` files —
+  closing a Known-simplification gap that used to say this was out of scope.** A new SIXTH
+  read-only tool, `draft_skill_extra_file(artifact_id, relative_path, kind, evidence)`, drafts one
+  supplementary file per call, sharing the `artifact_id` an earlier `draft_skill_file` call minted
+  rather than authoring a new artifact — the same repeatable-tool architecture
+  `draft_memory_file`/`draft_skill_file` already use (one model call, one deterministic validator,
+  one `tool_call` event), chosen over a single-call multi-file bundle because it doesn't need the
+  model to produce a custom delimited format correctly in one shot.
+
+  `schema.assemble` gathers every `draft_skill_extra_file` call sharing a `promote_to_skill`
+  candidate's `artifact_id` — last call per `(artifact_id, relative_path)` wins, the compound-key
+  generalization of the existing single-key "a repair loop legitimately re-drafts" rule — onto a new
+  `AssembledCandidate.extra_files: dict[str, AssembledExtraFile]`. A bad extra file (empty draft,
+  failed validator) is kept for visibility (parity with the main draft) but ALSO reported on the
+  candidate's own `problems`, which is what makes `apply._blocking_problem`'s existing "any problems
+  -> refuse" check block the whole candidate for free — no new blocking logic needed in `apply.py`.
+
+  `apply._promote_skill` writes the supplementary files behind their OWN containment check
+  (`_skill_extra_target`, CLAUDE.md invariant 9) — a DIFFERENT function from `_skill_target`, same
+  reasoning as why that one is already separate from the flat memory-file check: a possibly-nested
+  relative path needs its own wall. Every entry is validated BEFORE anything is written, including
+  `SKILL.md` itself — a candidate doomed by one bad `relative_path` must never leave a half-written,
+  DISCOVERABLE skill behind (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`).
+
+  **Found by TWO rounds of adversarial review before this shipped, and the second round is the one
+  worth reading closely.** Round one: `_skill_extra_target` uses `Path.is_relative_to()` rather than
+  `Path.relative_to()` + `except ValueError` (a NUL byte would otherwise raise uncaught, reproducing
+  a bug `_skill_target` already had to fix once), and each supplementary file's own `mkdir` is
+  isolated in its own try, separate from its `open()`. Round two, on the IMPLEMENTED code, found a
+  gap round one's own fixes had missed: `_skill_extra_target` checks each `relative_path` in
+  ISOLATION, so two individually-valid entries could still conflict with EACH OTHER —
+  `relative_path="scripts/utils"` (a file) and `relative_path="scripts/utils/helper.py"` (which
+  needs `scripts/utils` to be a DIRECTORY) both passed containment on their own, and the batch wrote
+  `SKILL.md` and the first extra to disk BEFORE the second one's `mkdir` collided — leaving exactly
+  the half-written, DISCOVERABLE skill the validate-before-write pass exists to prevent, reproduced
+  end to end through the real `assemble()` -> `apply_plan` path. `_extra_path_conflict` closes it:
+  checked on the RESOLVED targets, before anything is written, alongside every other entry's
+  containment check. (The isolated `mkdir` still earns its keep for a DIFFERENT case this new check
+  cannot see — a file already on disk from an earlier, unrelated `apply_plan` call, not a conflict
+  between this call's own entries.)
+
+  `render.render_plan` shows each supplementary file beside its candidate (so `ctx-distillery show`
+  and the eval judge both see them — invariant 11), and `render.plan_as_dict` picks `extra_files` up
+  automatically (`dataclasses.asdict`). Studio's Trajectory drawer and live feed both gained a
+  bespoke row for the sixth tool too — without it, a real run using it would have rendered as
+  `unrecognized: true` in the drawer and been silently DROPPED from the live SSE feed, the exact
+  "trace from a future build" case those two paths' own doc comments say should never happen for a
+  tool this project actually shipped.
+
+  **Two things deliberately NOT built, named rather than left silent**: no cross-check that a
+  drafted `SKILL.md`'s prose actually matches what was drafted via `draft_skill_extra_file` (a model
+  can write "see `scripts/setup.sh`" without ever drafting that path); and no live registry
+  validating that `draft_skill_extra_file`'s `artifact_id` argument corresponds to a real prior
+  `draft_skill_file` call (a typo'd id is a silently orphaned `tool_call` — never written, never an
+  error). Also not built: the studio PLAN panel does not yet browse multiple files per candidate
+  visually — the data is reachable over `GET /v1/runs/{id}`, a UI story is a follow-up.
+
 - **The eval scorecard now reports each row's own transcript composition** —
   `transcripts=<n> (sessions=<a> subagents=<b>)`, appended per row (scored or unscored), closing the
   gap an earlier entry below named "Not built, and named so it is not mistaken for shipped." Three

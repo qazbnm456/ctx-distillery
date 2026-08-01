@@ -1,7 +1,7 @@
 """ctx-distillery — distill an AI coding agent's transcripts + memory store, as a traced RLM harness.
 
 A downstream *consumer* of rlm-kit (a git-pinned dep; editable overlay for local co-dev): an RLM
-planner reads one or more session transcripts plus a persistent memory/skill index through five
+planner reads one or more session transcripts plus a persistent memory/skill index through six
 READ-ONLY tools, computes over them as code in a `pyodide` sandbox, and emits a judgement-only plan
 (keep / prune / promote_to_memory / promote_to_skill) whose drafted bytes are re-sourced from the
 trace on read. It PROPOSES; a human applies.
@@ -13,6 +13,7 @@ Public surface::
     from ctx_distillery import run_distillation_artifacts, DistillArtifacts  # ... + what it drew from
     from ctx_distillery import DistillPlan, DistillCandidate, DistillAction     # the SUBMIT shape
     from ctx_distillery import AssembledPlan, AssembledCandidate, assemble      # the read side
+    from ctx_distillery import AssembledExtraFile                          # ... skill supplementary files
     from ctx_distillery import HarnessAdapter, ArtifactRef, ClaudeCodeAdapter   # the harness seam
     from ctx_distillery import subagent_files, SubagentTranscript, TranscriptId # ... + subagents
     from ctx_distillery import render_plan, plan_as_dict, load_trace, plan_from_events
@@ -86,6 +87,7 @@ from .rubric import (
 from .schema import (
     PROMOTION_ACTIONS,
     AssembledCandidate,
+    AssembledExtraFile,
     AssembledPlan,
     DistillAction,
     DistillCandidate,
@@ -95,6 +97,7 @@ from .schema import (
 from .tools import (
     FormatCheck,
     make_draft_memory_file_tool,
+    make_draft_skill_extra_file_tool,
     make_draft_skill_file_tool,
     make_list_memory_files_tool,
     make_read_memory_file_tool,
@@ -120,6 +123,7 @@ __all__ = [  # noqa: RUF022
     "DistillCandidate",
     "DistillPlan",
     "AssembledCandidate",
+    "AssembledExtraFile",
     "AssembledPlan",
     "PROMOTION_ACTIONS",
     "assemble",
@@ -146,6 +150,7 @@ __all__ = [  # noqa: RUF022
     "make_read_transcript_chunk_tool",
     "make_draft_memory_file_tool",
     "make_draft_skill_file_tool",
+    "make_draft_skill_extra_file_tool",
     # redaction / rendering / trace reading
     "redact_transcript",
     "redact_all",

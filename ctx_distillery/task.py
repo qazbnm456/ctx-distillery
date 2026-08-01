@@ -1,7 +1,7 @@
 """The DistillSession RLM task — declaration plus the runtime tool wiring.
 
 `DistillSession` declares the shape of the task (signature, output_model, instructions) as
-CLAUDE.md's invariants require, and its `__init__` wires the five READ-ONLY tools from an immutable
+CLAUDE.md's invariants require, and its `__init__` wires the six READ-ONLY tools from an immutable
 memory-index snapshot plus an already-redacted transcript list. `session.run_distillation` is the
 driver that produces both and assembles the result; nothing here reads a harness directly.
 
@@ -28,7 +28,11 @@ from rlm_kit.tools.model import ChatFn
 
 from .adapters.base import ArtifactRef
 from .schema import DistillAction, DistillCandidate, DistillPlan
-from .tools.drafting import make_draft_memory_file_tool, make_draft_skill_file_tool
+from .tools.drafting import (
+    make_draft_memory_file_tool,
+    make_draft_skill_extra_file_tool,
+    make_draft_skill_file_tool,
+)
 from .tools.memory_reader import make_list_memory_files_tool, make_read_memory_file_tool
 from .tools.transcript_reader import make_read_transcript_chunk_tool
 
@@ -122,6 +126,13 @@ name existing in the OTHER scope is not a collision. A promote_to_skill candidat
 missing or is not one of those two values is refused at apply time rather than guessed at, exactly
 like a `prune` with no `target_path`.
 
+A skill may ALSO carry supplementary files beside its SKILL.md: reference documents under
+`references/` and utility scripts under `scripts/`. If the finding genuinely needs one, call
+`draft_skill_extra_file` AFTER `draft_skill_file`, passing the SAME `artifact_id` it returned —
+never a new one — plus a `relative_path` starting with `references/` (ending in `.md`) or
+`scripts/`, and `kind` matching ("reference" or "script"). Call it once per supplementary file; most
+skills need none at all, and adding one you don't have real evidence for is worse than omitting it.
+
 See CLAUDE.md for the hard invariants this task is built against.
 """
 
@@ -152,7 +163,7 @@ class DistillSession(RLMTask):
         config: RLMConfig | None = None,
         **kw: Any,
     ) -> None:
-        """Wire the five read-only tools from an index SNAPSHOT + already-redacted transcripts.
+        """Wire the six read-only tools from an index SNAPSHOT + already-redacted transcripts.
 
         `memory_index` is the `list[ArtifactRef]` from ONE `adapter.ingest()` call — an immutable
         snapshot, never a live adapter, so the `read_memory_file` allowlist cannot shift mid-run.
@@ -168,6 +179,7 @@ class DistillSession(RLMTask):
             make_read_transcript_chunk_tool(transcripts),
             make_draft_memory_file_tool(chat_fn, memory_index),
             make_draft_skill_file_tool(chat_fn, memory_index),
+            make_draft_skill_extra_file_tool(chat_fn),
         ]
         super().__init__(config=_forced_config(config), **kw)
 

@@ -26,11 +26,13 @@ adapter.ingest()  ->  redact  ->  DistillSession (RLM)  ->  assemble()  ->  [a h
   operator's own rules from `CD_REDACTIONS` (empty unless set). See `VENDOR.md` for the pin and the
   refresh command, `CLAUDE.md` invariant 3 for the reasoning, and "Tier three" below for the schema.
 - **`task.py`** — `DistillSession(RLMTask)`: the signature, the judgement-only `output_model`
-  (`{action, artifact_id, key_fields}` per candidate), the instructions, and the five read-only
+  (`{action, artifact_id, key_fields}` per candidate), the instructions, and the six read-only
   tools wired from an immutable index snapshot. The `pyodide` interpreter pin is enforced in code.
 - **`tools/`** — `list_memory_files` / `read_memory_file` (progressive disclosure over the store,
-  allowlisted to exact snapshot paths), `read_transcript_chunk`, and the two drafting tools
-  (`draft_memory_file` / `draft_skill_file`) that author text into the TRACE and never onto disk.
+  allowlisted to exact snapshot paths), `read_transcript_chunk`, and the three drafting tools
+  (`draft_memory_file` / `draft_skill_file` / `draft_skill_extra_file`) that author text into the
+  TRACE and never onto disk. The third drafts one `references/`/`scripts/` supplementary file per
+  call, sharing the `artifact_id` an earlier `draft_skill_file` call minted.
 - **`session.py`** — `run_distillation_artifacts` (ingest once, redact once, run once; returns the
   plan PLUS the redacted transcripts, resolved `run_id`, trace path, events and memory index),
   its unchanged `run_distillation` wrapper, and `assemble`, which re-sources each promotion's
@@ -324,7 +326,7 @@ ctx_distillery/
   rl_export.py         # the reward-free SFT/RL bundle `ctx-distillery export` prints. No main(),
                        #   no --out, structural labels only (no oracle) — see VENDOR.md
   trace_io.py          # load_trace / dict_events — the ONE place JSONL bytes become events
-  tools/               # the five READ-ONLY planner tools
+  tools/               # the six READ-ONLY planner tools
   adapters/
     base.py            # the read-only harness-adapter seam
     claude_code.py     # the one in-scope adapter
