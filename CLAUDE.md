@@ -146,7 +146,13 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    rlm-kit already takes for other untrusted content (fetched URLs, MCP output). `redact.py` runs
    **tier one** (7 hand-written patterns), then **tier two** (120 rules mechanically ported
    from gitleaks, `ctx_distillery/patterns/gitleaks_subset.json`), then **tier three** (the
-   operator's own rules, from the `CD_REDACTIONS` env var — empty unless set).
+   operator's own rules, from the `CD_REDACTIONS` env var — empty unless set). **This applies to
+   `RawSession.project_instructions` (the project's own `CLAUDE.md`) exactly as it does to
+   transcripts** — `session.run_distillation_artifacts` runs it through the SAME `redact()` call
+   (skipped only when the text is empty, a call-count detail for an existing test, not a
+   redaction-scope carve-out) before it ever reaches `.arun()`. A project's own instructions file
+   is less likely to carry a live secret than a raw session transcript, but "less likely" is not
+   "never," and it is now LM context exactly the same way transcripts are.
    - **Tier one is NOT redundant and must stay FIRST**, on measured grounds. **EXACTLY TWO of the
      seven are genuinely unavailable from gitleaks**: `bearer_token` uses a LOOKBEHIND, which RE2
      literally cannot express, so no gitleaks rule ever will; and `secret_assignment` substitutes the
@@ -364,6 +370,30 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
      for one). Two caveats from that same experiment are load-bearing and live in "Known
      simplifications" below — a GLOBAL skill of the same name SHADOWS a project one, and a project's
      very FIRST skills directory needs a Claude Code restart before it is discovered.
+   - **CONFIRMED by Claude Code's own official documentation, fetched directly**
+     (`code.claude.com/docs/en/claude-directory`, not inferred from a blog summary): a project's
+     root `CLAUDE.md` — or the equivalent `.claude/CLAUDE.md`, which the docs state explicitly is
+     the SAME thing in a different location ("Also works at `.claude/CLAUDE.md` if you prefer to
+     keep the project root clean") — is loaded into every session's context.
+     `ClaudeCodeAdapter.for_project` now reads it (`project_claude_md_path`,
+     `RawSession.project_instructions`) as read-only planner CONTEXT, never a promotion/prune
+     target. **Two things this project's OWN design choice, not a documented Claude Code
+     behavior — kept visibly separate from the confirmed fact above**: which of the two locations
+     wins if BOTH somehow exist (root does), and the decision to read ONLY the project-root file,
+     never the also-documented global `~/.claude/CLAUDE.md` (the operator's own cross-project
+     preference, out of scope for a per-project distillation) or an automatic nested-subdirectory
+     walk (no official confirmation such a thing exists as a mechanism separate from
+     `.claude/rules/`). **AGENTS.md is a WEAKER-evidence claim, and the distinction is worth keeping
+     visible rather than rounding up to match the citation above** (flagged by adversarial review):
+     `code.claude.com/docs/en/claude-directory` — the SAME page fetched for the CONFIRMED fact
+     above — simply does not mention AGENTS.md at all, one way or the other. That Claude Code lacks
+     native AGENTS.md support is inferred from a WEB SEARCH pass (community discussion of a manual
+     `ln -s AGENTS.md CLAUDE.md` symlink workaround), not from Anthropic's own documentation the way
+     the `.claude/CLAUDE.md` equivalence is. It could be stale (this is an active, contested feature
+     request) or simply wrong. What does NOT depend on this claim being right: this adapter's plain
+     file read follows a same-directory symlink either way (that is just how reading a file works),
+     so the `ln -s` workaround is picked up for free whether or not AGENTS.md ever gains native
+     support — no code here assumes one way or the other.
    The transcript RENDERING is deliberately LOSSY and its rules are pinned by tests: filter to
    `user`/`assistant` FIRST (no other event type carries `message` at all), handle `message.content`
    as either a plain string or a list of blocks, size a `tool_result` in chars OR blocks depending on

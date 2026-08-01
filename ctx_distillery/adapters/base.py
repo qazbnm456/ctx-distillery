@@ -123,11 +123,23 @@ class RawSession:
     into `run_meta` is CONDITIONAL on it being non-empty for the same reason — a present-but-empty
     list beside `meta["transcripts"] == 3` would read as "this run had no transcripts" rather than
     "this adapter reported no identities".
+
+    `project_instructions` is a DIFFERENT kind of thing from the two above: not a raw conversation
+    and not a structured index, but the harness's own project-level instructions file (Claude
+    Code's `CLAUDE.md`) — the project's existing, human-authored context, given to the planner as
+    read-only comparison material so it can notice when a session's finding is already documented
+    (redundant) or contradicts what is already written down (a conflict worth flagging). Never a
+    promotion/prune target: nothing in this project's `apply.py` can edit an existing file in
+    place, only ever create a new one.
     """
 
     transcripts: list[str] = field(default_factory=list)
     memory_index: list[ArtifactRef] = field(default_factory=list)
     transcript_ids: tuple[TranscriptId, ...] = ()
+    #: This project's own root `CLAUDE.md` (or `.claude/CLAUDE.md`), read-only planner CONTEXT —
+    #: never a promotion/prune target. Defaults to "" (an honest "none found or empty", never a
+    #: fabricated positive claim) so every existing adapter/caller/test is unaffected.
+    project_instructions: str = ""
 
 
 class HarnessAdapter(ABC):
