@@ -40,7 +40,7 @@ from rlm_kit.rubric import validate_rubric as _kit_validate_rubric
 from rlm_kit.trace import EVENT_RESULT, EVENT_TOOL_CALL
 
 from .schema import DistillPlan, assemble
-from .trace_io import dict_events
+from .trace_io import dict_events, transcript_facts
 
 CRITERION_CATEGORIES = ("TF", "TA", "TG", "PA")
 
@@ -181,19 +181,12 @@ def plan_from_events(events: list[dict]):
 def _run_start_transcripts(events: list[dict]) -> int | None:
     """How many transcripts this run was GIVEN, from its own `run_start` meta — None if unrecorded.
 
-    Read defensively (a non-dict `meta`, a non-int count, an old trace with neither) because
-    `trace_facts` must never raise on a malformed trace: `studio/` serves it over HTTP and `eval/`
-    scores a whole glob with it.
+    Delegates to `trace_io.transcript_facts` (invariant 11) — the same scan `eval/`'s `score_run` now
+    shares, rather than a second, rubric-local inline of "find `run_start`, guard non-dict `meta`,
+    guard a non-int/bool count." Still never raises on a malformed trace: `studio/` serves this over
+    HTTP and `eval/` scores a whole glob with it.
     """
-    for event in events:
-        if event.get("type") != "run_start":
-            continue
-        meta = (event.get("payload") or {}).get("meta")
-        if not isinstance(meta, dict):
-            return None
-        value = meta.get("transcripts")
-        return None if isinstance(value, bool) or not isinstance(value, int) else value
-    return None
+    return transcript_facts(events)["n_transcripts"]
 
 
 def trace_facts(events: list[dict]) -> dict:

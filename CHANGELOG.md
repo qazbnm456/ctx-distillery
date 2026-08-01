@@ -12,6 +12,33 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The eval scorecard now reports each row's own transcript composition** —
+  `transcripts=<n> (sessions=<a> subagents=<b>)`, appended per row (scored or unscored), closing the
+  gap an earlier entry below named "Not built, and named so it is not mistaken for shipped." Three
+  new `EvalRow` fields (`n_transcripts`/`transcript_sessions`/`transcript_subagents`), all `None`
+  (never a fabricated `0`) when a run's own trace never recorded them — deliberately PER ROW, never
+  on `EvalReport`, for the reason that earlier entry already gave: `score` scores an arbitrary glob
+  of traces, each with its own unrelated composition, so there is no single report-level number the
+  way there is one `judge_model` or `prompt_version`.
+
+  The fix is a promotion, not a new implementation (invariant 11): `studio/`'s `mapper.py` already
+  had `transcript_composition(meta)`, and `rubric.py` already had its own inline scan for the bare
+  `n_transcripts` count — two partial, independent reads of the same `run_start` meta. Both now go
+  through `ctx_distillery.trace_io.transcript_facts` (built on two new shared primitives,
+  `run_start_meta` + the moved `transcript_composition`), which `eval/`'s `score.score_run` calls as
+  its own, THIRD consumer — the same trigger invariant 11 already documents elsewhere ("eval/
+  needing the identical guard a THIRD time is what forced the shared module"). `studio/mapper.py`
+  re-imports and re-exports the name rather than losing it, so nothing importing from `mapper.py`
+  (`iterations.py`, its own tests) needed to change.
+
+  One sharp edge, worth recording rather than leaving implicit: `trace_io.dict_events` already
+  coerces a non-dict `run_start.meta` to `{}` before `run_start_meta`'s own scan ever sees it (a
+  normalization `dict_events`'s own docstring states), so a malformed meta and a genuinely empty one
+  are indistinguishable by the time any caller reads them — both surface as `{}`, not `None`. That
+  is harmless end to end (every downstream `.get(...)` degrades identically either way), and
+  `tests/test_trace_io.py` pins the distinction on purpose: `None` is reserved for "no `run_start`
+  event at all."
+
 - **`make check` is now the one verification entrypoint, and a `Makefile` is not a hole in invariant
   1.** Full verification was FIVE commands across four suites plus lint, existing only as ~40 lines of
   `CLAUDE.md ## Verify` prose whose lead-in still said "Run BOTH" — an undercount since the `eval/`,
@@ -278,11 +305,11 @@ never applies anything itself.
   `CD_*` env var: that surface is models and budgets, this is input selection, and a CLI flag is
   visible in the shell history that produced the trace.
 
-  **Not built, and named so it is not mistaken for shipped:** the eval scorecard footer does NOT
-  report a row's transcript composition (`transcripts=<n> (sessions=<a> subagents=<b>)`). It needs
-  `EvalRow`/`EvalReport` fields the design never specified, and it is ill-defined for `score`, whose
-  rows come from a glob of traces each with its own composition. The load-bearing half did land:
-  `judge.py` states that comparability is per-row and the trace is the authority.
+  **This used to say "Not built" here — that is now FALSE; see the newer, top-of-file entry on the
+  eval scorecard's per-row `transcripts=<n> (sessions=<a> subagents=<b>)` suffix.** The reasoning
+  below (ill-defined as an `EvalReport`-level aggregate, well-defined per row) is what that entry
+  built against, so it stays rather than being deleted — but do not read this bullet as current
+  status.
 
 - **FIXED — a symlinked `~/.claude` silently yielded ZERO transcripts** (`claude_home`). The helper
   was `Path.home().resolve() / CLAUDE_DIRNAME`, which resolves the home component and leaves

@@ -174,3 +174,66 @@ def load_trace(path: str, run_id: str | None = None) -> list[dict]:
     if run_id is None:
         return events
     return [event for event in events if event.get("run_id") == run_id]
+
+
+def run_start_meta(events: list[dict]) -> dict | None:
+    """The run's own `run_start` event's `payload.meta`, or None if there is none / it's malformed.
+
+    New shared extraction point (invariant 11): `rubric._run_start_transcripts` used to inline this
+    exact scan; `studio.mapper.transcript_composition` never needed it because its caller already has
+    a `meta` dict in hand (studio processes one SSE event at a time). Calls `dict_events` itself —
+    idempotent and O(n), the same stance `trace_facts`'s own docstring states for `assemble`: a
+    public function here cannot assume its caller already normalized.
+    """
+    for event in dict_events(events):
+        if event.get("type") != "run_start":
+            continue
+        meta = (event.get("payload") or {}).get("meta")
+        return meta if isinstance(meta, dict) else None
+    return None
+
+
+def transcript_composition(meta: object) -> dict[str, int | None]:
+    """`{"sessions": a, "subagents": b}` from a `run_start.meta["transcript_index"]`, or Nones.
+
+    MOVED here from `studio/`'s `mapper.py` (behavior and signature unchanged) once a THIRD consumer
+    (`eval/`'s `score.score_run`, via `transcript_facts` below) needed the identical guard — the same
+    trigger invariant 11 already documents for `dict_events` itself ("eval/ needing the identical
+    guard a THIRD time is what forced the shared module"). `studio/`'s `mapper.py` re-imports and
+    re-exports this name, so its own module-level import (its own tests, `iterations.py`) keeps
+    resolving unchanged.
+
+    A bare `transcripts=<n>` cannot say what those entries WERE, and once subagent transcripts can be
+    ingested a jump from 1 to 43 is silent semantic drift. The identity list added by
+    `ctx_distillery.adapters.base.TranscriptId` is what makes the composition answerable.
+
+    **Absent and MALFORMED both degrade to None, never to zero.** An old trace simply has no
+    `transcript_index` key; a corrupted or foreign one can carry anything at all there. Reporting
+    `sessions=0 subagents=0` for either would be a positive claim the trace never made, so the guard
+    is `isinstance(v, list)` PLUS a per-element `isinstance(e, dict)` filter.
+    """
+    if not isinstance(meta, dict):
+        return {"sessions": None, "subagents": None}
+    index = meta.get("transcript_index")
+    if not isinstance(index, list):
+        return {"sessions": None, "subagents": None}
+    kinds = [entry.get("kind") for entry in index if isinstance(entry, dict)]
+    return {
+        "sessions": sum(1 for kind in kinds if kind == "session"),
+        "subagents": sum(1 for kind in kinds if kind == "subagent"),
+    }
+
+
+def transcript_facts(events: list[dict]) -> dict[str, int | None]:
+    """`{"n_transcripts": n, "sessions": a, "subagents": b}` for one run — a single scan over its own
+    `run_start` meta, shared by `rubric.trace_facts` (`n_transcripts` only) and `eval/`'s
+    `score.score_run` (all three, rendered on the eval scorecard per row).
+
+    `n_transcripts` mirrors the guard `rubric._run_start_transcripts` has always applied: a non-int
+    or bool value degrades to None rather than a fabricated count.
+    """
+    meta = run_start_meta(events)
+    n = meta.get("transcripts") if isinstance(meta, dict) else None
+    if isinstance(n, bool) or not isinstance(n, int):
+        n = None
+    return {"n_transcripts": n, **transcript_composition(meta)}
