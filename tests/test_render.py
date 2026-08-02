@@ -39,6 +39,23 @@ def test_render_plan_omits_the_extra_file_section_when_there_are_none():
     assert "extra file" not in render_plan(plan)
 
 
+def test_render_plan_warns_when_the_harness_is_unsupported():
+    plan = AssembledPlan(candidates=[], harness="codex")
+    text = render_plan(plan)
+    assert "harness is 'codex'" in text
+    assert "refuse every promotion/prune" in text
+
+
+def test_render_plan_is_silent_about_harness_when_none():
+    plan = AssembledPlan(candidates=[], harness=None)
+    assert "harness" not in render_plan(plan)
+
+
+def test_render_plan_is_silent_about_harness_when_claude_code():
+    plan = AssembledPlan(candidates=[], harness="claude_code")
+    assert "harness" not in render_plan(plan)
+
+
 def test_plan_as_dict_picks_up_extra_files_automatically():
     """`plan_as_dict` is `dataclasses.asdict`, so a field added to `AssembledCandidate` shows up here
     without a hand-written mapping to update — this is the property that makes it worth asserting."""

@@ -570,6 +570,43 @@ def test_the_driver_stamps_the_planner_prompt_version(memory_dir, tmp_path):
     assert meta["planner_prompt_version"] == PLANNER_PROMPT_VERSION
 
 
+def test_run_meta_stamps_the_adapters_harness_name(memory_dir, tmp_path):
+    """Mirrors `test_the_driver_stamps_the_planner_prompt_version` exactly: `harness` is read off
+    the adapter passed to this call, not hardcoded, so a future second adapter's runs are
+    distinguishable in the trace from a Claude Code one."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            ClaudeCodeAdapter(memory_dir, transcripts=["t"]),
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["harness"] == "claude_code"
+
+
+def test_a_callers_own_meta_cannot_clobber_the_harness_stamp(memory_dir, tmp_path):
+    """`harness` is stamped AFTER `run_meta.update(meta or {})` specifically so a caller's own
+    `meta` dict — even one that happens to carry a `"harness"` key, accidentally or not — can never
+    silently override the real provenance."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            ClaudeCodeAdapter(memory_dir, transcripts=["t"]),
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+            meta={"harness": "not-real"},
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["harness"] == "claude_code"
+
+
 def test_project_instructions_are_redacted_before_reaching_the_planner(memory_dir, tmp_path):
     """A secret planted in `CLAUDE.md` must not survive into what the planner's own code actually
     sees — same guarantee `test_run_distillation_ingests_once_redacts_and_assembles` pins for

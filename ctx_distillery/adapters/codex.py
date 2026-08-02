@@ -369,6 +369,8 @@ class CodexAdapter(HarnessAdapter):
     a Codex-sourced promotion anywhere Codex-native, and this class does not change that.
     """
 
+    harness_name = "codex"
+
     @classmethod
     def for_project(cls, project_dir: str | Path, *, home: str | Path | None = None) -> CodexAdapter:
         """Discover the real storage for `project_dir` — see the module docstring for the full

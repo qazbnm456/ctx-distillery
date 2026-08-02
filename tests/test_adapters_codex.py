@@ -356,3 +356,10 @@ def test_bare_constructor_never_reaches_into_a_real_home(tmp_path, monkeypatch):
     adapter = CodexAdapter()
     assert adapter.ingest() == adapter.ingest()  # both calls degrade the same, no live reach-out
     assert adapter.list_targets() == []
+
+
+def test_harness_name_is_codex_and_distinct_from_claude_code():
+    from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
+
+    assert CodexAdapter.harness_name == "codex"
+    assert CodexAdapter.harness_name != ClaudeCodeAdapter.harness_name

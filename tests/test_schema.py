@@ -66,6 +66,10 @@ def _result(plan: dict):
     return {"type": EVENT_RESULT, "payload": {"output": plan}}
 
 
+def _run_start(meta):
+    return {"type": "run_start", "step_id": 0, "payload": {"meta": meta}}
+
+
 def _plan_dict(*candidates: dict) -> dict:
     return DistillPlan(candidates=[DistillCandidate(**c) for c in candidates]).model_dump()
 
@@ -160,3 +164,24 @@ def test_an_extra_file_for_an_artifact_id_no_candidate_references_is_simply_unus
     ]
     plan = assemble(events, DistillPlan.model_validate(_skill_candidate("a1")))
     assert set(plan.candidates[0].extra_files) == {"references/one.md"}
+
+
+# -- AssembledPlan.harness: read from run_start.meta, never from the plan's own claim -----------
+
+
+def test_assemble_populates_harness_from_run_start_meta():
+    events = [_run_start({"harness": "codex"}), _result(_plan_dict())]
+    assembled = assemble(events, DistillPlan.model_validate(_plan_dict()))
+    assert assembled.harness == "codex"
+
+
+def test_assemble_harness_is_none_without_a_run_start_event():
+    events = [_result(_plan_dict())]
+    assembled = assemble(events, DistillPlan.model_validate(_plan_dict()))
+    assert assembled.harness is None
+
+
+def test_assemble_harness_is_none_when_run_start_carries_no_harness_key():
+    events = [_run_start({"transcripts": 3}), _result(_plan_dict())]
+    assembled = assemble(events, DistillPlan.model_validate(_plan_dict()))
+    assert assembled.harness is None

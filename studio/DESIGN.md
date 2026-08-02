@@ -42,17 +42,18 @@ claim about what it drafted. The three derived states use only real `AssembledCa
 
 | derived state | frame | when |
 |---|---|---|
-| **blocked** | `--bad` (full frame) | a refusal decidable FROM THE TRACE — `problems` non-empty, **or** `draft_ok is False`, **or** a promotion whose assembled `draft` is empty/whitespace, **or** a `promote_to_skill` whose `key_fields['scope']` is not `"global"`/`"project"`, **or** a `prune` naming no `key_fields['target_path']` |
+| **blocked** | `--bad` (full frame) | a refusal decidable FROM THE TRACE — `problems` non-empty, **or** `draft_ok is False`, **or** a promotion whose assembled `draft` is empty/whitespace, **or** a `promote_to_skill` whose `key_fields['scope']` is not `"global"`/`"project"`, **or** a `prune` naming no `key_fields['target_path']`, **or** a non-`keep` candidate whose run `harness` is set and not one of `SUPPORTED_WRITE_HARNESSES` |
 | **backed** | `--signal` left edge | a `promote_to_memory`/`promote_to_skill` whose `artifact_id` resolved to real drafted bytes and is not blocked |
 | **inert** | `--border-strong` left edge | `keep` / `prune` — there is nothing to back, and claiming otherwise would be theatre |
 
 **`blocked` is not a UI opinion — every condition in it is one `apply_plan` really refuses on.**
-Three come from `apply.py::_blocking_problem` (the checks the writer re-runs regardless of action
-kind); two more mirror the per-action-kind `key_fields` conventions `_promote_skill` and `_prune`
-enforce. `app.js`'s `applyBlocker()` is that mirror.
+Four come from `apply.py::_blocking_problem` (the checks the writer re-runs regardless of action
+kind — including the harness-mismatch check, which is exempt only for `keep`); two more mirror the
+per-action-kind `key_fields` conventions `_promote_skill` and `_prune` enforce. `app.js`'s
+`applyBlocker()` is that mirror.
 
 **But red is a SUBSET of refused, not an equality — and saying otherwise would be the exact kind of
-false confidence §1 says this console must not project.** `apply.py` refuses at 29 sites. The five
+false confidence §1 says this console must not project.** `apply.py` refuses at 29 sites. The six
 above are the ones a FINISHED TRACE can decide; the rest cannot be known here at all, because they
 depend on the fresh `list_targets()` re-scan `apply_plan` performs at write time, against a store
 that may have changed since the run: a slug that now collides, a draft whose frontmatter carries no

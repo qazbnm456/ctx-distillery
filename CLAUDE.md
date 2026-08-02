@@ -901,11 +901,18 @@ show`), but `ctx-distillery-apply` cannot write a `promote_to_skill`/`promote_to
 drawn from one INTO Codex's own store. This is a deliberate, stated scope boundary, not an
 oversight — see `codex.py`'s module docstring for the full reasoning.
 
-**Prerequisite before `CodexAdapter` gets wired into `cli.py`/`ctx-distillery distill`, recorded
-now so it is not forgotten later**: nothing on `RawSession`/the trace/the plan records WHICH
-harness produced a run. The moment a second adapter is CLI-selectable, a human could distill a
-Codex project and approve a `promote_to_skill` candidate straight into their Claude Code skills
-store with zero warning that these are different, unrelated stores — a real footgun this adapter's
-existence does not itself create (it has no CLI wiring yet) but that MUST be resolved before that
-wiring lands (a harness marker on the plan/trace, or an explicit `apply.py`-side refusal, are both
-plausible fixes — deciding which is that follow-up's own scope, not decided here).
+**The prerequisite recorded above — resolved.** Every `HarnessAdapter` subclass now carries a
+`harness_name` class attribute (`"claude_code"` / `"codex"`), stamped by `run_distillation_artifacts`
+into `run_meta["harness"]` (AFTER the caller's own `meta` is merged in, so a caller cannot
+accidentally clobber it) and read back on assembly into `AssembledPlan.harness` (via
+`trace_io.run_start_meta` — never trusted from the plan's own claim, since a `DistillPlan` carries no
+such field at all). `schema.SUPPORTED_WRITE_HARNESSES = ("claude_code",)` is the single closed
+vocabulary both `render.py` (a warning line at the top of `render_plan`'s output, so `ctx-distillery
+show`'s default text and `apply.py`'s own dry-run report both surface a mismatch up front) and
+`apply.py` (`_blocking_problem`'s fourth check, refusing every non-`keep` action) read from — it
+lives in `schema.py` rather than `apply.py` specifically so `render.py` can import it without an
+`apply.py`<->`render.py` cycle (`apply.py` already imports `render_plan`). `harness is None` PERMITS
+deliberately (every trace before this landed is a Claude Code trace); a malformed non-string value
+is kept verbatim and refused via the same membership check, never coerced to `None`. `studio/`'s
+`app.js` mirrors the same four-condition `applyBlocker` (see `studio/DESIGN.md` §2). CLI wiring for
+`CodexAdapter` itself remains the separate, still-undone follow-up this was blocking.

@@ -168,6 +168,11 @@ async def run_distillation_artifacts(
     # axis that dominates plan quality — the same contract `eval/`'s `PROMPT_VERSION` has.
     run_meta["planner_prompt_version"] = PLANNER_PROMPT_VERSION
     run_meta.update(meta or {})
+    # Stamped LAST, deliberately AFTER the caller's own `meta` is merged in: this key is an
+    # authoritative provenance stamp `apply.py` gates a write-side refusal on, unlike the diagnostic
+    # counts above — a caller's `meta` dict incidentally carrying its own "harness" key must never
+    # silently clobber the real value.
+    run_meta["harness"] = adapter.harness_name
     with TraceRecorder(trace_path, run_id=rid, meta=run_meta):
         plan = await task.arun(
             transcripts=redacted_transcripts,

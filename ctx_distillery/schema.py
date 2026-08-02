@@ -65,10 +65,11 @@ from pydantic import BaseModel, Field
 from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT
 from rlm_kit.trace import EVENT_TOOL_CALL
 
-from .trace_io import dict_events, draft_cause
+from .trace_io import dict_events, draft_cause, run_start_meta
 
 __all__ = [
     "PROMOTION_ACTIONS",
+    "SUPPORTED_WRITE_HARNESSES",
     "AssembledCandidate",
     "AssembledExtraFile",
     "AssembledPlan",
@@ -194,6 +195,24 @@ class AssembledPlan:
 
     candidates: list[AssembledCandidate] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    #: Which harness produced this run ("claude_code", "codex", ...), read from the trace's own
+    #: run_start meta — never trusted from the plan's own claim (there is no such claim; a
+    #: DistillPlan has no harness field at all, matching invariant 2's "judgement only" shape).
+    #: `None` for a trace recorded before this field existed, or one with no run_start at all (e.g.
+    #: a hand-built plan in a test) — `apply.py` PERMITS `None` deliberately, since every trace
+    #: before this feature shipped is a Claude Code trace. A malformed (non-string) value is kept
+    #: VERBATIM rather than coerced to `None`: coercing garbage to `None` would wrongly permit it,
+    #: while `apply.py`'s `in SUPPORTED_WRITE_HARNESSES` membership check naturally refuses anything
+    #: that isn't the exact literal string it expects — the safer of the two failure modes.
+    harness: str | None = None
+
+
+#: The ONLY harnesses apply.py's write shapes (SKILL.md under .claude/skills/, memory files with
+#: Claude Code's own frontmatter, the _rescan collision authority) actually correspond to. Lives
+#: HERE, not in apply.py, so render.py can warn about a mismatch without an apply.py<->render.py
+#: import cycle (apply.py already imports render_plan for its own dry-run report). A run recorded
+#: under any OTHER harness_name gets every write action refused by apply._blocking_problem.
+SUPPORTED_WRITE_HARNESSES: tuple[str, ...] = ("claude_code",)
 
 
 def _draft_calls(events: Sequence[dict], tool: str) -> dict[str, dict]:
@@ -306,6 +325,8 @@ def assemble(events: Sequence[dict], plan: DistillPlan) -> AssembledPlan:
     # here rather than inside `_draft_calls` (which runs once PER drafting tool), so the pass is
     # O(events), not O(events x tools).
     events = dict_events(events)
+    run_meta = run_start_meta(events)
+    assembled.harness = run_meta.get("harness") if isinstance(run_meta, dict) else None
     by_tool = {tool: _draft_calls(events, tool) for tool in _DRAFT_TOOL_FOR_ACTION.values()}
     extra_by_artifact = _draft_extra_calls(events)
 

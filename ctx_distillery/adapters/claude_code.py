@@ -610,6 +610,8 @@ def _read_jsonl(path: Path) -> list[dict]:
 class ClaudeCodeAdapter(HarnessAdapter):
     """Read one Claude Code project's `memory/` directory, skills, and transcripts."""
 
+    harness_name = "claude_code"
+
     @classmethod
     def for_project(
         cls,
