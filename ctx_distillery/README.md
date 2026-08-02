@@ -20,7 +20,12 @@ adapter.ingest()  ->  redact  ->  DistillSession (RLM)  ->  assemble()  ->  [a h
   It also reads the project's own root `CLAUDE.md` (or `.claude/CLAUDE.md`) as
   `RawSession.project_instructions` — read-only planner CONTEXT, never a promotion/prune target,
   behind the same containment check. `ClaudeCodeAdapter.for_project(project_dir)` discovers the
-  real storage; see below.
+  real storage; see below. **`codex.py` is the SECOND adapter** (OpenAI Codex CLI), READ-ONLY
+  INGESTION ONLY (`apply.py` writes exclusively into Claude Code's own store, unchanged) — rollout
+  JSONL sessions filtered by `SessionMeta.cwd` (a machine-wide scan, not a free per-project
+  partition the way Claude Code's storage layout gives), `AGENTS.md` as `project_instructions`, and
+  `.agents/skills/*/SKILL.md` at every directory in a git-root-to-project walk. See that module's
+  own docstring for the full evidence-tier statement and scope reasoning.
 - **`redact.py`** — pattern-based host-side redaction, applied immediately after the single
   `ingest()` so the redacted list is the only text the model can reach. Three tiers, in order: 7
   hand-written patterns (the DOTALL private-key block, the lookbehind-anchored `Authorization:`
@@ -333,7 +338,8 @@ ctx_distillery/
   tools/               # the six READ-ONLY planner tools
   adapters/
     base.py            # the read-only harness-adapter seam
-    claude_code.py     # the one in-scope adapter
+    claude_code.py     # the first adapter (real format directly verified)
+    codex.py           # the second adapter — read-only ingestion only, apply.py untouched
   skills/              # memory-vs-skill-criteria.md — shipped in the wheel, read by the planner
 eval/                  # ctx-distillery-eval — a separate uv workspace member, judges the ARTIFACT
 studio/                # ctx-distillery-studio — replay-only console over a finished trace

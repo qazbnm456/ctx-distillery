@@ -885,8 +885,27 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 
 ## Harness scope
 
-Claude Code is the only adapter being built — it's the only platform whose real persistence
-format has been directly verified. Codex, Hermes, OpenClaw, and OpenCode are named future
-targets, deliberately **not** designed yet: their real on-disk formats haven't been inspected,
-and guessing one would be speculation dressed as design. Don't add an adapter for any of them
-until someone has actually looked at that harness's real format.
+**Claude Code and Codex now both have a real adapter — Hermes and OpenClaw remain named future
+targets, deliberately not designed yet.** Codex's real on-disk format was directly inspected this
+session (`openai/codex`'s own source, at HEAD, via the GitHub API) — a WEAKER evidence tier than
+Claude Code's (never cross-checked against a real installed Codex process or a dedicated control
+experiment; see `ctx_distillery/adapters/codex.py`'s own module docstring, which states this
+explicitly rather than rounding up to sound like the same confidence). Hermes and OpenClaw's real
+on-disk formats still haven't been inspected at all, and guessing either would be speculation
+dressed as design — don't add an adapter for either until someone has actually looked.
+
+**`CodexAdapter` is READ-ONLY INGESTION ONLY — `apply.py` gained NO Codex-specific write path.**
+It is entirely Claude-Code-specific still (invariant 9) and does not consult any adapter when
+writing. A Codex-sourced run produces a real judgement-only plan (reviewable via `ctx-distillery
+show`), but `ctx-distillery-apply` cannot write a `promote_to_skill`/`promote_to_memory` candidate
+drawn from one INTO Codex's own store. This is a deliberate, stated scope boundary, not an
+oversight — see `codex.py`'s module docstring for the full reasoning.
+
+**Prerequisite before `CodexAdapter` gets wired into `cli.py`/`ctx-distillery distill`, recorded
+now so it is not forgotten later**: nothing on `RawSession`/the trace/the plan records WHICH
+harness produced a run. The moment a second adapter is CLI-selectable, a human could distill a
+Codex project and approve a `promote_to_skill` candidate straight into their Claude Code skills
+store with zero warning that these are different, unrelated stores — a real footgun this adapter's
+existence does not itself create (it has no CLI wiring yet) but that MUST be resolved before that
+wiring lands (a harness marker on the plan/trace, or an explicit `apply.py`-side refusal, are both
+plausible fixes — deciding which is that follow-up's own scope, not decided here).
