@@ -12,6 +12,65 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **`CodexAdapter` — the SECOND `HarnessAdapter` this project has ever built, for OpenAI's Codex
+  CLI, READ-ONLY INGESTION ONLY.** `apply.py` gained no Codex-specific write path and remains
+  entirely Claude-Code-specific (invariant 9) — a Codex-sourced run produces a real judgement-only
+  plan, reviewable via `ctx-distillery show`, but `ctx-distillery-apply` cannot yet write a
+  `promote_to_skill`/`promote_to_memory` candidate drawn from one INTO Codex's own store. This is a
+  stated, deliberate scope boundary (confirmed with the user before design work started), not an
+  oversight.
+
+  **Evidence tier, stated explicitly rather than rounded up**: every structural fact this adapter
+  is built against was confirmed by reading `openai/codex`'s own SOURCE at HEAD this session (via
+  the GitHub API) — a weaker tier than several `ClaudeCodeAdapter` facts, which rest on a real
+  installed Claude Code process or a dedicated control experiment. `ctx_distillery/adapters/codex.py`'s
+  own module docstring says so, matching CLAUDE.md invariant 6's own evidence-tier discipline.
+
+  Rollouts (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) are rendered DELIBERATELY LOSSILY —
+  `user`/`assistant` message text plus a `[used tool: X]` label for tool-call-shaped items (Codex's
+  `FunctionCall`/`LocalShellCall`/`ToolSearchCall`/etc.), mirroring Claude Code's own `tool_use`
+  label rather than the silent drop a first draft had (found by adversarial review: a coding
+  agent's shell/patch calls are its actual substance, not noise). `AGENTS.md` becomes
+  `project_instructions` via the SAME field `CLAUDE.md`'s own ingestion already populates — walked
+  root-to-leaf from the nearest `.git` to the project directory, `AGENTS.override.md` preferred
+  over `AGENTS.md` per directory, never the global `~/.codex/AGENTS.md` (the identical
+  project-only scope decision already made for Claude Code's `CLAUDE.md`). Skills
+  (`.agents/skills/*/SKILL.md`) are enumerated at EVERY directory in that same walk, not just the
+  project directory (a second gap a first draft had — Codex's own `repo_agents_skill_roots` walks
+  the identical path AGENTS.md discovery does).
+
+  **Codex's own memory system (`~/.codex/memories/`) is DELIBERATELY NOT READ AT ALL** — a
+  correctness decision, not a simplification. Reading `codex-rs/memories/README.md` in full shows
+  it is a single, MACHINE-WIDE store ("Global Consolidation", "a single global phase-2 lock"),
+  consolidated across every project the operator has ever used Codex on, with no `cwd`/project
+  filter in either extraction phase's eligibility rules (confirmed further by adversarial review
+  against the actual state-DB schema: no project/cwd column exists on the stage-1 outputs table
+  either). Including it in a *per-project* snapshot would silently mix another, unrelated
+  project's learnings into this one's plan — worse than simply omitting it.
+
+  **The one real structural difference from `ClaudeCodeAdapter`, and its stated cost**: Claude Code
+  partitions storage by project on disk for free; Codex does not — every rollout on the machine
+  lives under the SAME `sessions/` tree, with the project recorded INSIDE each file as
+  `SessionMeta.cwd`. `for_project` must therefore open every rollout on the machine far enough to
+  read its `session_meta` line (capped at a fixed line count so a corrupted/hostile file that never
+  yields one cannot force an unbounded per-file read — added per adversarial review) and filter by
+  `cwd` — a real, stated cost proportional to every session ever recorded, not just this project's.
+
+  **A genuinely critical bug was caught and fixed before this ever shipped**: the first draft read
+  `cwd` from `payload["meta"]["cwd"]`, reasoning from `SessionMetaLine`'s Rust field being
+  `#[serde(flatten)]` — backwards. Flatten means `cwd` is a DIRECT sibling of `git` on the wire,
+  never nested under a `"meta"` key; had this shipped as written, `for_project` would have matched
+  ZERO sessions for every project, forever, silently indistinguishable from "no Codex history yet."
+  Found by adversarial review re-deriving the claim from `SessionMetaLine`'s own custom
+  `Deserialize` implementation rather than trusting the Rust struct shape at a glance.
+
+  **Prerequisite before this adapter gets CLI wiring, recorded now so it is not forgotten**:
+  nothing on `RawSession`/the trace/the plan records which harness produced a run. The moment a
+  second adapter is CLI-selectable, a human could distill a Codex project and approve a
+  `promote_to_skill` candidate straight into their Claude Code skills store with zero warning that
+  these are different, unrelated stores — this change does not introduce that footgun (no CLI
+  wiring lands here) but it MUST be resolved before wiring does.
+
 - **The planner now reads the project's own `CLAUDE.md` (or `.claude/CLAUDE.md`) as read-only
   context, closing a real gap: this tool reasoned about promoting durable knowledge into memory
   without ever seeing the durable knowledge the project already had written down.** Confirmed as a

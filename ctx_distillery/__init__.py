@@ -15,6 +15,7 @@ Public surface::
     from ctx_distillery import AssembledPlan, AssembledCandidate, assemble      # the read side
     from ctx_distillery import AssembledExtraFile                          # ... skill supplementary files
     from ctx_distillery import HarnessAdapter, ArtifactRef, ClaudeCodeAdapter   # the harness seam
+    from ctx_distillery import CodexAdapter                        # ... the SECOND one, read-only
     from ctx_distillery import subagent_files, SubagentTranscript, TranscriptId # ... + subagents
     from ctx_distillery import render_plan, plan_as_dict, load_trace, plan_from_events
     from ctx_distillery import load_runs, export_dataset                  # reward-free RL export
@@ -62,6 +63,12 @@ from .adapters.claude_code import (
     subagent_files,
     transcript_files,
 )
+
+# Only the class, deliberately: `codex.py` has its OWN `global_skills_root`/`codex_home` etc. —
+# same names as `claude_code.py`'s, a different harness's vocabulary that happens to coincide (see
+# `codex.py`'s own docstring on `SKILL_FILENAME`). Re-exporting both under one flat namespace here
+# would collide; reach Codex's own helpers via `ctx_distillery.adapters.codex` directly.
+from .adapters.codex import CodexAdapter
 from .config import PINNED_INTERPRETER, SUBSCRIPTION_PREFIX, DistillConfig, make_chat_fn, setup
 from .redact import REDACTIONS_ENV_VAR, load_operator_rules, redact_all, redact_transcript
 from .render import plan_as_dict, render_plan
@@ -145,6 +152,7 @@ __all__ = [  # noqa: RUF022
     "transcript_files",
     "subagent_files",
     "render_transcript_file",
+    "CodexAdapter",
     # the READ-ONLY tool set (closed — CLAUDE.md invariant 1)
     "FormatCheck",
     "make_list_memory_files_tool",
