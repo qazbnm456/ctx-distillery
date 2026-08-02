@@ -205,6 +205,7 @@ function startReplay(runId) {
   PLAN.filter = new Set();
   PLAN.runId = runId;
   PLAN.project = null;
+  PLAN.harness = null;
   renderCandidateList();
   renderStage();
   clear(document.getElementById("rubric-list"));
@@ -254,7 +255,11 @@ const CATEGORY_LENS = {
 // The two actions that carry drafted bytes — mirrors `ctx_distillery.schema.PROMOTION_ACTIONS`.
 const PROMOTION_ACTIONS = ["promote_to_memory", "promote_to_skill"];
 
-// Mirrors `ctx_distillery.apply._blocking_problem` — the three conditions `apply_plan` refuses on
+// Mirrors `ctx_distillery.schema.SUPPORTED_WRITE_HARNESSES` — the only harnesses apply.py's write
+// shapes correspond to. If that tuple changes, this one must move with it.
+const SUPPORTED_WRITE_HARNESSES = ["claude_code"];
+
+// Mirrors `ctx_distillery.apply._blocking_problem` — the four conditions `apply_plan` refuses on
 // regardless of action kind. Returns the reason, or null. Keyed ONLY on state `assemble()` already
 // computed from the trace, never on the plan's own claim about what it drafted (CLAUDE.md
 // invariant 2). The third condition is why this is a function and not just `problems.length`: an
@@ -269,6 +274,20 @@ function applyBlocker(candidate) {
   }
   if (PROMOTION_ACTIONS.includes(candidate.action) && !String(candidate.draft || "").trim()) {
     return "no drafted text was assembled for this promotion (nothing to write)";
+  }
+  // `candidate.action !== "keep"` MUST live here, not in `notApplicable` — `notApplicable` checks
+  // this function FIRST and only falls through to its own "keep is a no-op" reason afterward, so a
+  // `keep` candidate under a mismatched harness must clear this check to report its own reason
+  // instead of this one. Placed BEFORE the two per-action-kind checks below (not after) so the
+  // ORDER here matches `_blocking_problem`'s real precedence exactly — `apply.py` runs its harness
+  // check ahead of `_promote_skill`'s scope gate and `_prune`'s target gate, so a candidate with
+  // both defects must report the SAME reason here as the writer will actually give.
+  if (
+    candidate.action !== "keep" &&
+    PLAN.harness != null &&
+    !SUPPORTED_WRITE_HARNESSES.includes(PLAN.harness)
+  ) {
+    return `this run's harness is "${PLAN.harness}" — apply_plan only understands ${SUPPORTED_WRITE_HARNESSES.join(", ")}`;
   }
   // The two ADDITIONAL refusals that are derivable from the trace alone — added after a review
   // found the console framed both of these teal ("backed") while `apply_plan` would refuse them.
@@ -311,7 +330,7 @@ function candidateState(candidate) {
 // questions about one row — "let me read this" and "I want this applied" — and conflating them is
 // how a reviewer applies something they only meant to open.
 const PLAN = { candidates: [], selected: 0, view: "entry", picked: new Set(), runId: null,
-               project: null, transcriptIndex: [], filter: new Set() };
+               project: null, harness: null, transcriptIndex: [], filter: new Set() };
 
 function candidateLabel(candidate) {
   const k = candidate.key_fields || {};
@@ -875,6 +894,7 @@ async function loadPlan(runId) {
       candEmpty.hidden = true;
       PLAN.candidates = plan.candidates;
       PLAN.project = body.project || null;
+      PLAN.harness = plan.harness ?? null;
       PLAN.transcriptIndex = Array.isArray(body.transcript_index) ? body.transcript_index : [];
       renderCandidateList();
       renderStage();

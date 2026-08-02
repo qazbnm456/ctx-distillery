@@ -64,12 +64,52 @@ never applies anything itself.
   Found by adversarial review re-deriving the claim from `SessionMetaLine`'s own custom
   `Deserialize` implementation rather than trusting the Rust struct shape at a glance.
 
-  **Prerequisite before this adapter gets CLI wiring, recorded now so it is not forgotten**:
-  nothing on `RawSession`/the trace/the plan records which harness produced a run. The moment a
-  second adapter is CLI-selectable, a human could distill a Codex project and approve a
-  `promote_to_skill` candidate straight into their Claude Code skills store with zero warning that
-  these are different, unrelated stores — this change does not introduce that footgun (no CLI
-  wiring lands here) but it MUST be resolved before wiring does.
+  **Prerequisite before this adapter gets CLI wiring — resolved by the harness-marker change
+  below.**
+
+- **Every run is now stamped with WHICH harness produced it, and `apply.py` refuses to write a
+  candidate drawn from one it does not understand — the prerequisite `CodexAdapter` recorded
+  above.** `HarnessAdapter` gained a required `harness_name` class attribute
+  (`ClaudeCodeAdapter.harness_name = "claude_code"`, `CodexAdapter.harness_name = "codex"`);
+  `run_distillation_artifacts` stamps `run_meta["harness"]` from it — deliberately AFTER
+  `run_meta.update(meta or {})`, so a caller's own `meta` dict can never silently clobber the real
+  provenance — and `schema.assemble` reads it back (via `trace_io.run_start_meta`, never trusted
+  from the plan's own claim) into a new `AssembledPlan.harness: str | None` field.
+
+  `schema.SUPPORTED_WRITE_HARNESSES = ("claude_code",)` is the one closed vocabulary both
+  `render.py` and `apply.py` read from — placed in `schema.py` rather than `apply.py` specifically
+  so `render.py` can import it without an `apply.py`<->`render.py` cycle (`apply.py` already
+  imports `render_plan`). `render_plan` now prints a warning line at the very TOP of its output when
+  `plan.harness` is set and unsupported, so `ctx-distillery show`'s default text and
+  `ctx-distillery-apply`'s own dry-run report both surface a mismatch up front — an earlier
+  blueprint draft missed this entirely, leaving the primary CLI surface silent until `--confirm`
+  refused candidates one at a time. `apply._blocking_problem` gained a fourth check refusing every
+  non-`keep` action when the harness is set and unsupported; `harness is None` PERMITS deliberately
+  (every trace recorded before this landed is a Claude Code trace), and a malformed non-string
+  value is kept verbatim rather than coerced to `None` — the membership check refuses it naturally,
+  which is the safer of the two failure modes.
+
+  `studio/`'s `app.js` mirrors the same rule: `applyBlocker` gained a fourth condition (exempting
+  `keep`, matching `_blocking_problem` exactly), and `PLAN.harness` is populated by `loadPlan` from
+  the fetched plan's own `harness` field (reset to `null` by `startReplay`). `studio/DESIGN.md` §2's
+  two count-citing sentences ("three"/"five") moved to "four"/"six".
+
+  **Caught by adversarial review before implementation**: the first blueprint draft (1) never
+  touched `render.py` at all, (2) proposed JS wiring that referenced a nonexistent `data` variable
+  without saying which of the two real functions (`startReplay` for reset, `loadPlan` for populate)
+  needed which half of the edit, and (3) proposed a JS test that only exercised `applyBlocker` via
+  `seed()`'s direct `PLAN.harness` assignment — which would have stayed green even if the real
+  `loadPlan` fetch-population wiring were completely broken. All three are fixed in the shipped
+  version; the JS test suite now separately drives the real `loadPlan` against a mocked `fetch`.
+
+  **A fourth issue was caught by the post-implementation `/check` pass**: `applyBlocker`'s harness
+  check originally sat AFTER the `promote_to_skill` scope gate and the `prune` target gate, while
+  `_blocking_problem` checks harness BEFORE either — so a candidate with both a bad `scope` and a
+  mismatched harness would show the studio reviewer the scope reason while `apply_plan` would
+  actually refuse it for the harness reason instead. Not a safety bug (both land on refused), but
+  it broke DESIGN.md §2's own stated property that every blocked reason shown is the one
+  `apply_plan` really gives. Fixed by reordering `applyBlocker` to match, with a test pinning the
+  precedence directly.
 
 - **The planner now reads the project's own `CLAUDE.md` (or `.claude/CLAUDE.md`) as read-only
   context, closing a real gap: this tool reasoned about promoting durable knowledge into memory

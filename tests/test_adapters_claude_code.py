@@ -1122,3 +1122,7 @@ def test_a_subagent_whose_render_is_empty_is_dropped_not_emitted_as_a_bare_heade
 
     assert [t.id for t in raw.transcript_ids] == ["sess-1", "real"]
     assert [entry.split("\n")[0].split()[0] for entry in raw.transcripts] == ["[0]", "[1]"]
+
+
+def test_harness_name_is_claude_code():
+    assert ClaudeCodeAdapter.harness_name == "claude_code"

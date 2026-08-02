@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from .schema import AssembledPlan
+from .schema import SUPPORTED_WRITE_HARNESSES, AssembledPlan
 
 __all__ = ["plan_as_dict", "render_plan"]
 
@@ -47,6 +47,11 @@ def render_plan(plan: AssembledPlan) -> str:
     that has neither.
     """
     lines = []
+    if plan.harness is not None and plan.harness not in SUPPORTED_WRITE_HARNESSES:
+        lines.append(
+            f"(this run's harness is {plan.harness!r} — apply_plan only writes for "
+            f"{list(SUPPORTED_WRITE_HARNESSES)} and will refuse every promotion/prune below)"
+        )
     if not plan.candidates:
         lines.append("(this run's plan proposed no candidates)")
     for i, candidate in enumerate(plan.candidates):

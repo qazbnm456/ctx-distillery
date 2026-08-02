@@ -154,6 +154,13 @@ class HarnessAdapter(ABC):
     ever gain a write or delete path — see the module docstring.
     """
 
+    #: A short, stable identifier for this harness ("claude_code", "codex", ...), stamped into
+    #: every run's trace meta (`run_meta["harness"]`) so `apply.py` can refuse to write a
+    #: promotion drawn from a harness it does not understand into a store built for a different
+    #: one. Every concrete subclass MUST set this to a distinct, non-empty string — there is no
+    #: sensible default here, so the base class leaves it unset rather than picking one arbitrarily.
+    harness_name: str
+
     @abstractmethod
     def ingest(self) -> RawSession:
         """Read this harness's transcripts + memory store into a `RawSession`.

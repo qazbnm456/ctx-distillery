@@ -66,7 +66,7 @@ function load() {
   const src = fs.readFileSync(path.join(__dirname, "..", "static", "app.js"), "utf8");
   const api = new Function(
     src + "\nreturn { PLAN, renderZones, renderCandidateList, transcriptsCitedBy, " +
-    "appendProseWithLinks, citingTranscript, renderRubric, syncMeta };"
+    "appendProseWithLinks, citingTranscript, renderRubric, syncMeta, loadPlan };"
   )();
   return { api, byId: (id) => document.getElementById(id) };
 }
@@ -111,7 +111,7 @@ const PROSE_SHAPED = {
   },
 };
 
-function seed(api, candidates) {
+function seed(api, candidates, { harness = null } = {}) {
   api.PLAN.candidates = candidates;
   api.PLAN.transcriptIndex = [
     { kind: "session", id: "30f8147f-aaaa", session: "30f8147f-aaaa", parent: "session:30f8147f" },
@@ -121,6 +121,7 @@ function seed(api, candidates) {
   api.PLAN.filter = new Set();
   api.PLAN.picked = new Set();
   api.PLAN.selected = 0;
+  api.PLAN.harness = harness;
 }
 
 // --- tests ---------------------------------------------------------------------------------------
@@ -201,6 +202,61 @@ test("a keep candidate cannot be ticked for apply", () => {
   assert.strictEqual(boxes[0].disabled, true, "keep is not tickable");
   assert.match(boxes[0].title, /no-op/, "and the row says why");
   assert.strictEqual(boxes[1].disabled, false, "a promotion still is");
+});
+
+test("a promotion under an unsupported harness cannot be ticked for apply", () => {
+  const { api, byId } = load();
+  seed(api, [LIST_SHAPED], { harness: "codex" });
+  api.renderCandidateList();
+  const boxes = byId("cand-list").children.map((row) => row.children[0]);
+  assert.strictEqual(boxes[0].disabled, true, "a mismatched harness blocks the tick");
+  assert.match(boxes[0].title, /codex/, "and the row says which harness");
+});
+
+test("a keep candidate under a mismatched harness keeps its OWN no-op reason", () => {
+  // `notApplicable` checks `applyBlocker` first; the harness check inside `applyBlocker` must
+  // exempt `keep` so a keep row still reports "no-op", not the harness mismatch.
+  const { api, byId } = load();
+  const keep = { action: "keep", artifact_id: null, draft: "", draft_ok: null, problems: [],
+                 key_fields: { target_path: "/memory/x.md", reason: "unchanged" } };
+  seed(api, [keep], { harness: "codex" });
+  api.renderCandidateList();
+  const boxes = byId("cand-list").children.map((row) => row.children[0]);
+  assert.strictEqual(boxes[0].disabled, true);
+  assert.match(boxes[0].title, /no-op/, "still its own reason, not the harness one");
+});
+
+test("harness mismatch takes precedence over a bad scope, matching apply.py's own order", () => {
+  // `_blocking_problem` checks harness BEFORE `_promote_skill`'s scope gate, so a candidate with
+  // BOTH defects must report the harness reason here too — otherwise the tooltip a reviewer reads
+  // would disagree with the reason `apply_plan` actually gives.
+  const { api, byId } = load();
+  const badScopeUnderMismatch = {
+    action: "promote_to_skill", artifact_id: "a3", draft: "---\nname: z\n---\nbody",
+    draft_ok: true, problems: [], key_fields: { scope: "nonsense" },
+  };
+  seed(api, [badScopeUnderMismatch], { harness: "codex" });
+  api.renderCandidateList();
+  const boxes = byId("cand-list").children.map((row) => row.children[0]);
+  assert.match(boxes[0].title, /codex/, "harness reason wins, not the scope reason");
+});
+
+test("loadPlan populates PLAN.harness from the fetched response", async () => {
+  // The wiring test, not just the unit test: `seed()` sets `PLAN.harness` directly and would stay
+  // green even if the real fetch -> PLAN population path were broken (an earlier draft of this
+  // change referenced a variable, `data`, that does not exist at either real call site). This test
+  // drives the actual async function against a mocked `fetch`.
+  const { api } = load();
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      plan: { harness: "codex", candidates: [LIST_SHAPED], problems: [] },
+      project: null,
+      transcript_index: [],
+    }),
+  });
+  await api.loadPlan("some-run-id");
+  assert.strictEqual(api.PLAN.harness, "codex");
 });
 
 test("the meta column collapses when empty and expands when the RUBRIC fills it", () => {

@@ -902,6 +902,56 @@ def test_an_unknown_action_is_refused(memory_dir):
     assert "unknown action" in outcomes[0].reason
 
 
+# -- harness mismatch: apply.py only understands writes for SUPPORTED_WRITE_HARNESSES ------------
+
+
+def test_a_mismatched_harness_refuses_every_write_action(memory_dir):
+    mismatched_plan = AssembledPlan(
+        candidates=[
+            promotion("api-notes"),
+            skill_promotion(),
+            prune(memory_dir / "user-prefs.md"),
+        ],
+        harness="codex",
+    )
+    outcomes = apply_plan(
+        memory_dir,
+        mismatched_plan,
+        [0, 1, 2],
+        global_skills_dir=memory_dir / "skills",
+    )
+    assert [o.status for o in outcomes] == ["refused", "refused", "refused"]
+    assert all("codex" in o.reason for o in outcomes)
+    assert names_in(memory_dir) == {"project-conventions", "user-preferences", "MEMORY.md"}
+
+
+def test_a_keep_candidate_is_not_refused_under_a_mismatched_harness(memory_dir):
+    mismatched_plan = AssembledPlan(
+        candidates=[AssembledCandidate(action="keep", key_fields={"reason": "still true"})],
+        harness="codex",
+    )
+    outcomes = apply_plan(memory_dir, mismatched_plan, [0])
+    assert outcomes[0].status == "noop"
+    assert "no-op" in outcomes[0].reason
+
+
+@pytest.mark.parametrize("harness", [None, "claude_code"])
+def test_a_none_or_matching_harness_permits_the_write(memory_dir, harness):
+    permitted_plan = AssembledPlan(candidates=[promotion("api-notes")], harness=harness)
+    outcomes = apply_plan(memory_dir, permitted_plan, [0])
+    assert outcomes[0].status == "applied"
+
+
+def test_a_malformed_non_string_harness_refuses_rather_than_permitting(memory_dir):
+    """A non-string `harness` (an int, a list — never produced by a real trace, but not impossible
+    from a hand-built/corrupted one) must not be silently coerced to `None` and permitted: it is
+    never a member of `SUPPORTED_WRITE_HARNESSES`, so the membership check refuses it naturally."""
+    malformed_plan = AssembledPlan(candidates=[promotion("api-notes")], harness=123)
+    outcomes = apply_plan(memory_dir, malformed_plan, [0])
+    assert outcomes[0].status == "refused"
+    assert "123" in outcomes[0].reason
+
+
 # -- the audit record ----------------------------------------------------------------------------
 
 

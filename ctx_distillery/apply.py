@@ -97,7 +97,14 @@ from .adapters.claude_code import (
 )
 from .render import render_plan
 from .rubric import plan_from_events
-from .schema import PROMOTION_ACTIONS, AssembledCandidate, AssembledExtraFile, AssembledPlan, assemble
+from .schema import (
+    PROMOTION_ACTIONS,
+    SUPPORTED_WRITE_HARNESSES,
+    AssembledCandidate,
+    AssembledExtraFile,
+    AssembledPlan,
+    assemble,
+)
 from .trace_io import load_trace
 
 __all__ = [
@@ -253,7 +260,7 @@ def apply_plan(
                 _outcome(index, candidate, STATUS_SKIPPED, "not approved by the caller")
             )
             continue
-        blocker = _blocking_problem(candidate)
+        blocker = _blocking_problem(candidate, assembled_plan.harness)
         if blocker is not None:
             outcomes.append(_outcome(index, candidate, STATUS_REFUSED, blocker))
             continue
@@ -290,11 +297,18 @@ def apply_plan(
 # -- refusal checks that apply to EVERY action kind ----------------------------------------------
 
 
-def _blocking_problem(candidate: AssembledCandidate) -> str | None:
+def _blocking_problem(candidate: AssembledCandidate, harness: str | None) -> str | None:
     """The design's "refused regardless of action kind" checks, re-run here on purpose.
 
-    `assemble()` already computed all three; re-checking means a caller who approved a candidate
-    without reading its `problems` still cannot write a draft that failed its own format gate.
+    `assemble()` already computed the first three; re-checking means a caller who approved a
+    candidate without reading its `problems` still cannot write a draft that failed its own format
+    gate. The fourth is this module's own: `harness` is `assembled_plan.harness`, the trace's own
+    provenance stamp (never the candidate's own claim — there is none). `harness is None` PERMITS,
+    deliberately: every trace recorded before this stamp existed IS a Claude Code trace (no other
+    adapter was ever wired into a driver before this landed), and a hand-built plan in a test
+    defaults to `harness=None` for the same reason. Only an explicit, non-`"claude_code"` string
+    refuses — including a malformed (non-string) value, which is never a member of
+    `SUPPORTED_WRITE_HARNESSES` and so is refused rather than silently permitted.
     """
     if candidate.problems:
         detail = "; ".join(str(p) for p in candidate.problems)
@@ -303,6 +317,13 @@ def _blocking_problem(candidate: AssembledCandidate) -> str | None:
         return "the drafting call for this candidate failed its deterministic format check"
     if candidate.action in PROMOTION_ACTIONS and not (candidate.draft or "").strip():
         return "no drafted text was assembled for this promotion (nothing to write)"
+    if candidate.action != "keep" and harness is not None and harness not in SUPPORTED_WRITE_HARNESSES:
+        return (
+            f"this run's harness is {harness!r}, but apply.py only understands writes for "
+            f"{list(SUPPORTED_WRITE_HARNESSES)} — refusing to write a candidate drawn from a run "
+            f"this module cannot correctly interpret (its skill/memory shapes and collision checks "
+            f"are specific to {SUPPORTED_WRITE_HARNESSES[0]!r})"
+        )
     return None
 
 
