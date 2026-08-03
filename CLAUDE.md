@@ -816,14 +816,21 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 - **`apply_plan` is still callable directly from Python**, and `ctx-distillery-apply` is a thin
   layer over it — the CLI only knows how to derive Claude Code's roots from a `--project` path. Point
   at an unusual layout by calling `apply_plan(memory_dir, plan, approved_ids, ...)` yourself.
-- **No adapter for any harness other than Claude Code.**
+- **No adapter for Hermes or OpenClaw** — the two named future targets, still deliberately
+  undesigned because nobody has inspected their real on-disk formats. This bullet said "No adapter
+  for any harness other than Claude Code" until `CodexAdapter` landed. Which adapters exist, and on
+  what strength of evidence each rests, is `## Harness scope`'s job and is not restated here.
 - **`apply.py` archives, and nothing purges.** A pruned file is moved to
   `_ctx_distillery_archive/`, never deleted; deleting the archive for real is a separate, explicit
   `purge` operation that does not exist yet. That is deliberate — "still recoverable" beats
   "irreversible" even at the human-approved step.
 - **`apply_plan` only knows the Claude Code layout** (it builds a `ClaudeCodeAdapter` directly, and
-  its per-kind roots are Claude Code's). Generalising the apply step across harnesses waits for a
-  second adapter to actually exist.
+  its per-kind roots are Claude Code's). This bullet used to end "Generalising the apply step across
+  harnesses waits for a second adapter to actually exist." **That precondition is now MET and the
+  decision taken was NOT to generalise — it was to REFUSE**: a plan drawn from a non-Claude-Code run
+  gets every write action blocked rather than written into the wrong store. Generalising is still
+  unbuilt, and is no longer waiting on anything but someone deciding to do it. The mechanism lives in
+  `## Harness scope`; don't re-derive it here.
 - **`ctx_distillery/rubric.py` sources 100% of its facts from `session.assemble()`'s output, and
   `eval/` (`ctx-distillery-eval`) never writes and is never imported back.** The rubric is
   deterministic, reward-free ATLAS (TF/TA/TG/PA) facts, built on `rlm_kit.rubric` — it never decides

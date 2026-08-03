@@ -21,7 +21,8 @@ file. Both reward-free/read-only by construction; see their own `eval/README.md`
 `eval/` now has BOTH subcommands: `score` over existing traces, and `run <taskset|demo>`, which
 drives a real distillation per task and scores each fresh run against the redacted transcripts that
 run actually saw. Subagent transcripts are distillable too, opt-in
-(`ctx-distillery distill --include-subagents`). Still missing: any harness other than Claude Code.
+(`ctx-distillery distill --include-subagents`). Still missing: Hermes and OpenClaw, whose real
+on-disk formats nobody has inspected yet — and a write path for any harness but Claude Code.
 See `CLAUDE.md` for the hard invariants this project is built against.
 
 ## Install and run
