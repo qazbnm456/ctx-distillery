@@ -52,7 +52,7 @@ def test_list_runs_lists_trace_file_stems_sorted(tmp_path, monkeypatch):
 
 def test_list_runs_is_empty_when_traces_dir_is_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path / "does-not-exist")
-    assert client.get("/v1/runs").json() == {"runs": []}
+    assert client.get("/v1/runs").json() == {"runs": [], "live": []}
 
 
 # ---- /v1/runs/{run_id}: the assembled plan + rubric facts, from a REAL recorded trace --------
@@ -202,7 +202,10 @@ def test_a_traversal_shaped_request_that_survives_routing_still_reaches_the_slug
 
     tokens = list(seen)  # snapshot: `_trace_path` below re-enters the spy and would append again
     monkeypatch.setattr(appmod, "_slug_id", real)  # done spying; every call from here is the real one
-    assert tokens == ["..", "a\x00b", ".."]  # every one of them actually got there
+    # Each request slugs TWICE now: once in `_refuse_if_still_live` (checked before anything else),
+    # once more inside `_trace_path` when the payload/trace is actually read — every one of them
+    # actually got there, twice over, in request order.
+    assert tokens == ["..", "..", "a\x00b", "a\x00b", "..", ".."]
     assert real("..") == "unknown" and real("a\x00b") == "a-b"
     # and the paths they produce stay inside traces_dir, which is the property that matters
     for raw in tokens:
@@ -303,3 +306,230 @@ def test_frontend_shell_and_assets_are_served_and_revalidate():
         resp = client.get(f"/static/{asset}")
         assert resp.status_code == 200 and resp.headers.get("cache-control") == "no-cache"
     assert client.get("/v1/runs/does-not-exist").status_code == 404  # static mount didn't shadow the API
+
+
+# ---- live mode: GET /v1/projects, POST /v1/distill, POST /v1/runs/{run_id}/cancel -----------
+#
+# TWO overrides are both required, and each defends a DIFFERENT half of `_host_is_loopback`:
+# `client=("127.0.0.1", 50000)` is the ASGI scope's TCP peer (`request.client.host`) — Starlette's
+# default TestClient reports `("testclient", 50000)`, which is not loopback. `base_url=` is what a
+# request's own `Host` HEADER defaults to (NOT the `client=` tuple — a real gap this file's own
+# tests found: every `Host` header defaulted to the literal "testserver" until this was added,
+# which `_host_is_loopback` also refuses now that it requires BOTH the peer and the header to name a
+# loopback host).
+loopback_client = TestClient(
+    appmod.app, base_url="http://127.0.0.1:50000", client=("127.0.0.1", 50000)
+)
+
+
+def test_projects_404_when_live_mode_is_off(monkeypatch):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", ())
+    assert client.get("/v1/projects").status_code == 404
+
+
+def test_projects_lists_the_configured_allowlist(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    assert loopback_client.get("/v1/projects").json() == {"projects": [str(tmp_path)]}
+
+
+def test_projects_403_off_loopback_even_with_live_mode_on(monkeypatch, tmp_path):
+    """Found missing by adversarial review: without this check, once live mode is on, ANY client
+    that can reach the port — not just the browser sitting at this machine — could read the
+    operator's absolute local project paths."""
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    assert client.get("/v1/projects").status_code == 403  # non-loopback client
+
+
+def test_distill_404_when_live_mode_is_off(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", ())
+    resp = loopback_client.post("/v1/distill", json={"project_dir": str(tmp_path)})
+    assert resp.status_code == 404
+
+
+def test_distill_403_off_loopback_even_with_live_mode_on(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    resp = client.post("/v1/distill", json={"project_dir": str(tmp_path)})  # non-loopback client
+    assert resp.status_code == 403
+
+
+def test_distill_403_on_cross_origin_even_from_loopback(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    resp = loopback_client.post(
+        "/v1/distill",
+        json={"project_dir": str(tmp_path)},
+        headers={"origin": "http://attacker.example", "host": "127.0.0.1:50000"},
+    )
+    assert resp.status_code == 403
+
+
+def test_distill_403_on_a_dns_rebinding_attack_even_though_the_tcp_peer_is_loopback(
+    monkeypatch, tmp_path
+):
+    """The bug an adversarial review caught directly: a REAL DNS-rebinding attack makes the peer
+    address genuinely loopback (attacker DNS resolved a hostname to 127.0.0.1) while the browser's
+    `Host`/`Origin` headers still name the attacker's hostname, because a browser sends the hostname
+    it navigated to, never the resolved IP. A first draft's `_host_is_loopback` checked the peer
+    address FIRST and returned `True` immediately on a match — exactly backwards, since that is
+    precisely what is true in this attack. It must require the peer be loopback AND the `Host`
+    header itself name a loopback host."""
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    resp = loopback_client.post(  # loopback_client's TCP peer really is 127.0.0.1
+        "/v1/distill",
+        json={"project_dir": str(tmp_path)},
+        headers={
+            "origin": "http://rebind.attacker.example:50000",
+            "host": "rebind.attacker.example:50000",
+        },
+    )
+    assert resp.status_code == 403
+
+
+def test_distill_403_on_same_hostname_different_port_even_from_loopback(monkeypatch, tmp_path):
+    """A same-ORIGIN check, not a same-HOSTNAME check: comparing hostname alone would treat every
+    port on `127.0.0.1`/`localhost` as mutually trusted, which on a loopback-only threat model means
+    any OTHER local dev server or app would count as "same origin" for CSRF purposes. `Origin` here
+    names the right HOSTNAME but the WRONG port relative to `Host`."""
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    resp = loopback_client.post(
+        "/v1/distill",
+        json={"project_dir": str(tmp_path)},
+        headers={"origin": "http://127.0.0.1:9999", "host": "127.0.0.1:50000"},
+    )
+    assert resp.status_code == 403
+
+
+def test_distill_400_when_project_dir_is_not_in_the_allowlist(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path / "allowed",))
+    resp = loopback_client.post("/v1/distill", json={"project_dir": str(tmp_path / "elsewhere")})
+    assert resp.status_code == 400
+
+
+def test_distill_400_when_run_id_collides_with_an_already_live_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    monkeypatch.setattr(appmod, "_WORKERS", {"dup": object()})
+    resp = loopback_client.post(
+        "/v1/distill", json={"project_dir": str(tmp_path), "run_id": "dup"}
+    )
+    assert resp.status_code == 400
+
+
+def test_distill_400_when_run_id_collides_with_an_existing_trace_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    (tmp_path / "dup.jsonl").write_text("")
+    resp = loopback_client.post(
+        "/v1/distill", json={"project_dir": str(tmp_path), "run_id": "dup"}
+    )
+    assert resp.status_code == 400
+
+
+def test_distill_happy_path_streams_started_then_forwarded_events_then_completed(
+    monkeypatch, tmp_path
+):
+    """`run_live` itself is monkeypatched (its own behaviour is `tests/test_live.py`'s job) — this
+    pins the ROUTE's own contract: `distill.run.started` first (before anything the run itself
+    emits), every `sink()` call forwarded verbatim as its own SSE event, then exactly one terminal
+    `distill.run.completed` once `on_done` fires, and the registries are cleaned up after."""
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+
+    def fake_run_live(project_dir, run_id, trace_path, sink, on_done, **kw):
+        sink({"event": "distill.run.created", "data": {}})
+        sink({"event": "distill.run.completed", "data": {"foo": "bar"}})
+        on_done({"cancelled": False})
+
+    monkeypatch.setattr(appmod, "run_live", fake_run_live)
+
+    with loopback_client.stream(
+        "POST", "/v1/distill", json={"project_dir": str(tmp_path), "run_id": "live1"}
+    ) as resp:
+        assert resp.status_code == 200
+        body = "".join(resp.iter_text())
+
+    events = [line for line in body.split("\n\n") if line.strip()]
+    assert events[0].startswith("event: distill.run.started")
+    assert "run_id" in events[0]
+    assert any(e.startswith("event: distill.run.created") for e in events)
+    # exactly ONE terminal event, and it is the run's OWN completed event (not a synthesized one,
+    # since the run genuinely emitted its own before on_done fired)
+    completed = [e for e in events if e.startswith("event: distill.run.completed")]
+    assert len(completed) == 1
+    assert '"foo": "bar"' in completed[0]
+    assert "live1" not in appmod._WORKERS
+    assert "live1" not in appmod._CANCELS
+    assert "live1" not in appmod._RESERVED_RUN_IDS
+
+
+def test_distill_synthesizes_a_completed_event_if_the_run_never_emitted_one(monkeypatch, tmp_path):
+    """Mirrors `stream_run`'s own fallback: a run that fails before any `run_end` is ever recorded
+    must still end its stream with a `distill.run.completed`, carrying the `cancelled` flag."""
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+
+    def fake_run_live(project_dir, run_id, trace_path, sink, on_done, **kw):
+        on_done({"cancelled": True})  # no sink() calls at all — e.g. setup() failed immediately
+
+    monkeypatch.setattr(appmod, "run_live", fake_run_live)
+
+    with loopback_client.stream(
+        "POST", "/v1/distill", json={"project_dir": str(tmp_path), "run_id": "live2"}
+    ) as resp:
+        body = "".join(resp.iter_text())
+
+    events = [line for line in body.split("\n\n") if line.strip()]
+    completed = [e for e in events if e.startswith("event: distill.run.completed")]
+    assert len(completed) == 1
+    assert '"cancelled": true' in completed[0]
+
+
+def test_cancel_404_when_live_mode_is_off(monkeypatch):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", ())
+    assert loopback_client.post("/v1/runs/whatever/cancel").status_code == 404
+
+
+def test_cancel_404_when_run_is_not_currently_live(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    monkeypatch.setattr(appmod, "_CANCELS", {})
+    assert loopback_client.post("/v1/runs/not-live/cancel").status_code == 404
+
+
+def test_cancel_sets_the_events_and_returns_cancelling(monkeypatch, tmp_path):
+    import threading
+
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    ev = threading.Event()
+    monkeypatch.setattr(appmod, "_CANCELS", {"live3": ev})
+    resp = loopback_client.post("/v1/runs/live3/cancel")
+    assert resp.status_code == 200
+    assert resp.json() == {"cancelling": True}
+    assert ev.is_set()
+
+
+def test_cancel_403_off_loopback(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "_LIVE_PROJECTS", (tmp_path,))
+    monkeypatch.setattr(appmod, "_CANCELS", {"live4": SimpleNamespace(set=lambda: None)})
+    assert client.post("/v1/runs/live4/cancel").status_code == 403
+
+
+def test_get_run_refuses_409_while_the_run_is_still_live(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    monkeypatch.setattr(appmod, "_WORKERS", {"still-live": object()})
+    assert client.get("/v1/runs/still-live").status_code == 409
+
+
+def test_get_iterations_refuses_409_while_the_run_is_still_live(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    monkeypatch.setattr(appmod, "_WORKERS", {"still-live": object()})
+    assert client.get("/v1/runs/still-live/iterations").status_code == 409
+
+
+def test_stream_run_refuses_409_while_the_run_is_still_live(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    monkeypatch.setattr(appmod, "_WORKERS", {"still-live": object()})
+    assert client.get("/v1/runs/still-live/events").status_code == 409
+
+
+def test_list_runs_reports_live_run_ids(monkeypatch, tmp_path):
+    monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
+    monkeypatch.setattr(appmod, "_WORKERS", {"b-live": object(), "a-live": object()})
+    assert client.get("/v1/runs").json()["live"] == ["a-live", "b-live"]

@@ -32,6 +32,23 @@
         <p class="tracesdir" id="traces-dir" hidden></p>
       </div>
 
+      <!-- Live mode: OPT-IN, gated on the server's own CTXD_LIVE_PROJECTS allowlist. Hidden by
+           default; `loadLiveProjects` un-hides it only after GET /v1/projects succeeds (a 404 means
+           live mode is off, and the panel has nothing to offer). The project <select> is populated
+           from that SAME allowlist — there is no free-text project path anywhere in this UI, because
+           the server refuses one anyway (CLAUDE.md invariant 10's reopening condition (c)). -->
+      <div class="panel live-panel" id="live-panel" hidden>
+        <div class="panel-label">▾ Live distill</div>
+        <div class="row">
+          <select id="live-project" class="text-input"></select>
+        </div>
+        <div class="row live-actions">
+          <button id="live-start" class="btn btn-primary">Distill <span class="arrow">▶</span></button>
+          <button id="live-cancel" class="btn btn-danger" disabled>Cancel</button>
+        </div>
+        <div class="hint" id="live-status"></div>
+      </div>
+
       <!-- The candidate LIST is the review surface, so it sits above the replay feed and takes the
            rail's flexible height. It used to be the middle column with every draft expanded inline:
            10 candidates x a 260px capped draft is ~3,200px of content in a ~900px panel, and reading

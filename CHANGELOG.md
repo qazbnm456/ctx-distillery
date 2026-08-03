@@ -12,6 +12,53 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **`ctx-distillery-studio` gained an OPT-IN live-drive endpoint, `POST /v1/distill`, off unless the
+  operator sets `CTXD_LIVE_PROJECTS`.** This reopens a refusal `CLAUDE.md` invariant 10 previously
+  stated outright ("there is no live-drive endpoint"), on the four conditions that invariant itself
+  named as sufficient to revisit it — all four are now met, and `studio/README.md`'s "Scope: replay
+  + opt-in live" section and `studio/CLAUDE.md`'s invariant 10 hold the full argument:
+
+  1. A real cancel seam now exists UPSTREAM, in `rlm-kit`: `rlm_kit.SandboxCancelled` +
+     `RLMTask(cancel_event=...)` reach into the sandbox interpreter's own watchdog thread and can
+     kill a wedged `deno`/`pyodide` subprocess mid-call — the thing `asyncio.Task.cancel()`
+     fundamentally cannot do (the sandbox's blocking read has no `await` inside it). This project's
+     `rlm-kit` pin moved to the commit that adds it; ZERO ctx-distillery signature changes were
+     needed to wire it through, since `run_distillation_artifacts`'s existing `**kw` already
+     forwards `cancel_event=` into `DistillSession.__init__` -> `RLMTask.__init__`.
+  2. The route genuinely does not exist unless `CTXD_LIVE_PROJECTS` is set — `GET /v1/projects` and
+     `POST /v1/distill` both 404 otherwise, unconditionally.
+  3. A live request's `project_dir` is checked against that SAME environment-sourced allowlist
+     (exact match, never prefix/substring) — never taken on faith from the request body.
+  4. Every live-mode route requires BOTH a loopback check AND a same-origin check, and each of
+     those is itself an AND of two conditions, not an OR — an adversarial review found a first
+     draft got both wrong the same way, by direct reproduction: the loopback check must require the
+     real TCP peer be loopback **AND** the `Host` header itself name a loopback host (checking the
+     peer alone is backwards for DNS rebinding — a rebound request's peer genuinely IS loopback
+     while its `Host`/`Origin` headers still name the attacker's hostname), and the same-origin
+     check must compare `Origin` against `Host` by full authority — hostname AND port — rather than
+     hostname alone (which would make every port on `localhost` mutually trusted).
+
+  New: `studio/ctx_distillery_studio/live.py` (`run_live`, the worker-thread driver — builds the
+  SAME `DistillConfig.from_env()` -> `setup()` -> `make_chat_fn()` -> `ClaudeCodeAdapter.for_project()`
+  precondition the CLI's `_cmd_distill` does, so a live run and a CLI run of the same project can
+  never silently diverge in what they run under) and `studio/ctx_distillery_studio/shutdown.py`
+  (SIGINT/SIGTERM -> cancel-all-in-flight bridge, needed because uvicorn's own graceful shutdown
+  waits for open SSE connections BEFORE running lifespan shutdown, which would otherwise deadlock on
+  a run nothing has told to stop). `session.run_distillation_artifacts` gained an explicit
+  `on_event` keyword (kept separate from `**kw` because it belongs to `TraceRecorder`, a different
+  callee than `DistillSession`) so a live run's trace events can be forwarded to its SSE stream as
+  they are recorded, not just replayed after the fact. `GET /v1/runs/{run_id}` (and
+  `.../iterations`, `.../events`) now refuse with 409 while `run_id` is still live, rather than
+  showing a truncated, ever-changing snapshot — a live run's own progress is watched through `POST
+  /v1/distill`'s own SSE response instead, carrying one genuinely new event (`distill.run.started`)
+  ahead of everything else.
+
+  `run_live`'s exactly-once completion guarantee catches `BaseException`, not `Exception`:
+  `DistillConfig.from_env()` raises `SystemExit` as its own documented error contract on a
+  misconfigured `CD_*` var, and CPython's default `threading.excepthook` silently swallows an
+  uncaught `SystemExit` in a non-main thread — `except Exception` would have reproduced the exact
+  "the client hangs forever" failure this function exists to prevent, one exception type later.
+
 - **`CodexAdapter` — the SECOND `HarnessAdapter` this project has ever built, for OpenAI's Codex
   CLI, READ-ONLY INGESTION ONLY.** `apply.py` gained no Codex-specific write path and remains
   entirely Claude-Code-specific (invariant 9) — a Codex-sourced run produces a real judgement-only

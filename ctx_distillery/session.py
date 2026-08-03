@@ -110,6 +110,7 @@ async def run_distillation_artifacts(
     redact: Callable[[str], str] = redact_transcript,
     run_id: str | None = None,
     meta: dict | None = None,
+    on_event: Callable[[dict], None] | None = None,
     **kw: Any,
 ) -> DistillArtifacts:
     """Ingest once, redact once, run one `DistillSession`, assemble — and return ALL of it.
@@ -123,7 +124,15 @@ async def run_distillation_artifacts(
       redacted IMMEDIATELY into the one list threaded into both the task's constructor and
       `.arun()` — which is what makes "nothing unredacted ever reaches the model" a property of the
       code rather than a claim (CLAUDE.md invariant 3).
-    * Extra `**kw` go to `DistillSession` (e.g. `config=`, `interpreter=` for an offline test).
+    * Extra `**kw` go to `DistillSession` (e.g. `config=`, `interpreter=` for an offline test, or
+      `cancel_event=` for a caller — e.g. `ctx-distillery-studio`'s opt-in live mode — that wants to
+      stop an in-flight run: `DistillSession.__init__`'s own `**kw` already flows into
+      `RLMTask.__init__`, which threads `cancel_event` into the sandbox interpreter's own watchdog.
+      No signature change was needed here for that to work).
+    * `on_event`, unlike the above, is an EXPLICIT keyword-only parameter rather than folded into
+      `**kw`: it belongs to `TraceRecorder` below, a different callee than `DistillSession`, so it
+      cannot ride the same `**kw` forwarding without landing on the wrong constructor. `None` by
+      default — every existing caller is unaffected.
     * Writes/applies nothing: the returned artifacts are inert until a human acts on them. This
       module is inside `tests/test_no_write_capability.py`'s mutation scan and returning more data
       changes nothing about that — the only file this function's frame touches is the trace, and
@@ -173,7 +182,7 @@ async def run_distillation_artifacts(
     # counts above — a caller's `meta` dict incidentally carrying its own "harness" key must never
     # silently clobber the real value.
     run_meta["harness"] = adapter.harness_name
-    with TraceRecorder(trace_path, run_id=rid, meta=run_meta):
+    with TraceRecorder(trace_path, run_id=rid, meta=run_meta, on_event=on_event):
         plan = await task.arun(
             transcripts=redacted_transcripts,
             memory_index=render_memory_index(memory_index),

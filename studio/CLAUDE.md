@@ -19,40 +19,77 @@ root list still runs 1–12 with 10 as a stub. Never renumber to close the gap.
 The text below is moved VERBATIM — only indentation changed and the three `##` headings added.
 Corrections belong here now; do not re-add a second copy to the root file.
 
-## Invariant 10 — read-only of the trace, unreachable from the RLM
+## Invariant 10 — read-only of the trace, unreachable from the RLM (except through the one gated,
+## opt-in live path)
 
 **`studio/` (`ctx-distillery-studio`) is READ-ONLY of the trace file and unreachable from the
 RLM path — it is a THIRD workspace member, never a fork of the harness.** It replays a finished
 `DistillSession` run's trace/v1 JSONL file (`plan_from_events` -> `session.assemble` ->
 `rubric.trace_facts`, via `GET /v1/runs/{run_id}` and an SSE `GET /v1/runs/{run_id}/events`) and
 NEVER calls `ctx_distillery.apply.apply_plan` — applying a plan stays a separate, human-invoked
-action outside any web request, exactly as invariant 8 already requires.
+action outside any web request, exactly as invariant 8 already requires, LIVE OR REPLAYED.
 
-### Why there is no live-drive endpoint
+### The live-drive endpoint, and why it is safe to have reopened this
 
-There is no live-drive endpoint (no `POST /v1/distill` or similar). **The old reason —
-"`run_distillation` needs a caller-supplied `HarnessAdapter` + `chat_fn` already wired, a materially
-heavier precondition than a self-contained driver a web request could own" — is FALSE now and must
-not be restated**: `cli.py::_cmd_distill` IS that driver (it assembles the whole precondition from
-the `CD_*` env; ~55 lines, five failure paths). Three reasons survive the CLI, and
-`studio/README.md` §Scope holds the full argument: (a) **no cancel seam** — a distillation is a
-multi-minute, up-to-30-turn sandboxed episode and neither `run_distillation` nor anything in
-rlm-kit takes a `cancel_event`, so an HTTP-started run could only be hung or SIGKILLed, leaving
-exactly the truncated trace this studio papers over with its synthesized terminal event (the
-fix belongs upstream in rlm-kit); (b) **the import-level `live`-extra valve is unavailable**
-because replay itself needs `assemble`, which ships in the same distribution as the driver —
-contingent, not structural, and NOT restorable by `live = ["openai"]` (the planner spends
-through dspy/litellm, a core rlm-kit dep) nor by the `schema.py` split; splitting a package is
-the only route and is out of scope; (c) **the live input would be `project_dir`** — an
-unauthenticated HTTP parameter selecting whose ENTIRE Claude Code history is rendered and
-shipped to a remote model, with no `_slug_id` analogue, and invariants 5/6's defenses all assume
-the caller chose the project. Redaction is a filter, not an authorization decision; (c) is the
-strongest. The positive case: `ctx-distillery distill` writes into `$CTXD_TRACES_DIR`, the SAME
-directory this studio globs, so `distill` -> refresh -> Load already delivers what a live
-endpoint would, from a process that owns its own credentials. Reopening conditions (the refusal
-is falsifiable): a cancel seam in rlm-kit; an opt-in gate that makes the route not exist by
-default; an allowlist of drivable project dirs sourced from the ENVIRONMENT, never the request
-body; and a stated loopback-bind/auth posture.
+**`POST /v1/distill` now exists, and it is OFF unless the operator sets `CTXD_LIVE_PROJECTS`.**
+This invariant used to refuse the endpoint outright and name four conditions under which it would
+be safe to reopen; all four are now met, and `studio/README.md` §Scope holds the full argument —
+this bullet is the short form:
+
+1. **A cancel seam landed upstream, in rlm-kit**: `rlm_kit.SandboxCancelled` +
+   `RLMTask(cancel_event=...)` reach into the sandbox interpreter's own watchdog thread and can kill
+   a wedged `deno`/`pyodide` subprocess mid-call — what `asyncio.Task.cancel()` cannot do, because
+   the sandbox's blocking read has no `await` inside it to cancel. `studio/ctx_distillery_studio/
+   live.py::run_live` builds a plain `threading.Event` and passes it straight through
+   `run_distillation_artifacts(..., cancel_event=...)`; no ctx-distillery signature changed for this
+   to work, because `**kw` already carries it into `DistillSession.__init__` -> `RLMTask.__init__`.
+2. **The route does not exist by default** — `CTXD_LIVE_PROJECTS` unset means `GET /v1/projects`
+   and `POST /v1/distill` both 404, unconditionally.
+3. **Drivable project directories come from that SAME environment-sourced allowlist, never the
+   request body** — `_project_in_allowlist` is an EXACT match (never prefix/substring, the same
+   defense invariant 5 states for `read_memory_file`'s own allowlist).
+4. **A stated loopback-bind / auth posture** — every live-mode route requires BOTH
+   `_host_is_loopback` AND `_same_origin_or_absent`, and EACH of those is itself an AND, not an OR
+   (a first draft got both wrong the same way — see the `_host_is_loopback`/`_same_origin_or_absent`
+   docstrings in `app.py` for the exact reproduction an adversarial review used to catch it):
+   `_host_is_loopback` requires the real TCP peer (`request.client.host`, unspoofable) **AND** the
+   `Host` header itself name a loopback host — checking the peer alone is backwards for DNS
+   rebinding, since a rebound request's peer genuinely IS loopback while its `Host`/`Origin`
+   headers still name the attacker's hostname. `_same_origin_or_absent` compares `Origin` against
+   `Host` by FULL authority (hostname and port), not hostname alone — hostname-only would make every
+   port on `localhost` mutually trusted. Nothing here substitutes for anything else.
+
+**What this reopening did NOT change**: no HTTP request may reach `apply_plan`; a live run's own
+trace lands in the exact same `$CTXD_TRACES_DIR` a CLI run would and is read back through the exact
+same `_run_payload_core` a replay read uses (never a second implementation — invariant 11); and
+while a run_id is live, every single-id replay-read endpoint (`get_run`/`get_iterations`/
+`stream_run`) refuses with 409 via `_refuse_if_still_live` rather than showing a truncated,
+ever-changing snapshot — a live run's own progress is watched through `POST /v1/distill`'s own SSE
+response, a DIFFERENT transport than `GET /v1/runs/{run_id}/events`'s `EventSource`-compatible
+replay (a live request needs a body, which `EventSource` cannot send, so the frontend's `app.js`
+parses that response's SSE frames by hand — see `sseFrames`).
+
+**Import discipline stays load-bearing even with live mode ON.** `app.py`/`live.py` must stay
+importable with zero dspy cost regardless of whether `CTXD_LIVE_PROJECTS` is set — dspy only enters
+`sys.modules` once a live run's worker thread actually calls into `ctx_distillery.session`/`.task`/
+`.config`. Concretely: `live.py`'s imports of `ctx_distillery.config`/`.session`/
+`.adapters.claude_code` are ABSOLUTE, not relative (`ctx_distillery_studio` is its OWN top-level
+workspace member, not a subpackage of `ctx_distillery` — a `from ..config import ...` here would
+try to climb past `ctx_distillery_studio` itself and fail at the first real call with "attempted
+relative import beyond top-level package", a bug a purely static/docstring-level review cannot
+catch because nothing had executed the line yet); and `distill()`'s route handler imports
+`ctx_distillery.cli.default_run_id` LAZILY, inside its own body, never at `app.py`'s module top.
+
+**`run_live`'s exactly-once `on_done` guarantee catches `BaseException`, not `Exception`, on
+purpose.** `DistillConfig.from_env()` raises `SystemExit` as ITS OWN documented, user-facing error
+contract on a misconfigured `CD_*` var — exactly the "first time enabling live mode" mistake this
+function's own docstring anticipates. `SystemExit` is a `BaseException`, not an `Exception`, and
+CPython's default `threading.excepthook` SILENTLY SWALLOWS an uncaught `SystemExit` in a non-main
+worker thread (unlike any other exception, which it at least logs) — so `except Exception` would
+have reproduced the exact "`on_done` never fires, client hangs forever" failure this whole `try`
+exists to prevent, one exception type later. `BaseException` is safe specifically here because this
+function only ever runs off the main thread: `KeyboardInterrupt`/`SIGINT` are delivered to the main
+thread only, so there is no real interrupt this handler could be swallowing.
 
 ### `run_id` sanitization
 

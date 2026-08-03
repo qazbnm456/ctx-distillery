@@ -497,14 +497,18 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     RLM path — it is a THIRD workspace member, never a fork of the harness.** It replays a finished
     `DistillSession` run's trace/v1 JSONL file and NEVER calls `ctx_distillery.apply.apply_plan` —
     applying a plan stays a separate, human-invoked action outside any web request, exactly as
-    invariant 8 already requires. There is no live-drive endpoint (no `POST /v1/distill` or
-    similar), and the refusal is argued and falsifiable, not a default.
-    **The full invariant lives in `studio/CLAUDE.md`** — the three surviving reasons against a live
-    endpoint, the `_slug_id` cap, the `textContent`-only rendering rule, and the `trace_io`
-    dict-shape guard. It was moved there because it applies to that directory and to nothing else,
-    and Claude Code loads a nested `CLAUDE.md` only when reading files under it; the normative
-    sentence above stays HERE because it also constrains anyone editing `apply.py`. Corrections go
-    in the nested file — never re-add a second copy here.
+    invariant 8 already requires, LIVE OR REPLAYED. A live-drive endpoint (`POST /v1/distill`) now
+    EXISTS, but only opt-in: it is unreachable unless the operator sets `CTXD_LIVE_PROJECTS`, and
+    even then it never touches `apply_plan` — it only drives a `DistillSession` and streams its
+    trace, exactly what `ctx-distillery distill` already does from the CLI.
+    **The full invariant lives in `studio/CLAUDE.md`** — the four reopening conditions this
+    live-drive endpoint had to meet (a real cancel seam in rlm-kit, opt-in-only route existence, an
+    environment-sourced project allowlist, a stated loopback/CSRF posture), the `_slug_id` cap, the
+    `textContent`-only rendering rule, and the `trace_io` dict-shape guard. It was moved there
+    because it applies to that directory and to nothing else, and Claude Code loads a nested
+    `CLAUDE.md` only when reading files under it; the normative sentence above stays HERE because it
+    also constrains anyone editing `apply.py`. Corrections go in the nested file — never re-add a
+    second copy here.
     **This entry is a STUB, not a gap: the number 10 is cited by ~20 places in code, tests and CSS
     plus 13 in `CHANGELOG.md`, so the list still runs 1–12. Never renumber.**
 11. **Trace-reading logic has ONE implementation per job, shared across all three members — never a

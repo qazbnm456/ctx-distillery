@@ -29,7 +29,7 @@ from ctx_distillery.session import (
     run_distillation,
     run_distillation_artifacts,
 )
-from ctx_distillery.task import PLANNER_PROMPT_VERSION, DistillCandidate, DistillPlan
+from ctx_distillery.task import PLANNER_PROMPT_VERSION, DistillCandidate, DistillPlan, DistillSession
 
 from .test_adapters_claude_code import (
     NESTED_META,
@@ -439,6 +439,43 @@ def test_run_distillation_artifacts_reports_a_generated_run_id(memory_dir, tmp_p
     )
     assert artifacts.run_id
     assert {e.get("run_id") for e in artifacts.events} == {artifacts.run_id}
+
+
+def test_on_event_receives_every_recorded_event_live(memory_dir, tmp_path):
+    """The one property `studio/`'s live mode depends on: `on_event` fires for EVERY event
+    `TraceRecorder` records, live — not just a subset, and not merely the ones this test happens to
+    poke at. Confirmed against the exact same event stream `artifacts.events` returns afterward."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    adapter = ClaudeCodeAdapter(memory_dir, transcripts=["t"])
+    seen: list[dict] = []
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            on_event=seen.append,
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    assert seen == artifacts.events
+    assert [e["type"] for e in seen] == ["run_start", "main_step", "final", "result", "run_end"]
+
+
+def test_cancel_event_reaches_the_constructed_sandbox_interpreter():
+    """The ctx-distillery-side half of the REVISION's own claim: `cancel_event` needs ZERO
+    signature changes here to reach rlm-kit's real sandbox watchdog — it rides the EXISTING `**kw`
+    forwarding (`run_distillation_artifacts` -> `DistillSession.__init__` -> `RLMTask.__init__`).
+    Checked directly on `DistillSession`/`RLMTask`, one layer below `run_distillation_artifacts`,
+    with the REAL (never-executed) pyodide interpreter — a `ScriptedInterpreter` override would
+    bypass `build_interpreter` entirely and prove nothing about this specific wiring."""
+    import threading
+
+    _configure([{"reasoning": "x", "code": "x"}])
+    ev = threading.Event()
+    task = DistillSession(memory_index=[], chat_fn=lambda spec: "x", transcripts=[], cancel_event=ev)
+    rlm = task._build_rlm()
+    assert rlm._interpreter._cancel_event is ev
 
 
 # -- subagent ingestion: redaction, and the trace's identity list -------------------------------
