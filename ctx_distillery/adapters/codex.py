@@ -317,9 +317,33 @@ def _project_agents_md(project_dir: str | Path) -> str:
 def _skill_refs(root: Path, scope: ArtifactScope) -> list[ArtifactRef]:
     """Enumerate `<root>/*/SKILL.md` as `kind="skill"` refs at `scope` — the same shape and
     containment discipline `claude_code._skill_refs` uses (own copy, not an import; see
-    `SKILL_FILENAME`'s own docstring for why). `root` must already be the TRUSTED, un-re-resolved
-    path it was constructed from — never re-resolved here, so an intermediate symlink (e.g. `.agents`
-    itself) cannot validate its own escape.
+    `SKILL_FILENAME`'s own docstring for why). `root` is never re-resolved here — and what that buys
+    DIFFERS BY CALLER, which is the part worth stating precisely, because the two callers sit on
+    opposite sides of this module's own trust boundary:
+
+    * the GLOBAL root (`CodexAdapter.list_targets` -> `self.global_skills_dir`) arrives ALREADY
+      RESOLVED — `__init__` does `Path(global_skills_dir).expanduser().resolve()`. So a symlinked
+      `~/.agents` has already moved the root before this function is reached, and a skill at the
+      symlink's target DOES enumerate (reproduced directly). That is CORRECT: `~/.agents` is
+      operator configuration, a symlinked config directory is an ordinary dotfiles layout, and
+      `claude_code.claude_home` was changed to resolve its WHOLE path for exactly this reason —
+      leaving it unresolved silently returned zero transcripts for anyone who symlinks `~/.claude`.
+    * the PROJECT roots (`_project_skill_refs` -> `directory / .agents / skills`) are NOT resolved:
+      only `directory` is, and the two components are appended raw. That is what still blocks a
+      symlinked `<project>/.agents` — verified: the escape enumerates NOTHING through that caller.
+      It matters because `project_dir` is the UNTRUSTED side of this module's threat model (see the
+      module docstring: it "COULD be someone else's cloned repo"), unlike `~/.agents`.
+
+    So: **do NOT resolve the project roots for symmetry with the global one.** An earlier revision of
+    this docstring said re-resolving was avoided "so an intermediate symlink (e.g. `.agents` itself)
+    cannot validate its own escape", which is false of the global caller and true of the project
+    ones; a first correction then over-generalized the other way and said an unresolved root "closes
+    nothing", which would have invited exactly the change that opens the escape. Both halves have to
+    be said together.
+
+    Below the root, for BOTH callers, `resolved.parent.parent != root` catches a skill DIRECTORY
+    inside an otherwise-legitimate root that symlinks out of it — the enumeration-side half
+    CLAUDE.md invariant 5 asks for.
     """
     if not root.is_dir():
         return []
