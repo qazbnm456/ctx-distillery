@@ -379,10 +379,14 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    sole collision/target authority (the run's snapshot is stale by construction), creates a
    promotion with `open(path, "x")` (O_EXCL — the atomic, TOCTOU-proof enforcement; the re-scan is
    only the friendly early message), derives the filename as `slugify(frontmatter["name"]) + ".md"`
-   with a degenerate slug being a hard refusal AND the slug CAPPED at `_SLUG_MAX` (120, the same
-   number every other slugger in the workspace uses — `cli._slug`, `studio`'s `app._RUN_ID_MAX`,
-   `eval`'s `cli._TASK_ID_MAX`; the input is untrusted MODEL output and one path component over
-   ~255 bytes is an `OSError` from the first `stat` that touches it), ARCHIVES a prune to
+   with a degenerate slug being a hard refusal AND a slug longer than `_SLUG_MAX` (120) being one
+   too — `slugify` REFUSES an over-long name rather than TRUNCATING it, which is the opposite
+   handling from the three run-id sluggers that share that same number (`cli._slug`, `studio`'s
+   `app._RUN_ID_MAX`, `eval`'s `cli._TASK_ID_MAX` all cut). A run id is machine bookkeeping, so
+   shortening it loses nothing a human was relying on; a promotion slug is the identity the operator
+   APPROVED, so installing under a shortened one substitutes a name they never saw. The input is
+   untrusted MODEL output and one path component over ~255 bytes is an `OSError` from the first
+   `stat` that touches it. It ARCHIVES a prune to
    `<memory_dir's parent>/_ctx_distillery_archive/` instead of deleting it, and refuses any
    candidate carrying `problems` / `draft_ok is False` / an empty promotion draft. Because it
    writes, it is the one module EXEMPT from `tests/test_no_write_capability.py`'s mutation scan —
