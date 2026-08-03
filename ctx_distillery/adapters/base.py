@@ -2,14 +2,17 @@
 
 ctx-distillery is designed to be agent-harness-agnostic: the RLM planning core (the
 `DistillSession` task, its tools, the judgement-only SUBMIT + assemble-on-read convention)
-never talks to a harness's on-disk format directly. Instead each harness (Claude Code today;
-Codex / Hermes / OpenClaw / OpenCode as *named future targets*, not yet designed — see
+never talks to a harness's on-disk format directly. Instead each harness (Claude Code and
+Codex now; Hermes / OpenClaw as *named future targets*, still not yet designed — see
 CLAUDE.md's "Harness scope") gets a thin adapter that implements this interface.
 
-This module defines ONLY the seam. There is no concrete adapter here yet — that is
-deliberate: a Claude Code adapter is buildable now because its real persistence format has
-been directly inspected; the others have not, so pre-guessing their schemas would be
-speculation dressed as design.
+This module defines ONLY the seam — no concrete adapter lives here. `ClaudeCodeAdapter`
+(`adapters/claude_code.py`) and `CodexAdapter` (`adapters/codex.py`, READ-ONLY INGESTION
+ONLY — see that module's own docstring for why `apply.py` gained no Codex-specific write
+path) are both buildable because their real persistence formats have been directly
+inspected, at two different evidence tiers (stated explicitly in each module's own
+docstring, per CLAUDE.md invariant 6). Hermes / OpenClaw have not been inspected at all, so
+pre-guessing their schemas would still be speculation dressed as design.
 
 Hard constraint (mirrors CLAUDE.md's invariants): every method here is READ-ONLY. There is
 no write/emit method on this interface, and none may ever be added — the actual "apply a
@@ -123,11 +126,23 @@ class RawSession:
     into `run_meta` is CONDITIONAL on it being non-empty for the same reason — a present-but-empty
     list beside `meta["transcripts"] == 3` would read as "this run had no transcripts" rather than
     "this adapter reported no identities".
+
+    `project_instructions` is a DIFFERENT kind of thing from the two above: not a raw conversation
+    and not a structured index, but the harness's own project-level instructions file (Claude
+    Code's `CLAUDE.md`) — the project's existing, human-authored context, given to the planner as
+    read-only comparison material so it can notice when a session's finding is already documented
+    (redundant) or contradicts what is already written down (a conflict worth flagging). Never a
+    promotion/prune target: nothing in this project's `apply.py` can edit an existing file in
+    place, only ever create a new one.
     """
 
     transcripts: list[str] = field(default_factory=list)
     memory_index: list[ArtifactRef] = field(default_factory=list)
     transcript_ids: tuple[TranscriptId, ...] = ()
+    #: This project's own root `CLAUDE.md` (or `.claude/CLAUDE.md`), read-only planner CONTEXT —
+    #: never a promotion/prune target. Defaults to "" (an honest "none found or empty", never a
+    #: fabricated positive claim) so every existing adapter/caller/test is unaffected.
+    project_instructions: str = ""
 
 
 class HarnessAdapter(ABC):
@@ -138,6 +153,13 @@ class HarnessAdapter(ABC):
     one harness's actual, verified persistence format. Nothing in this base class may
     ever gain a write or delete path — see the module docstring.
     """
+
+    #: A short, stable identifier for this harness ("claude_code", "codex", ...), stamped into
+    #: every run's trace meta (`run_meta["harness"]`) so `apply.py` can refuse to write a
+    #: promotion drawn from a harness it does not understand into a store built for a different
+    #: one. Every concrete subclass MUST set this to a distinct, non-empty string — there is no
+    #: sensible default here, so the base class leaves it unset rather than picking one arbitrarily.
+    harness_name: str
 
     @abstractmethod
     def ingest(self) -> RawSession:

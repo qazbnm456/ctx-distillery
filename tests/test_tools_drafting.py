@@ -19,8 +19,10 @@ from ctx_distillery.tools.drafting import (
     MAX_CONSECUTIVE_INVALID,
     FormatCheck,
     make_draft_memory_file_tool,
+    make_draft_skill_extra_file_tool,
     make_draft_skill_file_tool,
     make_memory_validator,
+    make_skill_extra_file_validator,
     make_skill_validator,
 )
 from ctx_distillery.trace_io import draft_cause
@@ -252,12 +254,65 @@ def test_a_memory_name_does_not_collide_with_a_skill_of_the_same_name(snapshot):
     assert make_memory_validator(refs, lambda: "project")(_GOOD_MEMORY).ok is True
 
 
+# -- make_skill_extra_file_validator: the sixth tool's format check --------------------------
+
+
+def _extra_validator(kind, relative_path):
+    return make_skill_extra_file_validator(lambda: kind, lambda: relative_path)
+
+
+def test_a_good_reference_and_a_good_script_both_pass():
+    assert _extra_validator("reference", "references/setup.md")("Some reference text.\n").ok is True
+    assert _extra_validator("script", "scripts/build.sh")("#!/bin/sh\necho hi\n").ok is True
+
+
+def test_an_unrecognized_kind_is_refused():
+    check = _extra_validator("gibberish", "references/x.md")("text")
+    assert check.ok is False
+    assert any("kind must be one of" in e for e in check.errors)
+
+
+def test_a_relative_path_not_matching_its_declared_kind_is_refused():
+    """A planner mismatch (says kind="reference" but gives a scripts/ path, or vice versa) is caught
+    at DRAFT time rather than silently writing to the wrong directory later."""
+    mismatched_reference = _extra_validator("reference", "scripts/x.md")("text")
+    assert mismatched_reference.ok is False
+    assert any("must start with" in e for e in mismatched_reference.errors)
+
+    mismatched_script = _extra_validator("script", "references/x.md")("text")
+    assert mismatched_script.ok is False
+    assert any("must start with" in e for e in mismatched_script.errors)
+
+
+def test_a_reference_relative_path_must_end_in_md():
+    check = _extra_validator("reference", "references/notes.txt")("text")
+    assert check.ok is False
+    assert any("must end in '.md'" in e for e in check.errors)
+
+
+def test_a_script_relative_path_may_have_any_extension():
+    for path in ("scripts/build.sh", "scripts/run.py", "scripts/tool", "scripts/lib/util.js"):
+        assert _extra_validator("script", path)("content").ok is True
+
+
+def test_an_empty_extra_draft_is_refused():
+    check = _extra_validator("reference", "references/x.md")("   ")
+    assert check.ok is False
+    assert any("empty draft" in e for e in check.errors)
+
+
+def test_the_extra_file_validator_needs_no_frontmatter():
+    """Unlike SKILL.md/memory files, a supplementary file is plain content — no `---` block."""
+    assert _extra_validator("reference", "references/x.md")("Just prose, no frontmatter.\n").ok is True
+
+
 # -- tools -----------------------------------------------------------------------------------
 
 
-def test_both_tools_are_repl_safe(snapshot):
+def test_all_three_drafting_tools_are_repl_safe(snapshot):
     assert_repl_safe(make_draft_memory_file_tool(_chat(_GOOD_MEMORY), snapshot))
     assert_repl_safe(make_draft_skill_file_tool(_chat(_GOOD_SKILL), snapshot))
+    assert_repl_safe(make_draft_skill_extra_file_tool(_chat("text")))
 
 
 def test_draft_memory_file_records_the_full_text_keyed_by_artifact_id(snapshot, tmp_path):
@@ -302,6 +357,49 @@ def test_the_skill_tool_passes_its_scope_to_the_validators_collision_check(tmp_p
         project_result = tool("p", "project", "e")
         assert project_result["ok"] is False
         assert any("shadowed" in e for e in project_result["errors"])
+
+
+def test_draft_skill_extra_file_records_the_full_text_keyed_by_the_GIVEN_artifact_id(tmp_path):
+    """Unlike the other two drafting tools, this one does NOT mint its own artifact_id — it takes
+    the caller-supplied one from an earlier draft_skill_file call, because it attaches a file to an
+    ALREADY-DRAFTED skill rather than authoring a new artifact."""
+    tool = make_draft_skill_extra_file_tool(_chat("Some reference body.\n"))
+    trace = str(tmp_path / "t.jsonl")
+    with TraceRecorder(trace, run_id="r0"):
+        out = tool("a1", "references/setup.md", "reference", "the session did this")
+    assert out == {
+        "artifact_id": "a1",
+        "relative_path": "references/setup.md",
+        "ok": True,
+        "errors": [],
+        "draft": "Some reference body.\n",
+    }
+    payload = _payloads(trace, "draft_skill_extra_file")[0]
+    assert payload["artifact_id"] == "a1"
+    assert payload["relative_path"] == "references/setup.md"
+    assert payload["kind"] == "reference"
+    assert payload["draft"] == "Some reference body.\n"
+
+
+def test_a_repeat_call_with_the_same_relative_path_records_a_SECOND_tool_call(tmp_path):
+    """`assemble()` is what resolves "last call per (artifact_id, relative_path) wins" — this tool
+    itself just records every call; a retry is TWO tool_call events, not an in-place update."""
+    tool = make_draft_skill_extra_file_tool(_chat("second draft"))
+    with TraceRecorder(str(tmp_path / "t.jsonl"), run_id="r0"):
+        first = tool("a1", "references/x.md", "reference", "e")
+        second = tool("a1", "references/x.md", "reference", "e")
+    assert first["draft"] == "second draft" and second["draft"] == "second draft"
+    assert len(_payloads(str(tmp_path / "t.jsonl"), "draft_skill_extra_file")) == 2
+
+
+def test_an_invalid_extra_draft_comes_back_ok_false_and_is_still_recorded(tmp_path):
+    tool = make_draft_skill_extra_file_tool(_chat("   "))  # blank body
+    trace = str(tmp_path / "t.jsonl")
+    with TraceRecorder(trace, run_id="r0"):
+        out = tool("a1", "references/x.md", "reference", "e")
+    assert out["ok"] is False and out["errors"]
+    payload = _payloads(trace, "draft_skill_extra_file")[0]
+    assert payload["ok"] is False and payload["draft"] == "   "
 
 
 def test_each_call_mints_a_distinct_artifact_id(snapshot):
@@ -399,4 +497,5 @@ def test_the_tools_never_write_a_file(snapshot, memory_dir):
     before = sorted(p.name for p in memory_dir.iterdir())
     make_draft_memory_file_tool(_chat(_GOOD_MEMORY), snapshot)("t", "project", "e")
     make_draft_skill_file_tool(_chat(_GOOD_SKILL), snapshot)("p", "global", "e")
+    make_draft_skill_extra_file_tool(_chat("text"))("a1", "references/x.md", "reference", "e")
     assert sorted(p.name for p in memory_dir.iterdir()) == before

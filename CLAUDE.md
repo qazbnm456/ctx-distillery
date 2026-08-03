@@ -113,8 +113,15 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 1. **No tool ever writes or deletes anything, and the interpreter stays pinned to `pyodide`.**
    Both halves matter: never add a tool that can `open(..., "w")`, delete, or otherwise mutate a
    transcript or memory/skill file — the read-only tool set (`list_memory_files`,
-   `read_memory_file`, `read_transcript_chunk`, `draft_memory_file`, `draft_skill_file`) is
-   closed, not a starting point to extend with a writer. And never switch the sandbox off the
+   `read_memory_file`, `read_transcript_chunk`, `draft_memory_file`, `draft_skill_file`,
+   `draft_skill_extra_file`) is closed, not a starting point to extend with a writer.
+   **`draft_skill_extra_file` widened this enumeration from five tools to six** — it drafts a
+   skill's supplementary `references/`/`scripts/` files (see the Known simplifications bullet this
+   closed), and it is read-only in EXACTLY the same sense the other five are: it returns text and
+   records it to the trace, and never touches a `skill_dir` or any other path. Widening the
+   enumeration is not a weakening of "no writer, ever" — the substantive guarantee is unchanged; a
+   future addition still has to clear the same bar (text out, nothing written) to join this list,
+   not merely extend it by precedent. And never switch the sandbox off the
    explicitly-pinned `pyodide` interpreter — that pin is stated in the task, not left to the
    default, because the "no mutation" guarantee depends on never routing through a
    writable-mount config. Together these make "propose, never apply" a structural property of
@@ -128,14 +135,24 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    `draft_memory_file` or `draft_skill_file` (both `make_model_tool`-based) and recorded as a
    `tool_call` event. Assemble the real text on READ by matching that event's `artifact_id` —
    never trust the plan's own claim about what it drafted. This is what keeps a label from
-   drifting from the bytes it describes.
+   drifting from the bytes it describes. A `promote_to_skill` candidate's supplementary
+   `references/`/`scripts/` files follow the SAME rule one level down: `draft_skill_extra_file`
+   records each one as its own `tool_call`, keyed by the SAME `artifact_id` plus its own
+   `relative_path`, and `schema.assemble` re-sources them the same way — never a field on the plan
+   itself.
 3. **Sensitive transcript content is redacted host-side before it becomes LM context, in THREE
    TIERS, in that order.** Redaction is not the planner's judgement call — do it in the
    tool/ingestion layer, before any transcript text is exposed to the RLM, the same stance
    rlm-kit already takes for other untrusted content (fetched URLs, MCP output). `redact.py` runs
    **tier one** (7 hand-written patterns), then **tier two** (120 rules mechanically ported
    from gitleaks, `ctx_distillery/patterns/gitleaks_subset.json`), then **tier three** (the
-   operator's own rules, from the `CD_REDACTIONS` env var — empty unless set).
+   operator's own rules, from the `CD_REDACTIONS` env var — empty unless set). **This applies to
+   `RawSession.project_instructions` (the project's own `CLAUDE.md`) exactly as it does to
+   transcripts** — `session.run_distillation_artifacts` runs it through the SAME `redact()` call
+   (skipped only when the text is empty, a call-count detail for an existing test, not a
+   redaction-scope carve-out) before it ever reaches `.arun()`. A project's own instructions file
+   is less likely to carry a live secret than a raw session transcript, but "less likely" is not
+   "never," and it is now LM context exactly the same way transcripts are.
    - **Tier one is NOT redundant and must stay FIRST**, on measured grounds. **EXACTLY TWO of the
      seven are genuinely unavailable from gitleaks**: `bearer_token` uses a LOOKBEHIND, which RE2
      literally cannot express, so no gitleaks rule ever will; and `secret_assignment` substitutes the
@@ -302,8 +319,12 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    method: writing into `memory_dir` is ordinary host-side Python, the same reasoning
    `tools/memory_reader.py` gives for reading.
 5. **Tools close over an immutable SNAPSHOT, never a live adapter.** `run_distillation` calls
-   `adapter.ingest()` EXACTLY ONCE; that `list[ArtifactRef]` is what all five tool factories
-   receive. Nothing in `HarnessAdapter` promises `list_targets()` is cheap or stable across
+   `adapter.ingest()` EXACTLY ONCE; that `list[ArtifactRef]` is what every tool factory that needs
+   it receives — FOUR of the six (`list_memory_files`, `read_memory_file`, `draft_memory_file`,
+   `draft_skill_file`); `read_transcript_chunk` closes over the transcript list instead, and
+   `draft_skill_extra_file` needs neither (a supplementary file has no name-collision concept to
+   check the snapshot against). Nothing in `HarnessAdapter` promises `list_targets()` is cheap or
+   stable across
    calls, so a live reference would let `read_memory_file`'s allowlist shift mid-run — and it
    would create a second copy of the transcripts the driver already owns. The allowlist check is
    an EXACT `Path(path).resolve()` match against the snapshot; never make it a prefix or
@@ -349,6 +370,30 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
      for one). Two caveats from that same experiment are load-bearing and live in "Known
      simplifications" below — a GLOBAL skill of the same name SHADOWS a project one, and a project's
      very FIRST skills directory needs a Claude Code restart before it is discovered.
+   - **CONFIRMED by Claude Code's own official documentation, fetched directly**
+     (`code.claude.com/docs/en/claude-directory`, not inferred from a blog summary): a project's
+     root `CLAUDE.md` — or the equivalent `.claude/CLAUDE.md`, which the docs state explicitly is
+     the SAME thing in a different location ("Also works at `.claude/CLAUDE.md` if you prefer to
+     keep the project root clean") — is loaded into every session's context.
+     `ClaudeCodeAdapter.for_project` now reads it (`project_claude_md_path`,
+     `RawSession.project_instructions`) as read-only planner CONTEXT, never a promotion/prune
+     target. **Two things this project's OWN design choice, not a documented Claude Code
+     behavior — kept visibly separate from the confirmed fact above**: which of the two locations
+     wins if BOTH somehow exist (root does), and the decision to read ONLY the project-root file,
+     never the also-documented global `~/.claude/CLAUDE.md` (the operator's own cross-project
+     preference, out of scope for a per-project distillation) or an automatic nested-subdirectory
+     walk (no official confirmation such a thing exists as a mechanism separate from
+     `.claude/rules/`). **AGENTS.md is a WEAKER-evidence claim, and the distinction is worth keeping
+     visible rather than rounding up to match the citation above** (flagged by adversarial review):
+     `code.claude.com/docs/en/claude-directory` — the SAME page fetched for the CONFIRMED fact
+     above — simply does not mention AGENTS.md at all, one way or the other. That Claude Code lacks
+     native AGENTS.md support is inferred from a WEB SEARCH pass (community discussion of a manual
+     `ln -s AGENTS.md CLAUDE.md` symlink workaround), not from Anthropic's own documentation the way
+     the `.claude/CLAUDE.md` equivalence is. It could be stale (this is an active, contested feature
+     request) or simply wrong. What does NOT depend on this claim being right: this adapter's plain
+     file read follows a same-directory symlink either way (that is just how reading a file works),
+     so the `ln -s` workaround is picked up for free whether or not AGENTS.md ever gains native
+     support — no code here assumes one way or the other.
    The transcript RENDERING is deliberately LOSSY and its rules are pinned by tests: filter to
    `user`/`assistant` FIRST (no other event type carries `message` at all), handle `message.content`
    as either a plain string or a list of blocks, size a `tool_result` in chars OR blocks depending on
@@ -428,25 +473,57 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    roots with `adapters.claude_code.global_skills_root()` / `project_skills_root(project_dir)` — the
    same functions `for_project` uses, so the reader and the writer cannot disagree about a location.
 
+   **A skill's SUPPLEMENTARY `references/`/`scripts/` files get their OWN containment check too,
+   for the same reason `_skill_target` is separate from the flat memory check**: a possibly-nested
+   relative path needs its own wall, not a bent version of one built for exactly one path
+   component. `_skill_extra_target(skill_dir, relative_path)` confines a supplementary file to the
+   closed `references`/`scripts` prefix set, refuses any `.`/`..`/absolute/home-relative segment,
+   and checks `resolved.is_relative_to(resolved_skill_dir)` — a bool check that never raises, unlike
+   `Path.relative_to()` — catching a symlinked intermediate directory the same way `_skill_target`
+   already does for the skill directory and `SKILL.md` itself. `_promote_skill` runs this check for
+   EVERY supplementary file BEFORE writing anything at all, including `SKILL.md` — a candidate
+   doomed by one bad `relative_path` must never leave a half-written, DISCOVERABLE skill behind
+   (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`). Writing itself never deletes a
+   supplementary file an `overwrite` draft omits — consistent with "archives, never deletes"
+   holding everywhere in this module.
+
+   **`_skill_extra_target` checks each `relative_path` in ISOLATION, which is not the whole
+   story — a second adversarial pass on the SHIPPED code found that two individually-valid entries
+   can still conflict with EACH OTHER.** `relative_path="scripts/utils"` (a file) and
+   `relative_path="scripts/utils/helper.py"` (which needs `scripts/utils` to be a directory) both
+   pass containment alone, and writing them in sequence let `SKILL.md` and the first extra land on
+   disk before the second one's `mkdir` collided — reproduced end to end through the real
+   `assemble()` -> `apply_plan` path, exactly the half-written-discoverable-skill outcome the
+   validate-before-write pass exists to prevent. `_extra_path_conflict` closes it: checked on the
+   RESOLVED targets, before anything is written, alongside every entry's own containment check.
+
 10. **`studio/` (`ctx-distillery-studio`) is READ-ONLY of the trace file and unreachable from the
     RLM path — it is a THIRD workspace member, never a fork of the harness.** It replays a finished
     `DistillSession` run's trace/v1 JSONL file and NEVER calls `ctx_distillery.apply.apply_plan` —
     applying a plan stays a separate, human-invoked action outside any web request, exactly as
-    invariant 8 already requires. There is no live-drive endpoint (no `POST /v1/distill` or
-    similar), and the refusal is argued and falsifiable, not a default.
-    **The full invariant lives in `studio/CLAUDE.md`** — the three surviving reasons against a live
-    endpoint, the `_slug_id` cap, the `textContent`-only rendering rule, and the `trace_io`
-    dict-shape guard. It was moved there because it applies to that directory and to nothing else,
-    and Claude Code loads a nested `CLAUDE.md` only when reading files under it; the normative
-    sentence above stays HERE because it also constrains anyone editing `apply.py`. Corrections go
-    in the nested file — never re-add a second copy here.
+    invariant 8 already requires, LIVE OR REPLAYED. A live-drive endpoint (`POST /v1/distill`) now
+    EXISTS, but only opt-in: it is unreachable unless the operator sets `CTXD_LIVE_PROJECTS`, and
+    even then it never touches `apply_plan` — it only drives a `DistillSession` and streams its
+    trace, exactly what `ctx-distillery distill` already does from the CLI.
+    **The full invariant lives in `studio/CLAUDE.md`** — the four reopening conditions this
+    live-drive endpoint had to meet (a real cancel seam in rlm-kit, opt-in-only route existence, an
+    environment-sourced project allowlist, a stated loopback/CSRF posture), the `_slug_id` cap, the
+    `textContent`-only rendering rule, and the `trace_io` dict-shape guard. It was moved there
+    because it applies to that directory and to nothing else, and Claude Code loads a nested
+    `CLAUDE.md` only when reading files under it; the normative sentence above stays HERE because it
+    also constrains anyone editing `apply.py`. Corrections go in the nested file — never re-add a
+    second copy here.
     **This entry is a STUB, not a gap: the number 10 is cited by ~20 places in code, tests and CSS
     plus 13 in `CHANGELOG.md`, so the list still runs 1–12. Never renumber.**
 11. **Trace-reading logic has ONE implementation per job, shared across all three members — never a
-    per-member copy. FOUR functions are covered: `rubric.plan_from_events` (plan-from-trace
+    per-member copy. FIVE functions are covered: `rubric.plan_from_events` (plan-from-trace
     reconstruction), `trace_io.load_trace`/`dict_events` (the non-dict shape guard),
-    `trace_io.draft_cause` (a recorded drafting call's outcome, see invariant 12), and
-    `render.render_plan` (the human/judge-legible plan rendering).** The same rule applied OUTSIDE
+    `trace_io.draft_cause` (a recorded drafting call's outcome, see invariant 12),
+    `trace_io.transcript_facts` (a run's own transcript composition, built from
+    `run_start_meta`/`transcript_composition` — the same guard `studio/`'s `mapper.py` used to keep
+    to itself until `eval/`'s scorecard needed it too, exactly the "a third consumer forces the
+    shared module" pattern this invariant already names elsewhere), and `render.render_plan` (the
+    human/judge-legible plan rendering).** The same rule applied OUTSIDE
     the trace path once: `ctx_distillery/regex_walk.py` is the ONE `re`-parse-tree walk, shared by
     `scripts/derive_liveness_samples.py` (`sample_for`, which generates the liveness fixture) and
     `redact._reaching_prefixes` (`reaching_prefixes`, which derives a ReDoS probe's marker). The walk
@@ -677,8 +754,25 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   accepted. Irrelevant to DRAFTING the file — `draft_skill_file` authors a body and nothing more —
   and worth knowing for the human who APPLIES it, which is why it belongs beside `apply_plan`'s
   other caveats rather than in the drafting tool's docs.
-- **A skill's `references/` and `scripts/` are out of scope.** A real skill directory may carry them;
-  `draft_skill_file` authors the `SKILL.md` body only, and `apply.py` writes only that one file.
+- **A skill's `references/` and `scripts/` are BUILT, and this bullet used to say the opposite.**
+  It read *"out of scope... `draft_skill_file` authors the `SKILL.md` body only, and `apply.py`
+  writes only that one file"* — both halves are now false. `draft_skill_extra_file` (the sixth
+  read-only tool, invariant 1) drafts one supplementary file per call, sharing the `artifact_id` an
+  earlier `draft_skill_file` call minted; `schema.assemble` gathers them per `promote_to_skill`
+  candidate keyed by `relative_path` (`AssembledCandidate.extra_files`); `apply._promote_skill`
+  writes `SKILL.md` and then each supplementary file, behind its own containment check (invariant
+  9). Two things deliberately NOT built, named rather than left silent: no cross-check that a
+  drafted `SKILL.md`'s prose actually matches what was drafted via `draft_skill_extra_file` (a model
+  can write "see `scripts/setup.sh`" without ever drafting that path, and nothing catches the
+  mismatch), and no live registry validating that `draft_skill_extra_file`'s `artifact_id` argument
+  actually corresponds to a real prior `draft_skill_file` call (a typo'd id is a silently orphaned
+  `tool_call`, never written and never an error — harmless blast radius, not solved for v1).
+  `render.render_plan` shows each supplementary file beside its candidate (so `ctx-distillery show`
+  and the eval judge both see them, invariant 11), and `render.plan_as_dict` — plain
+  `dataclasses.asdict` — carries `extra_files` into `ctx-distillery show --json` and the studio's
+  `GET /v1/runs/{id}` automatically. The studio's PLAN panel does not render them VISUALLY yet
+  (`app.js` has no UI for browsing multiple files per candidate) — the data is reachable over the
+  API; a real browsing UI is a follow-up, not a requirement for the planner to propose them at all.
 - **Skill enumeration is opt-in on the explicit constructor.** `ClaudeCodeAdapter(memory_dir)` (what
   `apply.py`'s re-scan builds) enumerates no skills at all; pass `global_skills_dir=` /
   `project_skills_dir=`, or use `for_project`, which resolves the real roots. Deliberate: a bare
@@ -799,8 +893,34 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 
 ## Harness scope
 
-Claude Code is the only adapter being built — it's the only platform whose real persistence
-format has been directly verified. Codex, Hermes, OpenClaw, and OpenCode are named future
-targets, deliberately **not** designed yet: their real on-disk formats haven't been inspected,
-and guessing one would be speculation dressed as design. Don't add an adapter for any of them
-until someone has actually looked at that harness's real format.
+**Claude Code and Codex now both have a real adapter — Hermes and OpenClaw remain named future
+targets, deliberately not designed yet.** Codex's real on-disk format was directly inspected this
+session (`openai/codex`'s own source, at HEAD, via the GitHub API) — a WEAKER evidence tier than
+Claude Code's (never cross-checked against a real installed Codex process or a dedicated control
+experiment; see `ctx_distillery/adapters/codex.py`'s own module docstring, which states this
+explicitly rather than rounding up to sound like the same confidence). Hermes and OpenClaw's real
+on-disk formats still haven't been inspected at all, and guessing either would be speculation
+dressed as design — don't add an adapter for either until someone has actually looked.
+
+**`CodexAdapter` is READ-ONLY INGESTION ONLY — `apply.py` gained NO Codex-specific write path.**
+It is entirely Claude-Code-specific still (invariant 9) and does not consult any adapter when
+writing. A Codex-sourced run produces a real judgement-only plan (reviewable via `ctx-distillery
+show`), but `ctx-distillery-apply` cannot write a `promote_to_skill`/`promote_to_memory` candidate
+drawn from one INTO Codex's own store. This is a deliberate, stated scope boundary, not an
+oversight — see `codex.py`'s module docstring for the full reasoning.
+
+**The prerequisite recorded above — resolved.** Every `HarnessAdapter` subclass now carries a
+`harness_name` class attribute (`"claude_code"` / `"codex"`), stamped by `run_distillation_artifacts`
+into `run_meta["harness"]` (AFTER the caller's own `meta` is merged in, so a caller cannot
+accidentally clobber it) and read back on assembly into `AssembledPlan.harness` (via
+`trace_io.run_start_meta` — never trusted from the plan's own claim, since a `DistillPlan` carries no
+such field at all). `schema.SUPPORTED_WRITE_HARNESSES = ("claude_code",)` is the single closed
+vocabulary both `render.py` (a warning line at the top of `render_plan`'s output, so `ctx-distillery
+show`'s default text and `apply.py`'s own dry-run report both surface a mismatch up front) and
+`apply.py` (`_blocking_problem`'s fourth check, refusing every non-`keep` action) read from — it
+lives in `schema.py` rather than `apply.py` specifically so `render.py` can import it without an
+`apply.py`<->`render.py` cycle (`apply.py` already imports `render_plan`). `harness is None` PERMITS
+deliberately (every trace before this landed is a Claude Code trace); a malformed non-string value
+is kept verbatim and refused via the same membership check, never coerced to `None`. `studio/`'s
+`app.js` mirrors the same four-condition `applyBlocker` (see `studio/DESIGN.md` §2). CLI wiring for
+`CodexAdapter` itself remains the separate, still-undone follow-up this was blocking.

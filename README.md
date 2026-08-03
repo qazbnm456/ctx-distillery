@@ -7,10 +7,12 @@ across sessions, and what durable knowledge is worth promoting into a standing m
 reusable Skill. It is a judgement engine, nothing more.
 
 **Status: the planner is wired and offline-tested; the apply step exists; storage is auto-discovered;
-both are driveable from the command line.** The five read-only planning tools, the Claude Code
+both are driveable from the command line.** The six read-only planning tools, the Claude Code
 adapter, the assemble-on-read convention, the human-gated `apply_plan`, auto-discovery of Claude
 Code's real on-disk storage (transcripts + both skill scopes), and the two console scripts are
-implemented. Two sibling `uv` workspace members round it out: **`eval/`**
+implemented. A SECOND adapter, `CodexAdapter` (OpenAI Codex CLI), now exists too — read-only
+ingestion only; `apply_plan` still writes exclusively into Claude Code's own store (see "Harness-
+agnostic by design" below). Two sibling `uv` workspace members round it out: **`eval/`**
 (`ctx-distillery-eval`) — a reward-free LLM-as-judge scoring the assembled plan against its
 transcript(s), offline by default and pointable at a real model with `CDEVAL_MODEL` — and
 **`studio/`** (`ctx-distillery-studio`) — a replay-only FastAPI + zero-build-vanilla-JS console
@@ -266,7 +268,7 @@ plan's own claim about what it wrote; see the guide's
 [The shape of one run](https://github.com/qazbnm456/ctx-distillery/blob/main/ctx_distillery/README.md#the-shape-of-one-run)
 for the assemble-on-read mechanics.
 
-## Harness-agnostic by design — Claude Code today
+## Harness-agnostic by design — Claude Code and Codex today
 
 The planning core is meant to work over any AI coding agent's transcript + memory format, not
 just one. That's bridged through a thin **adapter seam** — `ingest()` / `schema_for(kind)` /
@@ -274,14 +276,18 @@ just one. That's bridged through a thin **adapter seam** — `ingest()` / `schem
 the harness is the "provider," not a model or API. See `ctx_distillery/adapters/base.py` for the
 interface.
 
-Right now, **only a Claude Code adapter is in scope to build**, because it's the only platform
-whose real on-disk persistence format (the memory frontmatter schema, the `MEMORY.md` index,
-scratchpad conventions) has actually been inspected and verified. Codex, Hermes, OpenClaw, and
-OpenCode are named as **future targets** in `CLAUDE.md`'s "Harness scope" — deliberately not
-designed yet. Their real formats haven't been looked at from here, and guessing one would be
-speculation dressed as design, not genuine multi-harness support. When one of them is actually in
-scope, the honest next step is the same one taken for Claude Code: read its real current format
-first, then write the adapter.
+**Two adapters exist now**: `ClaudeCodeAdapter` (real on-disk format directly verified against an
+installed Claude Code process / a dedicated control experiment) and `CodexAdapter`
+(`ctx_distillery/adapters/codex.py`, real format confirmed from `openai/codex`'s own source at
+HEAD — a weaker evidence tier, stated explicitly in that module's own docstring, since it has not
+yet been cross-checked against a real installed Codex CLI). **`CodexAdapter` is READ-ONLY
+INGESTION ONLY** — `apply.py` remains entirely Claude-Code-specific, so a Codex-sourced plan can be
+reviewed (`ctx-distillery show`) but not yet applied into Codex's own store; see the module's own
+docstring for the full scope reasoning. Hermes and OpenClaw are still named as **future targets**
+in `CLAUDE.md`'s "Harness scope" — deliberately not designed yet. Their real formats haven't been
+looked at from here, and guessing one would be speculation dressed as design, not genuine
+multi-harness support. When one of them is actually in scope, the honest next step is the same one
+already taken twice: read its real current format first, then write the adapter.
 
 ## Documentation — the guide
 

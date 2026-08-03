@@ -18,6 +18,10 @@ def _result(plan: dict) -> dict:
     return {"type": EVENT_RESULT, "payload": {"output": plan}}
 
 
+def _run_start(meta: dict) -> dict:
+    return {"type": "run_start", "payload": {"meta": meta}}
+
+
 def _plan_dict(*candidates: dict) -> dict:
     return DistillPlan(candidates=[DistillCandidate(**c) for c in candidates]).model_dump()
 
@@ -47,6 +51,31 @@ def test_score_run_passes_a_custom_judge_through():
     assert seen["reference"] == ""  # no taskset -> no reference, and the v1 prompt is rendered
 
 
+def test_score_run_populates_transcript_composition_from_the_run_s_own_run_start_meta():
+    events = [
+        _run_start(
+            {
+                "transcripts": 3,
+                "transcript_index": [
+                    {"kind": "session"},
+                    {"kind": "session"},
+                    {"kind": "subagent"},
+                ],
+            }
+        ),
+        _result(_plan_dict()),
+    ]
+    row = score_run("r0", "trace.jsonl", events, ["t"])
+    assert (row.n_transcripts, row.transcript_sessions, row.transcript_subagents) == (3, 2, 1)
+
+
+def test_score_run_degrades_transcript_composition_to_none_on_a_trace_with_no_run_start():
+    row = score_run("r0", "trace.jsonl", [_result(_plan_dict())], ["t"])
+    assert row.n_transcripts is None
+    assert row.transcript_sessions is None
+    assert row.transcript_subagents is None
+
+
 def test_score_run_forwards_a_taskset_reference_to_the_judge():
     """The judge-only ground truth reaches the judge and nothing else. It is passed POSITIONALLY, so
     a `Judge` that only accepts two arguments is a broken `Judge` — the protocol says three."""
@@ -74,6 +103,17 @@ def test_score_run_records_an_unscored_row_when_the_judge_fails():
     row = score_run("r0", "trace.jsonl", [_result(_plan_dict())], ["t"], judge=failing_judge)
     assert row.score is None and row.unscored is True
     assert row.unscored_reason == "judge endpoint error: connection refused"
+
+
+def test_score_run_records_transcript_composition_even_when_the_judge_fails():
+    """A row's input-size provenance doesn't depend on the judge succeeding — populated on BOTH
+    return paths."""
+    def failing_judge(plan_text, transcript_texts, reference=""):
+        return JudgeVerdict(ok=False, reason="judge endpoint error: connection refused")
+
+    events = [_run_start({"transcripts": 2, "transcript_index": [{"kind": "session"}] * 2})]
+    row = score_run("r0", "trace.jsonl", events, ["t"], judge=failing_judge)
+    assert (row.n_transcripts, row.transcript_sessions, row.transcript_subagents) == (2, 2, 0)
 
 
 def test_score_run_supplies_a_reason_for_a_judge_that_fails_without_one():

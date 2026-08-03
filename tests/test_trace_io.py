@@ -17,7 +17,13 @@ import json
 import pytest
 from rlm_kit.trace import EVENT_RESULT, TraceRecorder, load_events
 
-from ctx_distillery.trace_io import dict_events, load_trace
+from ctx_distillery.trace_io import (
+    dict_events,
+    load_trace,
+    run_start_meta,
+    transcript_composition,
+    transcript_facts,
+)
 
 #: Every JSON shape that is valid but NOT an object — the exact set `load_events` lets through.
 NON_DICT_LINES = ("42", "null", '"x"', "[1, 2, 3]")
@@ -185,3 +191,94 @@ def test_dict_events_does_not_mutate_the_caller_s_events():
     original = {"type": "tool_call", "step_id": 1, "payload": "oops"}
     dict_events([original])
     assert original["payload"] == "oops"
+
+
+# -- run_start_meta / transcript_composition / transcript_facts --------------------------------
+# The shared extraction point `rubric._run_start_transcripts` now delegates to, and the guard a
+# THIRD consumer (`eval/`'s `score.score_run`) needed — moved here from `studio/`'s `mapper.py`
+# (invariant 11). `tests/test_rubric.py`'s own `trace_facts` suite already pins that this refactor
+# left `n_transcripts` byte-for-byte unchanged; these tests pin the shared functions directly.
+
+
+def _run_start(meta):
+    return {"type": "run_start", "step_id": 0, "payload": {"meta": meta}}
+
+
+def test_run_start_meta_finds_the_first_run_start_s_meta():
+    events = [_run_start({"transcripts": 3}), {"type": "tool_call", "payload": {}}]
+    assert run_start_meta(events) == {"transcripts": 3}
+
+
+def test_run_start_meta_is_none_without_a_run_start_event_at_all():
+    assert run_start_meta([{"type": "tool_call", "payload": {}}]) is None
+    assert run_start_meta([]) is None
+
+
+def test_run_start_meta_of_a_non_dict_meta_is_the_EMPTY_dict_not_none():
+    """`dict_events` (called internally, before this function's own scan) already coerces a
+    non-dict `payload.meta` to `{}` — the THIRD normalization its own docstring describes. So a
+    malformed meta and a genuinely empty one are indistinguishable by the time this function's loop
+    ever sees them, and both read as `{}` rather than `None`. That is harmless downstream:
+    `transcript_composition({})` and `transcript_facts`'s own `.get("transcripts")` degrade to None
+    either way — `None` here is reserved for "no `run_start` at all" / "no `meta` key at all",
+    checked above."""
+    assert run_start_meta([_run_start("nope")]) == {}
+
+
+def test_run_start_meta_drops_non_dict_lines_before_scanning():
+    """A non-dict line before the real `run_start` must not hide it (and must not raise)."""
+    events = [42, None, _run_start({"transcripts": 1})]
+    assert run_start_meta(events) == {"transcripts": 1}
+
+
+def test_transcript_composition_degrades_to_none_never_zero():
+    assert transcript_composition(None) == {"sessions": None, "subagents": None}
+    assert transcript_composition({}) == {"sessions": None, "subagents": None}
+    assert transcript_composition({"transcript_index": "nope"}) == {
+        "sessions": None,
+        "subagents": None,
+    }
+
+
+def test_transcript_composition_counts_by_kind_and_ignores_junk_entries():
+    meta = {
+        "transcript_index": [
+            {"kind": "session"},
+            {"kind": "session"},
+            {"kind": "subagent"},
+            "junk",  # a non-dict entry is skipped, not counted as either kind
+            {"kind": "unknown"},
+        ]
+    }
+    assert transcript_composition(meta) == {"sessions": 2, "subagents": 1}
+
+
+def test_transcript_facts_combines_the_count_and_the_composition_in_one_scan():
+    events = [
+        _run_start(
+            {
+                "transcripts": 3,
+                "transcript_index": [
+                    {"kind": "session"},
+                    {"kind": "session"},
+                    {"kind": "subagent"},
+                ],
+            }
+        )
+    ]
+    assert transcript_facts(events) == {"n_transcripts": 3, "sessions": 2, "subagents": 1}
+
+
+def test_transcript_facts_degrades_field_by_field_on_an_old_or_malformed_trace():
+    assert transcript_facts([]) == {"n_transcripts": None, "sessions": None, "subagents": None}
+    assert transcript_facts([_run_start({"transcripts": "two"})]) == {
+        "n_transcripts": None,
+        "sessions": None,
+        "subagents": None,
+    }
+    # `n_transcripts` known, composition absent: a trace recorded before subagent ingestion shipped.
+    assert transcript_facts([_run_start({"transcripts": 5})]) == {
+        "n_transcripts": 5,
+        "sessions": None,
+        "subagents": None,
+    }

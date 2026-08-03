@@ -97,7 +97,14 @@ from .adapters.claude_code import (
 )
 from .render import render_plan
 from .rubric import plan_from_events
-from .schema import PROMOTION_ACTIONS, AssembledCandidate, AssembledPlan, assemble
+from .schema import (
+    PROMOTION_ACTIONS,
+    SUPPORTED_WRITE_HARNESSES,
+    AssembledCandidate,
+    AssembledExtraFile,
+    AssembledPlan,
+    assemble,
+)
 from .trace_io import load_trace
 
 __all__ = [
@@ -133,6 +140,13 @@ _SLUG_DISALLOWED = re.compile(r"[^a-z0-9-]+")
 #: Reproduced at just 300 characters, and the input is `frontmatter["name"]` — untrusted MODEL
 #: output, which makes this reachable from a real plan rather than only from a hand-built one.
 _SLUG_MAX = 120
+
+#: The closed set of directories a skill's supplementary files may live under — the write-time half
+#: of the containment `_skill_extra_target` enforces; `tools/drafting.SKILL_EXTRA_PREFIXES` is the
+#: draft-time cross-check the model-facing validator uses, kept as two separate constants because
+#: one is a dict keyed by `kind` (draft-time) and this one is the plain directory-name set an
+#: already-written `relative_path` is checked against (apply has no `kind` to consult).
+_ALLOWED_EXTRA_PREFIXES = ("references", "scripts")
 
 
 @dataclass(frozen=True)
@@ -245,7 +259,7 @@ def apply_plan(
                 _outcome(index, candidate, STATUS_SKIPPED, "not approved by the caller")
             )
             continue
-        blocker = _blocking_problem(candidate)
+        blocker = _blocking_problem(candidate, assembled_plan.harness)
         if blocker is not None:
             outcomes.append(_outcome(index, candidate, STATUS_REFUSED, blocker))
             continue
@@ -282,11 +296,18 @@ def apply_plan(
 # -- refusal checks that apply to EVERY action kind ----------------------------------------------
 
 
-def _blocking_problem(candidate: AssembledCandidate) -> str | None:
+def _blocking_problem(candidate: AssembledCandidate, harness: str | None) -> str | None:
     """The design's "refused regardless of action kind" checks, re-run here on purpose.
 
-    `assemble()` already computed all three; re-checking means a caller who approved a candidate
-    without reading its `problems` still cannot write a draft that failed its own format gate.
+    `assemble()` already computed the first three; re-checking means a caller who approved a
+    candidate without reading its `problems` still cannot write a draft that failed its own format
+    gate. The fourth is this module's own: `harness` is `assembled_plan.harness`, the trace's own
+    provenance stamp (never the candidate's own claim — there is none). `harness is None` PERMITS,
+    deliberately: every trace recorded before this stamp existed IS a Claude Code trace (no other
+    adapter was ever wired into a driver before this landed), and a hand-built plan in a test
+    defaults to `harness=None` for the same reason. Only an explicit, non-`"claude_code"` string
+    refuses — including a malformed (non-string) value, which is never a member of
+    `SUPPORTED_WRITE_HARNESSES` and so is refused rather than silently permitted.
     """
     if candidate.problems:
         detail = "; ".join(str(p) for p in candidate.problems)
@@ -295,6 +316,13 @@ def _blocking_problem(candidate: AssembledCandidate) -> str | None:
         return "the drafting call for this candidate failed its deterministic format check"
     if candidate.action in PROMOTION_ACTIONS and not (candidate.draft or "").strip():
         return "no drafted text was assembled for this promotion (nothing to write)"
+    if candidate.action != "keep" and harness is not None and harness not in SUPPORTED_WRITE_HARNESSES:
+        return (
+            f"this run's harness is {harness!r}, but apply.py only understands writes for "
+            f"{list(SUPPORTED_WRITE_HARNESSES)} — refusing to write a candidate drawn from a run "
+            f"this module cannot correctly interpret (its skill/memory shapes and collision checks "
+            f"are specific to {SUPPORTED_WRITE_HARNESSES[0]!r})"
+        )
     return None
 
 
@@ -510,6 +538,28 @@ def _promote_skill(
     if target is None:
         return _outcome(index, candidate, STATUS_REFUSED, refusal)
 
+    # VALIDATE-BEFORE-WRITE, for every supplementary file, BEFORE anything is written — including
+    # SKILL.md. Pure computation, no filesystem mutation: catches a bad `relative_path` (wrong
+    # prefix, traversal, a symlinked directory) while the candidate is still entirely undoable,
+    # rather than after SKILL.md has already made the skill LIVE and discoverable
+    # (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`). `_blocking_problem` already refused any
+    # candidate whose extras failed to DRAFT (see `schema.assemble`); this is the analogous check for
+    # extras that drafted fine but whose `relative_path` cannot be safely written.
+    extra_targets: dict[str, Path] = {}
+    for relative_path in candidate.extra_files:
+        extra_target, extra_refusal = _skill_extra_target(target.parent, relative_path)
+        if extra_target is None:
+            return _outcome(
+                index, candidate, STATUS_REFUSED, f"supplementary file {relative_path!r}: {extra_refusal}"
+            )
+        extra_targets[relative_path] = extra_target
+    # `_skill_extra_target` checks each path in ISOLATION; this catches two entries that are each
+    # individually valid but cannot BOTH exist (one a file, the other a path underneath it) — see
+    # `_extra_path_conflict`'s own docstring for the reproduction this closes.
+    conflict = _extra_path_conflict(extra_targets)
+    if conflict is not None:
+        return _outcome(index, candidate, STATUS_REFUSED, f"supplementary files conflict: {conflict}")
+
     # Empirically confirmed: an EXISTING skills root picks up a new skill mid-session, but a
     # project's very FIRST top-level skills directory being created needs a Claude Code restart to
     # be discovered at all. Checked before mkdir, since mkdir is what would make `root` exist.
@@ -537,6 +587,54 @@ def _promote_skill(
         )
     except OSError as exc:
         return _outcome(index, candidate, STATUS_REFUSED, f"could not write {target}: {exc}")
+
+    written_extras = 0
+    for relative_path, extra_target in extra_targets.items():
+        extra = candidate.extra_files[relative_path]
+        text = extra.draft if isinstance(extra, AssembledExtraFile) else None
+        try:
+            # A supplementary file may nest (e.g. `scripts/lib/util.py`) — its OWN try, separate from
+            # the `open()` below, for the same reason the skill directory's own mkdir is isolated: a
+            # bare `relative_path="scripts"` with nothing under it creates a FILE named `scripts`, and
+            # a later `scripts/build.sh` would then `mkdir` where `scripts` already exists as a
+            # non-directory — `exist_ok=True` does NOT suppress that `FileExistsError`. The real
+            # `draft_skill_extra_file` tool's own validator DOES refuse a bare `"scripts"` (it requires
+            # the `"scripts/"` prefix, trailing slash included) — this is reachable only through
+            # `apply_plan`'s OWN input contract, which never trusts a hand-built or stale candidate to
+            # have gone through that validator at all (the same stance every other refusal in this
+            # module takes). `_extra_path_conflict` below catches the NESTED-PREFIX shape of this same
+            # hazard (e.g. `scripts/utils` + `scripts/utils/helper.py`) BEFORE anything is written;
+            # this isolated `mkdir` is the last-resort catch for whatever slips past it.
+            extra_target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return _outcome(
+                index,
+                candidate,
+                STATUS_REFUSED,
+                f"wrote SKILL.md and {written_extras} of {len(extra_targets)} supplementary files "
+                f"before failing: could not create the directory for {relative_path!r}: {exc}",
+            )
+        try:
+            with open(extra_target, "w" if overwrite else "x", encoding="utf-8") as handle:
+                handle.write(text or "")
+        except FileExistsError:
+            return _outcome(
+                index,
+                candidate,
+                STATUS_REFUSED,
+                f"wrote SKILL.md and {written_extras} of {len(extra_targets)} supplementary files "
+                f"before failing: name collision at {extra_target} (exclusive-create refused it)",
+            )
+        except OSError as exc:
+            return _outcome(
+                index,
+                candidate,
+                STATUS_REFUSED,
+                f"wrote SKILL.md and {written_extras} of {len(extra_targets)} supplementary files "
+                f"before failing: could not write {extra_target}: {exc}",
+            )
+        written_extras += 1
+
     if scope == "global":
         # Grows the shadow set live: a LATER candidate in this same apply_plan call that promotes a
         # `project` skill under this same name must see this write, not just what the pre-call
@@ -548,12 +646,13 @@ def _promote_skill(
         if is_new_root
         else ""
     )
+    extras_note = f" + {written_extras} supplementary file(s)" if written_extras else ""
     return _outcome(
         index,
         candidate,
         STATUS_APPLIED,
         f"wrote {'(overwriting) ' if overwrite else ''}{len(candidate.draft or '')} chars to a "
-        f"{scope} skill{restart_note}",
+        f"{scope} skill{extras_note}{restart_note}",
         path=str(target),
     )
 
@@ -637,6 +736,88 @@ def _skill_target(root: Path, slug: str, *, overwrite: bool) -> tuple[Path | Non
             f"approve this ONE candidate for overwrite explicitly."
         )
     return resolved, ""
+
+
+def _skill_extra_target(skill_dir: Path, relative_path: str) -> tuple[Path | None, str]:
+    """`(<skill_dir>/<relative_path> resolved, "")`, or `(None, reason)` — the containment check for
+    a skill's SUPPLEMENTARY `references/`/`scripts/` files. A DIFFERENT function from
+    `_skill_target` on purpose (same reasoning as why THAT function is separate from the flat
+    memory-file check): a possibly-nested relative path needs its own wall, not a bent version of a
+    check built for exactly one path component.
+
+    1. `relative_path` is non-blank, carries no backslash, is not absolute/home-relative, and no
+       path segment is empty/`.`/`..` — checked directly (never assumed from the model's draft),
+       because a caller deriving `relative_path` some other way must still hit this wall.
+    2. The FIRST segment must be one of `_ALLOWED_EXTRA_PREFIXES` — the closed set this project's
+       `draft_skill_extra_file` tool authors into.
+    3. EVERY filesystem call is inside a try catching `(OSError, ValueError)` — the SAME pair
+       `_skill_target` already catches around its own `.resolve()` calls (a NUL byte raises
+       `ValueError`; an overlong path raises `OSError`/ENAMETOOLONG). A refusal is the right answer
+       to an unusable path, never an exception escaping `apply_plan` mid-batch.
+    4. The resolved path must satisfy `resolved.is_relative_to(resolved_skill_dir)` — a bool check
+       that never raises, unlike `Path.relative_to()` — catching a symlinked `references`/`scripts`
+       directory (or any intermediate segment) redirecting the write outside the skill directory,
+       the nested analogue of what `_skill_target` already does for the skill directory itself and
+       for `SKILL.md` within it.
+    """
+    if not relative_path or not relative_path.strip():
+        return None, "a supplementary file's relative_path is blank"
+    if "\\" in relative_path:
+        return None, f"relative_path {relative_path!r} contains a backslash — use forward slashes only"
+    if relative_path.startswith(("/", "~")):
+        return None, (
+            f"relative_path {relative_path!r} must be relative to the skill directory, not "
+            f"absolute or home-relative"
+        )
+    parts = relative_path.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return None, f"relative_path {relative_path!r} contains an empty/`.`/`..` path segment"
+    if parts[0] not in _ALLOWED_EXTRA_PREFIXES:
+        return None, (
+            f"relative_path {relative_path!r} must live under one of "
+            f"{list(_ALLOWED_EXTRA_PREFIXES)}/"
+        )
+    target = skill_dir.joinpath(*parts)
+    try:
+        resolved = target.resolve()
+        resolved_dir = skill_dir.resolve()
+    except (OSError, ValueError) as exc:
+        return None, f"could not resolve {target}: {exc}"
+    if not resolved.is_relative_to(resolved_dir):
+        return None, (
+            f"refusing to write outside {resolved_dir}: {relative_path!r} resolves to {resolved}"
+        )
+    return resolved, ""
+
+
+def _extra_path_conflict(targets: dict[str, Path]) -> str | None:
+    """The reason string for the first pair of `extra_files` entries that cannot BOTH exist, or None.
+
+    `_skill_extra_target` checks each `relative_path` in ISOLATION — it has no reason to know about
+    the others. Two individually-valid paths can still conflict with EACH OTHER: `scripts/utils`
+    (a file) and `scripts/utils/helper.py` (which needs `scripts/utils` to be a DIRECTORY) both pass
+    containment on their own, but writing them in sequence lets `SKILL.md` and the first extra land
+    on disk before the second one's `mkdir` collides with the first — leaving a half-written, LIVE,
+    DISCOVERABLE skill behind despite an overall `refused` outcome (found by adversarial review,
+    reproduced end to end through the real `assemble()` -> `apply_plan` path). Checked on the
+    RESOLVED targets, before anything is written, so this candidate refuses up front like every other
+    doomed one — `Path.is_relative_to()` again, never `Path.relative_to()`, for the same
+    never-raise-on-a-bad-path reason `_skill_extra_target` itself gives.
+    """
+    items = list(targets.items())
+    for i, (path_a, target_a) in enumerate(items):
+        for path_b, target_b in items[i + 1 :]:
+            if target_a != target_b and (
+                target_b.is_relative_to(target_a) or target_a.is_relative_to(target_b)
+            ):
+                ancestor, descendant = (
+                    (path_a, path_b) if target_b.is_relative_to(target_a) else (path_b, path_a)
+                )
+                return (
+                    f"{ancestor!r} and {descendant!r} conflict — {ancestor!r} would have to be "
+                    f"both a file and a directory"
+                )
+    return None
 
 
 # -- prune ----------------------------------------------------------------------------------------

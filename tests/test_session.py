@@ -29,7 +29,7 @@ from ctx_distillery.session import (
     run_distillation,
     run_distillation_artifacts,
 )
-from ctx_distillery.task import PLANNER_PROMPT_VERSION, DistillCandidate, DistillPlan
+from ctx_distillery.task import PLANNER_PROMPT_VERSION, DistillCandidate, DistillPlan, DistillSession
 
 from .test_adapters_claude_code import (
     NESTED_META,
@@ -441,6 +441,43 @@ def test_run_distillation_artifacts_reports_a_generated_run_id(memory_dir, tmp_p
     assert {e.get("run_id") for e in artifacts.events} == {artifacts.run_id}
 
 
+def test_on_event_receives_every_recorded_event_live(memory_dir, tmp_path):
+    """The one property `studio/`'s live mode depends on: `on_event` fires for EVERY event
+    `TraceRecorder` records, live — not just a subset, and not merely the ones this test happens to
+    poke at. Confirmed against the exact same event stream `artifacts.events` returns afterward."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    adapter = ClaudeCodeAdapter(memory_dir, transcripts=["t"])
+    seen: list[dict] = []
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            on_event=seen.append,
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    assert seen == artifacts.events
+    assert [e["type"] for e in seen] == ["run_start", "main_step", "final", "result", "run_end"]
+
+
+def test_cancel_event_reaches_the_constructed_sandbox_interpreter():
+    """The ctx-distillery-side half of the REVISION's own claim: `cancel_event` needs ZERO
+    signature changes here to reach rlm-kit's real sandbox watchdog — it rides the EXISTING `**kw`
+    forwarding (`run_distillation_artifacts` -> `DistillSession.__init__` -> `RLMTask.__init__`).
+    Checked directly on `DistillSession`/`RLMTask`, one layer below `run_distillation_artifacts`,
+    with the REAL (never-executed) pyodide interpreter — a `ScriptedInterpreter` override would
+    bypass `build_interpreter` entirely and prove nothing about this specific wiring."""
+    import threading
+
+    _configure([{"reasoning": "x", "code": "x"}])
+    ev = threading.Event()
+    task = DistillSession(memory_index=[], chat_fn=lambda spec: "x", transcripts=[], cancel_event=ev)
+    rlm = task._build_rlm()
+    assert rlm._interpreter._cancel_event is ev
+
+
 # -- subagent ingestion: redaction, and the trace's identity list -------------------------------
 
 
@@ -568,6 +605,111 @@ def test_the_driver_stamps_the_planner_prompt_version(memory_dir, tmp_path):
     )
     meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
     assert meta["planner_prompt_version"] == PLANNER_PROMPT_VERSION
+
+
+def test_run_meta_stamps_the_adapters_harness_name(memory_dir, tmp_path):
+    """Mirrors `test_the_driver_stamps_the_planner_prompt_version` exactly: `harness` is read off
+    the adapter passed to this call, not hardcoded, so a future second adapter's runs are
+    distinguishable in the trace from a Claude Code one."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            ClaudeCodeAdapter(memory_dir, transcripts=["t"]),
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["harness"] == "claude_code"
+
+
+def test_a_callers_own_meta_cannot_clobber_the_harness_stamp(memory_dir, tmp_path):
+    """`harness` is stamped AFTER `run_meta.update(meta or {})` specifically so a caller's own
+    `meta` dict — even one that happens to carry a `"harness"` key, accidentally or not — can never
+    silently override the real provenance."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            ClaudeCodeAdapter(memory_dir, transcripts=["t"]),
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+            meta={"harness": "not-real"},
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["harness"] == "claude_code"
+
+
+def test_project_instructions_are_redacted_before_reaching_the_planner(memory_dir, tmp_path):
+    """A secret planted in `CLAUDE.md` must not survive into what the planner's own code actually
+    sees — same guarantee `test_run_distillation_ingests_once_redacts_and_assembles` pins for
+    transcripts, but checked through the REPL variable itself: unlike a transcript (surfaced into a
+    tool_call event by `read_transcript_chunk`, an explicit audit point), nothing records
+    `project_instructions` into the trace on its own, so the trace blob has nothing to assert on —
+    the binding dspy hands the planner's code is the only place this guarantee is observable."""
+    _configure([{"reasoning": "look", "code": "x = project_instructions"}])
+    adapter = ClaudeCodeAdapter(
+        memory_dir,
+        transcripts=["t"],
+        project_instructions="the release key is " + _SECRET + "\n",
+    )
+    held: dict = {}
+
+    def step_read(_tools, variables):
+        held["seen"] = variables.get("project_instructions")
+        return {"plan": {"candidates": []}}
+
+    asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([step_read]),
+        )
+    )
+    assert _SECRET not in held["seen"]
+    assert "[REDACTED:api_key]" in held["seen"]
+
+
+def test_project_instructions_chars_is_stamped_in_run_meta(memory_dir, tmp_path):
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    adapter = ClaudeCodeAdapter(
+        memory_dir, transcripts=["t"], project_instructions="# five words here exactly\n"
+    )
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            adapter,
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["project_instructions_chars"] == len("# five words here exactly\n")
+
+
+def test_project_instructions_chars_is_zero_when_none_was_found(memory_dir, tmp_path):
+    """0 is an HONEST report ("no CLAUDE.md, or an empty one") — never a fabricated positive claim,
+    the same "None/absent vs. a real 0" care `transcript_index` already takes, just answerable here
+    without an ambiguity: this project always knows the true length."""
+    _configure([{"reasoning": "submit", "code": "SUBMIT(plan={...})"}])
+    artifacts = asyncio.run(
+        run_distillation_artifacts(
+            ClaudeCodeAdapter(memory_dir, transcripts=["t"]),
+            lambda spec: _DRAFT,
+            str(tmp_path / "trace.jsonl"),
+            run_id="r0",
+            interpreter=ScriptedInterpreter([{"plan": {"candidates": []}}]),
+        )
+    )
+    meta = next(e for e in artifacts.events if e["type"] == EVENT_RUN_START)["payload"]["meta"]
+    assert meta["project_instructions_chars"] == 0
 
 
 def test_run_distillation_is_a_thin_wrapper_returning_exactly_the_same_plan(memory_dir, tmp_path):

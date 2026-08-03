@@ -301,7 +301,7 @@ def setup(config: DistillConfig) -> DistillConfig:
 
 
 def make_chat_fn(config: DistillConfig) -> Callable[[str], Any]:
-    """Build the `chat_fn` the two drafting tools call — an OpenAI-compatible completion closure.
+    """Build the `chat_fn` the three drafting tools call — an OpenAI-compatible completion closure.
 
     A CLI can own `run_distillation`'s preconditions end to end — an operator's shell already holds
     the credentials, and a foreground process is where a multi-minute sandboxed RLM episode belongs.

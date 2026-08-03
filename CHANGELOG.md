@@ -12,6 +12,282 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **`ctx-distillery-studio` gained an OPT-IN live-drive endpoint, `POST /v1/distill`, off unless the
+  operator sets `CTXD_LIVE_PROJECTS`.** This reopens a refusal `CLAUDE.md` invariant 10 previously
+  stated outright ("there is no live-drive endpoint"), on the four conditions that invariant itself
+  named as sufficient to revisit it — all four are now met, and `studio/README.md`'s "Scope: replay
+  + opt-in live" section and `studio/CLAUDE.md`'s invariant 10 hold the full argument:
+
+  1. A real cancel seam now exists UPSTREAM, in `rlm-kit`: `rlm_kit.SandboxCancelled` +
+     `RLMTask(cancel_event=...)` reach into the sandbox interpreter's own watchdog thread and can
+     kill a wedged `deno`/`pyodide` subprocess mid-call — the thing `asyncio.Task.cancel()`
+     fundamentally cannot do (the sandbox's blocking read has no `await` inside it). This project's
+     `rlm-kit` pin moved to the commit that adds it; ZERO ctx-distillery signature changes were
+     needed to wire it through, since `run_distillation_artifacts`'s existing `**kw` already
+     forwards `cancel_event=` into `DistillSession.__init__` -> `RLMTask.__init__`.
+  2. The route genuinely does not exist unless `CTXD_LIVE_PROJECTS` is set — `GET /v1/projects` and
+     `POST /v1/distill` both 404 otherwise, unconditionally.
+  3. A live request's `project_dir` is checked against that SAME environment-sourced allowlist
+     (exact match, never prefix/substring) — never taken on faith from the request body.
+  4. Every live-mode route requires BOTH a loopback check AND a same-origin check, and each of
+     those is itself an AND of two conditions, not an OR — an adversarial review found a first
+     draft got both wrong the same way, by direct reproduction: the loopback check must require the
+     real TCP peer be loopback **AND** the `Host` header itself name a loopback host (checking the
+     peer alone is backwards for DNS rebinding — a rebound request's peer genuinely IS loopback
+     while its `Host`/`Origin` headers still name the attacker's hostname), and the same-origin
+     check must compare `Origin` against `Host` by full authority — hostname AND port — rather than
+     hostname alone (which would make every port on `localhost` mutually trusted).
+
+  New: `studio/ctx_distillery_studio/live.py` (`run_live`, the worker-thread driver — builds the
+  SAME `DistillConfig.from_env()` -> `setup()` -> `make_chat_fn()` -> `ClaudeCodeAdapter.for_project()`
+  precondition the CLI's `_cmd_distill` does, so a live run and a CLI run of the same project can
+  never silently diverge in what they run under) and `studio/ctx_distillery_studio/shutdown.py`
+  (SIGINT/SIGTERM -> cancel-all-in-flight bridge, needed because uvicorn's own graceful shutdown
+  waits for open SSE connections BEFORE running lifespan shutdown, which would otherwise deadlock on
+  a run nothing has told to stop). `session.run_distillation_artifacts` gained an explicit
+  `on_event` keyword (kept separate from `**kw` because it belongs to `TraceRecorder`, a different
+  callee than `DistillSession`) so a live run's trace events can be forwarded to its SSE stream as
+  they are recorded, not just replayed after the fact. `GET /v1/runs/{run_id}` (and
+  `.../iterations`, `.../events`) now refuse with 409 while `run_id` is still live, rather than
+  showing a truncated, ever-changing snapshot — a live run's own progress is watched through `POST
+  /v1/distill`'s own SSE response instead, carrying one genuinely new event (`distill.run.started`)
+  ahead of everything else.
+
+  `run_live`'s exactly-once completion guarantee catches `BaseException`, not `Exception`:
+  `DistillConfig.from_env()` raises `SystemExit` as its own documented error contract on a
+  misconfigured `CD_*` var, and CPython's default `threading.excepthook` silently swallows an
+  uncaught `SystemExit` in a non-main thread — `except Exception` would have reproduced the exact
+  "the client hangs forever" failure this function exists to prevent, one exception type later.
+
+- **`CodexAdapter` — the SECOND `HarnessAdapter` this project has ever built, for OpenAI's Codex
+  CLI, READ-ONLY INGESTION ONLY.** `apply.py` gained no Codex-specific write path and remains
+  entirely Claude-Code-specific (invariant 9) — a Codex-sourced run produces a real judgement-only
+  plan, reviewable via `ctx-distillery show`, but `ctx-distillery-apply` cannot yet write a
+  `promote_to_skill`/`promote_to_memory` candidate drawn from one INTO Codex's own store. This is a
+  stated, deliberate scope boundary (confirmed with the user before design work started), not an
+  oversight.
+
+  **Evidence tier, stated explicitly rather than rounded up**: every structural fact this adapter
+  is built against was confirmed by reading `openai/codex`'s own SOURCE at HEAD this session (via
+  the GitHub API) — a weaker tier than several `ClaudeCodeAdapter` facts, which rest on a real
+  installed Claude Code process or a dedicated control experiment. `ctx_distillery/adapters/codex.py`'s
+  own module docstring says so, matching CLAUDE.md invariant 6's own evidence-tier discipline.
+
+  Rollouts (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) are rendered DELIBERATELY LOSSILY —
+  `user`/`assistant` message text plus a `[used tool: X]` label for tool-call-shaped items (Codex's
+  `FunctionCall`/`LocalShellCall`/`ToolSearchCall`/etc.), mirroring Claude Code's own `tool_use`
+  label rather than the silent drop a first draft had (found by adversarial review: a coding
+  agent's shell/patch calls are its actual substance, not noise). `AGENTS.md` becomes
+  `project_instructions` via the SAME field `CLAUDE.md`'s own ingestion already populates — walked
+  root-to-leaf from the nearest `.git` to the project directory, `AGENTS.override.md` preferred
+  over `AGENTS.md` per directory, never the global `~/.codex/AGENTS.md` (the identical
+  project-only scope decision already made for Claude Code's `CLAUDE.md`). Skills
+  (`.agents/skills/*/SKILL.md`) are enumerated at EVERY directory in that same walk, not just the
+  project directory (a second gap a first draft had — Codex's own `repo_agents_skill_roots` walks
+  the identical path AGENTS.md discovery does).
+
+  **Codex's own memory system (`~/.codex/memories/`) is DELIBERATELY NOT READ AT ALL** — a
+  correctness decision, not a simplification. Reading `codex-rs/memories/README.md` in full shows
+  it is a single, MACHINE-WIDE store ("Global Consolidation", "a single global phase-2 lock"),
+  consolidated across every project the operator has ever used Codex on, with no `cwd`/project
+  filter in either extraction phase's eligibility rules (confirmed further by adversarial review
+  against the actual state-DB schema: no project/cwd column exists on the stage-1 outputs table
+  either). Including it in a *per-project* snapshot would silently mix another, unrelated
+  project's learnings into this one's plan — worse than simply omitting it.
+
+  **The one real structural difference from `ClaudeCodeAdapter`, and its stated cost**: Claude Code
+  partitions storage by project on disk for free; Codex does not — every rollout on the machine
+  lives under the SAME `sessions/` tree, with the project recorded INSIDE each file as
+  `SessionMeta.cwd`. `for_project` must therefore open every rollout on the machine far enough to
+  read its `session_meta` line (capped at a fixed line count so a corrupted/hostile file that never
+  yields one cannot force an unbounded per-file read — added per adversarial review) and filter by
+  `cwd` — a real, stated cost proportional to every session ever recorded, not just this project's.
+
+  **A genuinely critical bug was caught and fixed before this ever shipped**: the first draft read
+  `cwd` from `payload["meta"]["cwd"]`, reasoning from `SessionMetaLine`'s Rust field being
+  `#[serde(flatten)]` — backwards. Flatten means `cwd` is a DIRECT sibling of `git` on the wire,
+  never nested under a `"meta"` key; had this shipped as written, `for_project` would have matched
+  ZERO sessions for every project, forever, silently indistinguishable from "no Codex history yet."
+  Found by adversarial review re-deriving the claim from `SessionMetaLine`'s own custom
+  `Deserialize` implementation rather than trusting the Rust struct shape at a glance.
+
+  **Prerequisite before this adapter gets CLI wiring — resolved by the harness-marker change
+  below.**
+
+- **Every run is now stamped with WHICH harness produced it, and `apply.py` refuses to write a
+  candidate drawn from one it does not understand — the prerequisite `CodexAdapter` recorded
+  above.** `HarnessAdapter` gained a required `harness_name` class attribute
+  (`ClaudeCodeAdapter.harness_name = "claude_code"`, `CodexAdapter.harness_name = "codex"`);
+  `run_distillation_artifacts` stamps `run_meta["harness"]` from it — deliberately AFTER
+  `run_meta.update(meta or {})`, so a caller's own `meta` dict can never silently clobber the real
+  provenance — and `schema.assemble` reads it back (via `trace_io.run_start_meta`, never trusted
+  from the plan's own claim) into a new `AssembledPlan.harness: str | None` field.
+
+  `schema.SUPPORTED_WRITE_HARNESSES = ("claude_code",)` is the one closed vocabulary both
+  `render.py` and `apply.py` read from — placed in `schema.py` rather than `apply.py` specifically
+  so `render.py` can import it without an `apply.py`<->`render.py` cycle (`apply.py` already
+  imports `render_plan`). `render_plan` now prints a warning line at the very TOP of its output when
+  `plan.harness` is set and unsupported, so `ctx-distillery show`'s default text and
+  `ctx-distillery-apply`'s own dry-run report both surface a mismatch up front — an earlier
+  blueprint draft missed this entirely, leaving the primary CLI surface silent until `--confirm`
+  refused candidates one at a time. `apply._blocking_problem` gained a fourth check refusing every
+  non-`keep` action when the harness is set and unsupported; `harness is None` PERMITS deliberately
+  (every trace recorded before this landed is a Claude Code trace), and a malformed non-string
+  value is kept verbatim rather than coerced to `None` — the membership check refuses it naturally,
+  which is the safer of the two failure modes.
+
+  `studio/`'s `app.js` mirrors the same rule: `applyBlocker` gained a fourth condition (exempting
+  `keep`, matching `_blocking_problem` exactly), and `PLAN.harness` is populated by `loadPlan` from
+  the fetched plan's own `harness` field (reset to `null` by `startReplay`). `studio/DESIGN.md` §2's
+  two count-citing sentences ("three"/"five") moved to "four"/"six".
+
+  **Caught by adversarial review before implementation**: the first blueprint draft (1) never
+  touched `render.py` at all, (2) proposed JS wiring that referenced a nonexistent `data` variable
+  without saying which of the two real functions (`startReplay` for reset, `loadPlan` for populate)
+  needed which half of the edit, and (3) proposed a JS test that only exercised `applyBlocker` via
+  `seed()`'s direct `PLAN.harness` assignment — which would have stayed green even if the real
+  `loadPlan` fetch-population wiring were completely broken. All three are fixed in the shipped
+  version; the JS test suite now separately drives the real `loadPlan` against a mocked `fetch`.
+
+  **A fourth issue was caught by the post-implementation `/check` pass**: `applyBlocker`'s harness
+  check originally sat AFTER the `promote_to_skill` scope gate and the `prune` target gate, while
+  `_blocking_problem` checks harness BEFORE either — so a candidate with both a bad `scope` and a
+  mismatched harness would show the studio reviewer the scope reason while `apply_plan` would
+  actually refuse it for the harness reason instead. Not a safety bug (both land on refused), but
+  it broke DESIGN.md §2's own stated property that every blocked reason shown is the one
+  `apply_plan` really gives. Fixed by reordering `applyBlocker` to match, with a test pinning the
+  precedence directly.
+
+- **The planner now reads the project's own `CLAUDE.md` (or `.claude/CLAUDE.md`) as read-only
+  context, closing a real gap: this tool reasoned about promoting durable knowledge into memory
+  without ever seeing the durable knowledge the project already had written down.** Confirmed as a
+  genuine gap first — `ArtifactKind = Literal["memory", "skill", "index"]` has no fourth kind, and
+  `ClaudeCodeAdapter.ingest()`/`list_targets()` never touched a project's own root instructions
+  file. Confirmed via Claude Code's own official docs (`code.claude.com/docs/en/claude-directory`,
+  fetched directly, not inferred from a blog summary) that a project `CLAUDE.md` — or the
+  equivalent `.claude/CLAUDE.md`, which the docs state is the same thing in a different location —
+  is loaded into every session's context. **A WEAKER claim, kept visibly separate per adversarial
+  review**: that Claude Code does not natively read AGENTS.md is inferred from a web-search pass
+  (community discussion of a manual `ln -s AGENTS.md CLAUDE.md` workaround), not from the same
+  official docs page, which does not mention AGENTS.md at all — could be stale, given this is an
+  active feature request. Nothing here depends on it being right either way: a plain file read
+  follows a same-directory symlink regardless, so the workaround is picked up for free whether or
+  not AGENTS.md ever gains native support.
+
+  `RawSession` gains `project_instructions: str = ""`; `ClaudeCodeAdapter.for_project` reads it via
+  a new `project_claude_md_path` helper (root wins if both locations somehow exist — THIS
+  project's own design choice, not a documented Claude Code precedence rule, kept visibly labeled
+  as such); `session.run_distillation_artifacts` redacts it through the exact same `redact()` call
+  transcripts already go through (invariant 3, skipped only when empty — a call-count detail for
+  an existing test, not a redaction-scope carve-out) and stamps `run_meta["project_instructions_chars"]`
+  for provenance (an honest `0`, never a fabricated claim, when none was found); `DistillSession`'s
+  signature gains `project_instructions: str` as a THIRD, always-visible input (no tool needed —
+  unlike `transcripts`, nothing closes over it, so it flows only through `.arun()`); and the
+  planner's instructions tell it to treat this as a comparison point (flag redundant promotions,
+  flag contradictions as conflicts for human review) — explicitly NOT the same trust tier as this
+  project's own memory/skill files, since a target project's `CLAUDE.md` is authored by whoever
+  controls THAT repo, which may be an untrusted third party the operator is distilling; the
+  paragraph fences it as DATA to reason about, never instructions directed at the planner itself,
+  mirroring `eval/`'s own `UNTRUSTED_DATA_RULE` convention for the identical shape of fence.
+  Read-only, never a promotion/prune target — `apply.py` has no "edit an existing file in place"
+  capability anywhere, and building one is an explicit non-goal here. Not added to
+  `DistillArtifacts` or `eval/`'s judge prompt: no concrete consumer needs the redacted text outside
+  the run itself today, and adding a field with no real consumer is the premature-abstraction trap
+  this project's own conventions already warn against.
+
+  **Found by adversarial review, fixed before merge**: the first draft skipped the
+  enumeration-side containment check invariant 5 already requires for `_memory_refs`/`memory_dir`
+  — `project_claude_md_path` now refuses a resolved candidate (or a `.claude` directory itself)
+  that escapes the directory it was found in, closing the same class of hole a git-tracked
+  `CLAUDE.md -> /etc/passwd` in a cloned, untrusted repo would otherwise open, without breaking the
+  documented same-directory AGENTS.md symlink case; and the redact-unconditionally draft would have
+  broken `tests/test_session.py::test_a_custom_redactor_is_honoured`, an existing test asserting
+  the injected redactor's call count, fixed by skipping the call entirely on empty input.
+
+- **A skill promotion may now carry supplementary `references/*.md` and `scripts/*` files —
+  closing a Known-simplification gap that used to say this was out of scope.** A new SIXTH
+  read-only tool, `draft_skill_extra_file(artifact_id, relative_path, kind, evidence)`, drafts one
+  supplementary file per call, sharing the `artifact_id` an earlier `draft_skill_file` call minted
+  rather than authoring a new artifact — the same repeatable-tool architecture
+  `draft_memory_file`/`draft_skill_file` already use (one model call, one deterministic validator,
+  one `tool_call` event), chosen over a single-call multi-file bundle because it doesn't need the
+  model to produce a custom delimited format correctly in one shot.
+
+  `schema.assemble` gathers every `draft_skill_extra_file` call sharing a `promote_to_skill`
+  candidate's `artifact_id` — last call per `(artifact_id, relative_path)` wins, the compound-key
+  generalization of the existing single-key "a repair loop legitimately re-drafts" rule — onto a new
+  `AssembledCandidate.extra_files: dict[str, AssembledExtraFile]`. A bad extra file (empty draft,
+  failed validator) is kept for visibility (parity with the main draft) but ALSO reported on the
+  candidate's own `problems`, which is what makes `apply._blocking_problem`'s existing "any problems
+  -> refuse" check block the whole candidate for free — no new blocking logic needed in `apply.py`.
+
+  `apply._promote_skill` writes the supplementary files behind their OWN containment check
+  (`_skill_extra_target`, CLAUDE.md invariant 9) — a DIFFERENT function from `_skill_target`, same
+  reasoning as why that one is already separate from the flat memory-file check: a possibly-nested
+  relative path needs its own wall. Every entry is validated BEFORE anything is written, including
+  `SKILL.md` itself — a candidate doomed by one bad `relative_path` must never leave a half-written,
+  DISCOVERABLE skill behind (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`).
+
+  **Found by TWO rounds of adversarial review before this shipped, and the second round is the one
+  worth reading closely.** Round one: `_skill_extra_target` uses `Path.is_relative_to()` rather than
+  `Path.relative_to()` + `except ValueError` (a NUL byte would otherwise raise uncaught, reproducing
+  a bug `_skill_target` already had to fix once), and each supplementary file's own `mkdir` is
+  isolated in its own try, separate from its `open()`. Round two, on the IMPLEMENTED code, found a
+  gap round one's own fixes had missed: `_skill_extra_target` checks each `relative_path` in
+  ISOLATION, so two individually-valid entries could still conflict with EACH OTHER —
+  `relative_path="scripts/utils"` (a file) and `relative_path="scripts/utils/helper.py"` (which
+  needs `scripts/utils` to be a DIRECTORY) both passed containment on their own, and the batch wrote
+  `SKILL.md` and the first extra to disk BEFORE the second one's `mkdir` collided — leaving exactly
+  the half-written, DISCOVERABLE skill the validate-before-write pass exists to prevent, reproduced
+  end to end through the real `assemble()` -> `apply_plan` path. `_extra_path_conflict` closes it:
+  checked on the RESOLVED targets, before anything is written, alongside every other entry's
+  containment check. (The isolated `mkdir` still earns its keep for a DIFFERENT case this new check
+  cannot see — a file already on disk from an earlier, unrelated `apply_plan` call, not a conflict
+  between this call's own entries.)
+
+  `render.render_plan` shows each supplementary file beside its candidate (so `ctx-distillery show`
+  and the eval judge both see them — invariant 11), and `render.plan_as_dict` picks `extra_files` up
+  automatically (`dataclasses.asdict`). Studio's Trajectory drawer and live feed both gained a
+  bespoke row for the sixth tool too — without it, a real run using it would have rendered as
+  `unrecognized: true` in the drawer and been silently DROPPED from the live SSE feed, the exact
+  "trace from a future build" case those two paths' own doc comments say should never happen for a
+  tool this project actually shipped.
+
+  **Two things deliberately NOT built, named rather than left silent**: no cross-check that a
+  drafted `SKILL.md`'s prose actually matches what was drafted via `draft_skill_extra_file` (a model
+  can write "see `scripts/setup.sh`" without ever drafting that path); and no live registry
+  validating that `draft_skill_extra_file`'s `artifact_id` argument corresponds to a real prior
+  `draft_skill_file` call (a typo'd id is a silently orphaned `tool_call` — never written, never an
+  error). Also not built: the studio PLAN panel does not yet browse multiple files per candidate
+  visually — the data is reachable over `GET /v1/runs/{id}`, a UI story is a follow-up.
+
+- **The eval scorecard now reports each row's own transcript composition** —
+  `transcripts=<n> (sessions=<a> subagents=<b>)`, appended per row (scored or unscored), closing the
+  gap an earlier entry below named "Not built, and named so it is not mistaken for shipped." Three
+  new `EvalRow` fields (`n_transcripts`/`transcript_sessions`/`transcript_subagents`), all `None`
+  (never a fabricated `0`) when a run's own trace never recorded them — deliberately PER ROW, never
+  on `EvalReport`, for the reason that earlier entry already gave: `score` scores an arbitrary glob
+  of traces, each with its own unrelated composition, so there is no single report-level number the
+  way there is one `judge_model` or `prompt_version`.
+
+  The fix is a promotion, not a new implementation (invariant 11): `studio/`'s `mapper.py` already
+  had `transcript_composition(meta)`, and `rubric.py` already had its own inline scan for the bare
+  `n_transcripts` count — two partial, independent reads of the same `run_start` meta. Both now go
+  through `ctx_distillery.trace_io.transcript_facts` (built on two new shared primitives,
+  `run_start_meta` + the moved `transcript_composition`), which `eval/`'s `score.score_run` calls as
+  its own, THIRD consumer — the same trigger invariant 11 already documents elsewhere ("eval/
+  needing the identical guard a THIRD time is what forced the shared module"). `studio/mapper.py`
+  re-imports and re-exports the name rather than losing it, so nothing importing from `mapper.py`
+  (`iterations.py`, its own tests) needed to change.
+
+  One sharp edge, worth recording rather than leaving implicit: `trace_io.dict_events` already
+  coerces a non-dict `run_start.meta` to `{}` before `run_start_meta`'s own scan ever sees it (a
+  normalization `dict_events`'s own docstring states), so a malformed meta and a genuinely empty one
+  are indistinguishable by the time any caller reads them — both surface as `{}`, not `None`. That
+  is harmless end to end (every downstream `.get(...)` degrades identically either way), and
+  `tests/test_trace_io.py` pins the distinction on purpose: `None` is reserved for "no `run_start`
+  event at all."
+
 - **`make check` is now the one verification entrypoint, and a `Makefile` is not a hole in invariant
   1.** Full verification was FIVE commands across four suites plus lint, existing only as ~40 lines of
   `CLAUDE.md ## Verify` prose whose lead-in still said "Run BOTH" — an undercount since the `eval/`,
@@ -278,11 +554,11 @@ never applies anything itself.
   `CD_*` env var: that surface is models and budgets, this is input selection, and a CLI flag is
   visible in the shell history that produced the trace.
 
-  **Not built, and named so it is not mistaken for shipped:** the eval scorecard footer does NOT
-  report a row's transcript composition (`transcripts=<n> (sessions=<a> subagents=<b>)`). It needs
-  `EvalRow`/`EvalReport` fields the design never specified, and it is ill-defined for `score`, whose
-  rows come from a glob of traces each with its own composition. The load-bearing half did land:
-  `judge.py` states that comparability is per-row and the trace is the authority.
+  **This used to say "Not built" here — that is now FALSE; see the newer, top-of-file entry on the
+  eval scorecard's per-row `transcripts=<n> (sessions=<a> subagents=<b>)` suffix.** The reasoning
+  below (ill-defined as an `EvalReport`-level aggregate, well-defined per row) is what that entry
+  built against, so it stays rather than being deleted — but do not read this bullet as current
+  status.
 
 - **FIXED — a symlinked `~/.claude` silently yielded ZERO transcripts** (`claude_home`). The helper
   was `Path.home().resolve() / CLAUDE_DIRNAME`, which resolves the home component and leaves

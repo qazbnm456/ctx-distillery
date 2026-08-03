@@ -222,6 +222,73 @@ def make_skill_validator(
     return validate
 
 
+#: The closed set of supplementary-file kinds `draft_skill_extra_file` accepts, and the directory
+#: prefix each is confined to — `apply._skill_extra_target` re-derives the SAME prefixes from the
+#: written `relative_path` alone (it has no `kind` to consult), so this dict is this module's own
+#: cross-check, not the write-time containment wall.
+SKILL_EXTRA_PREFIXES = {"reference": "references/", "script": "scripts/"}
+
+
+def make_skill_extra_file_validator(
+    kind: Callable[[], str | None], relative_path: Callable[[], str | None]
+) -> Callable[[str], FormatCheck]:
+    """Build the deterministic format check for ONE supplementary file of an already-drafted skill.
+
+    Purely structural, same as every validator in this module — never whether the CONTENT is a good
+    reference doc or a correct script (that is the human reviewer's call, exactly like whether a
+    SKILL.md's instructions are good advice already is; `CLAUDE.md` invariant 1 pins "validation is
+    structural only" for this whole file).
+
+    `kind`/`relative_path` are read-back closures (the current call's own arguments), the same
+    "pending" pattern `make_skill_validator`'s `scope` argument already uses — a cross-check between
+    what the planner DECLARED and what it actually asked the model to draft.
+    """
+
+    def validate(raw: str) -> FormatCheck:
+        errors: list[str] = []
+        requested_kind = kind()
+        requested_path = relative_path() or ""
+        if requested_kind not in SKILL_EXTRA_PREFIXES:
+            errors.append(
+                f"kind must be one of {list(SKILL_EXTRA_PREFIXES)}, got {requested_kind!r}"
+            )
+        else:
+            prefix = SKILL_EXTRA_PREFIXES[requested_kind]
+            if not requested_path.startswith(prefix):
+                errors.append(
+                    f"relative_path {requested_path!r} must start with {prefix!r} for "
+                    f"kind={requested_kind!r}"
+                )
+            if requested_kind == "reference" and not requested_path.endswith(".md"):
+                errors.append(
+                    f"a reference file's relative_path must end in '.md', got {requested_path!r}"
+                )
+        text = raw or ""
+        if not text.strip():
+            errors.append("empty draft: the model returned no text")
+        return FormatCheck(ok=not errors, errors=errors)
+
+    return validate
+
+
+def _spec_for_skill_extra(relative_path: str, kind: str, evidence: str) -> str:
+    """The MODEL-FACING prompt text for ONE supplementary skill file — kept in lockstep with
+    `make_skill_extra_file_validator` on purpose, the same reason `_spec_for_skill` gives."""
+    noun = "reference document" if kind == "reference" else "script"
+    frontmatter_note = (
+        "plain markdown, no YAML frontmatter block (frontmatter belongs only in SKILL.md itself)"
+        if kind == "reference"
+        else "the complete script source, ready to save verbatim at that path"
+    )
+    return (
+        f"Draft ONE supplementary {noun} for an ALREADY-DRAFTED skill.\n"
+        f"relative_path (must match exactly): {relative_path}\n"
+        f"kind: {kind}\n"
+        f"evidence from the session transcript(s):\n{evidence}\n"
+        f"Output the complete file content for {relative_path} and nothing else — {frontmatter_note}."
+    )
+
+
 def _spec_for_memory(topic: str, memory_type: str, evidence: str) -> str:
     return (
         f"Draft ONE Claude Code memory file.\n"
@@ -381,3 +448,73 @@ def make_draft_skill_file_tool(
         return {"artifact_id": artifact_id, "ok": result.ok, "errors": errors, "draft": draft}
 
     return draft_skill_file
+
+
+def make_draft_skill_extra_file_tool(chat_fn: ChatFn) -> Callable[[str, str, str, str], dict]:
+    """Wrap an injected `chat_fn` into the sync `draft_skill_extra_file` tool.
+
+    The SIXTH read-only tool (`CLAUDE.md` invariant 1's enumeration widened from five to six) — text
+    only, exactly like the other two drafting tools, and needing LESS closure state than they do: a
+    supplementary file has no name-collision concept, so unlike `draft_memory_file`/`draft_skill_file`
+    this tool takes no `memory_index` snapshot at all.
+
+    Unlike its two siblings, this tool does NOT mint its own `artifact_id` — it takes the
+    caller-supplied one from an earlier `draft_skill_file` call, because it is explicitly attaching a
+    file to an ALREADY-DRAFTED skill artifact, not authoring a new one. A typo'd/mismatched
+    `artifact_id` is not caught here (this closure has no access to the run's own trace as it
+    executes) — it becomes a silently orphaned `tool_call` that no `promote_to_skill` candidate ends
+    up referencing, never written and never an error. Documented, not solved: see this project's
+    design notes for `draft_skill_extra_file` on why a live cross-call registry is a deferred
+    follow-up rather than a v1 requirement.
+    """
+    pending: dict[str, str | None] = {"kind": None, "relative_path": None}
+    call_model = make_model_tool(
+        chat_fn,
+        make_skill_extra_file_validator(lambda: pending["kind"], lambda: pending["relative_path"]),
+        max_consecutive_invalid=MAX_CONSECUTIVE_INVALID,
+    )
+
+    def draft_skill_extra_file(artifact_id: str, relative_path: str, kind: str, evidence: str) -> dict:
+        """Draft ONE supplementary file for an ALREADY-DRAFTED skill. Writes nothing — text only.
+
+        Call this AFTER ``draft_skill_file``, passing the SAME ``artifact_id`` it returned — this
+        file is attached to that skill, not a new artifact. ``relative_path`` must be
+        ``references/<name>.md`` with ``kind="reference"``, or ``scripts/<name>`` (any extension)
+        with ``kind="script"``. Returns ``{"artifact_id", "relative_path", "ok", "errors", "draft"}``.
+        Call it as many times as you need, once per supplementary file; a repeat call with the SAME
+        ``relative_path`` replaces that one file only — every other file you already drafted for this
+        skill is untouched."""
+        pending["kind"] = kind
+        pending["relative_path"] = relative_path
+        result = call_model(_spec_for_skill_extra(relative_path, kind, evidence))
+        draft = result.raw or ""
+        errors = _errors_with_infra(result)
+        record_tool_call(
+            "draft_skill_extra_file",
+            args={
+                "artifact_id": artifact_id,
+                "relative_path": relative_path,
+                "kind": kind,
+                "evidence": evidence,
+            },
+            ok=result.ok,
+            artifact_id=artifact_id,
+            relative_path=relative_path,
+            kind=kind,
+            draft=draft,
+            errors=errors,
+            reasoning=result.reasoning,
+            endpoint_error=result.endpoint_error,
+            circuit_broken=result.circuit_broken,
+            cause=result.cause,
+            validator_ran=result.validator_ran,
+        )
+        return {
+            "artifact_id": artifact_id,
+            "relative_path": relative_path,
+            "ok": result.ok,
+            "errors": errors,
+            "draft": draft,
+        }
+
+    return draft_skill_extra_file

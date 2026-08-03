@@ -116,6 +116,15 @@ def _draft_skill_file() -> dict:
             "reasoning": None, "endpoint_error": "502 from the drafter endpoint", "circuit_broken": True}
 
 
+def _draft_skill_extra_file() -> dict:
+    return {"tool": "draft_skill_extra_file",
+            "args": {"artifact_id": "d3b846aa69da", "relative_path": "references/runbook.md",
+                     "kind": "reference", "evidence": EVIDENCE},
+            "ok": True, "artifact_id": "d3b846aa69da", "relative_path": "references/runbook.md",
+            "kind": "reference", "draft": DRAFT, "errors": [], "reasoning": None,
+            "endpoint_error": None, "circuit_broken": False}
+
+
 # ---- the two measured traces -----------------------------------------------------------------
 # LIVE: the real run's event mix — {run_start:1, tool_call:4, main_step:3, final:1, result:1,
 # run_end:1}, tool_calls carrying LOWER step_ids than the main_steps (main_step flushes post-hoc), ts
@@ -328,7 +337,7 @@ def test_duration_s_is_gap_attributed_planner_think_plus_tool_exec():
     assert out["timeline"][0]["duration_s"] == 10.574     # gap since run_start, not a 10s tool call
 
 
-# ---- the five tools' rows, field by field ----------------------------------------------------
+# ---- the six tools' rows, field by field -------------------------------------------------------
 
 
 def test_list_memory_files_row():
@@ -405,11 +414,31 @@ def test_draft_skill_row_carries_procedure_scope_and_the_failure_detail():
     assert "draft" not in entry
 
 
+def test_draft_skill_extra_file_row_carries_relative_path_and_kind_never_the_draft():
+    """The sixth tool's own row shape — same `draft_chars`/`errors`/`endpoint_error`/
+    `circuit_broken` fields the other two drafting tools carry, plus `relative_path` (a
+    skill-relative virtual path, never filtered by the path guard) and its own `kind` vocabulary
+    (`"reference"`/`"script"`, distinct from the artifact `kind` `draft_skill_file` records)."""
+    entry = _one(_draft_skill_extra_file())
+    assert entry["label"] == "draft skill extra file"
+    assert entry["artifact_id"] == "d3b846aa69da"
+    assert entry["relative_path"] == "references/runbook.md"
+    assert entry["kind"] == "reference"
+    assert entry["draft_chars"] == len(DRAFT)
+    assert entry["errors"] == [] and entry["circuit_broken"] is False
+    assert entry["endpoint_error"] is None
+    assert "draft" not in entry and "evidence" not in entry and "reasoning" not in entry
+    assert "unrecognized" not in entry, "a real sixth-tool call must not read as an unknown trace"
+
+
 def test_the_payloads_own_kind_survives_because_the_envelope_field_was_renamed():
     """cve-reverser opens the entry as `{"kind": "tool", …}` and `setdefault`s the payload on top, so
-    the payload's OWN `kind` is silently swallowed. Three of this project's five tools carry one."""
+    the payload's OWN `kind` is silently swallowed. Four of this project's six tools carry one —
+    `draft_skill_extra_file`'s is a different vocabulary (`"reference"`/`"script"`), not a
+    duplicate of the others' artifact `kind`, which is why it gets its own row in the loop."""
     for payload, expected in ((_read_memory_file(), "memory"), (_draft_memory_file(), "memory"),
-                              (_draft_skill_file(), "skill")):
+                              (_draft_skill_file(), "skill"),
+                              (_draft_skill_extra_file(), "reference")):
         entry = _one(payload)
         assert entry["entry_kind"] == "tool"
         assert entry["kind"] == expected

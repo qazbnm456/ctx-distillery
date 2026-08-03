@@ -80,6 +80,10 @@ SKILLS_DIRNAME = "skills"
 SKILL_FILENAME = "SKILL.md"
 #: One past conversation per file, `<session-id>.jsonl`, sibling to `memory/`.
 TRANSCRIPT_GLOB = "*.jsonl"
+#: The project's own instructions file — `<project_dir>/CLAUDE.md`, or `<project_dir>/.claude/CLAUDE.md`
+#: (see `project_claude_md_path`). NOT the global `~/.claude/CLAUDE.md` — that is the operator's own
+#: cross-project preference, out of scope for a per-project distillation.
+CLAUDE_MD_FILENAME = "CLAUDE.md"
 
 #: `<project storage>/<session-id>/subagents/` — the SIDE-STORAGE directory a session gets when it
 #: spawned subagents. The `<session-id>/` level is named for the session FILE's stem, by
@@ -175,6 +179,43 @@ def project_skills_root(project_dir: str | Path) -> Path:
     CONFIRMED by a control experiment, with the shadowing/restart caveats stated there.
     """
     return Path(project_dir).expanduser().resolve() / CLAUDE_DIRNAME / SKILLS_DIRNAME
+
+
+def project_claude_md_path(project_dir: str | Path) -> Path | None:
+    """`<project_dir>/CLAUDE.md`, or `<project_dir>/.claude/CLAUDE.md` if the root one is absent —
+    the two locations CONFIRMED by Claude Code's own docs (`code.claude.com/docs/en/claude-directory`,
+    fetched directly): "Also works at `.claude/CLAUDE.md` if you prefer to keep the project root
+    clean." Root wins if BOTH somehow exist — THIS PROJECT'S OWN design choice, not a documented
+    Claude Code precedence rule (the docs describe alternative locations, not a coexistence rule).
+    `None` if neither exists.
+
+    Deliberately does NOT walk parent directories and does NOT read the global `~/.claude/CLAUDE.md`
+    — both confirmed to exist by the same docs, both out of scope: a parent-directory walk has no
+    official confirmation as an automatic mechanism (separate from `.claude/rules/`, which is a
+    different concept this project already treats as out of scope), and the global file is the
+    operator's own cross-project preference, not this project's per-project memory.
+
+    **Containment, mirroring `_memory_refs`'s enumeration-side check exactly**: the FULLY resolved
+    candidate's parent must equal the (fixed, already-resolved) directory it was found in. This is
+    not the same defense as `read_memory_file`'s request-side allowlist (there is no "request" here
+    at all) — it is the OTHER hazard invariant 5 already names for `_memory_refs`: `Path.is_file()`
+    and reading both follow symlinks transparently, so a git-tracked `CLAUDE.md -> /etc/passwd` (or
+    any absolute path) in a CLONED, untrusted repository would otherwise have its target's bytes
+    read as LM context. Comparing against the FIXED `parent` (never re-resolving "the expected
+    parent" through the same chain being validated) is what also catches `.claude` itself being a
+    symlink, not only `CLAUDE.md`. This does NOT break the documented `ln -s AGENTS.md CLAUDE.md`
+    workaround (Claude Code has no native AGENTS.md support as of this research) — that symlink's
+    target still resolves to a file in the SAME directory the symlink itself sits in.
+    """
+    root = Path(project_dir).expanduser().resolve()
+    for parent in (root, root / CLAUDE_DIRNAME):
+        candidate = parent / CLAUDE_MD_FILENAME
+        if not candidate.is_file():
+            continue
+        resolved = candidate.resolve()
+        if resolved.parent == parent:
+            return resolved
+    return None
 
 
 def transcript_files(project_dir: str | Path, *, home: str | Path | None = None) -> list[Path]:
@@ -569,6 +610,8 @@ def _read_jsonl(path: Path) -> list[dict]:
 class ClaudeCodeAdapter(HarnessAdapter):
     """Read one Claude Code project's `memory/` directory, skills, and transcripts."""
 
+    harness_name = "claude_code"
+
     @classmethod
     def for_project(
         cls,
@@ -605,6 +648,12 @@ class ClaudeCodeAdapter(HarnessAdapter):
         carries a synthesized header (`session_header` / `subagent_header`), and `transcript_ids`
         names every entry. With it OFF the rendering is BYTE-IDENTICAL to what it has always been —
         no headers, no sidechain events — and only `transcript_ids` is new.
+
+        Also reads the project's own `CLAUDE.md` (or `.claude/CLAUDE.md`) via
+        `project_claude_md_path` — see that function's docstring for scope and the containment
+        check. Absent (or refused for escaping `project_dir`) degrades to `""`, the same
+        "nothing here yet is a normal input" stance every other piece of storage this method
+        discovers already takes.
         """
         sessions = transcript_files(project_dir, home=home)
         if include_subagents:
@@ -615,12 +664,14 @@ class ClaudeCodeAdapter(HarnessAdapter):
                 TranscriptId(kind="session", id=p.stem, session=p.stem, parent=f"session:{p.stem}")
                 for p in sessions
             )
+        claude_md_path = project_claude_md_path(project_dir)
         return cls(
             memory_dir_for_project(project_dir, home=home),
             transcripts=transcripts,
             transcript_ids=transcript_ids,
             global_skills_dir=global_skills_root(home=home),
             project_skills_dir=project_skills_root(project_dir),
+            project_instructions=_read_text(claude_md_path) if claude_md_path else "",
         )
 
     def __init__(
@@ -631,6 +682,7 @@ class ClaudeCodeAdapter(HarnessAdapter):
         transcript_ids: Sequence[TranscriptId] = (),
         global_skills_dir: str | Path | None = None,
         project_skills_dir: str | Path | None = None,
+        project_instructions: str = "",
     ) -> None:
         # `.resolve()` once, here: every path this adapter hands out is absolute. Combined with
         # `list_targets`'s containment check below, this is what lets `read_memory_file` do an EXACT
@@ -651,6 +703,10 @@ class ClaudeCodeAdapter(HarnessAdapter):
         # `for_project` is the constructor that resolves the real roots.
         self.global_skills_dir = Path(global_skills_dir).resolve() if global_skills_dir else None
         self.project_skills_dir = Path(project_skills_dir).resolve() if project_skills_dir else None
+        # Plain text, not a path: unlike memory_dir/skills, there is no re-request surface for this
+        # later (no tool ever reads it by name), so there is nothing here for a containment check to
+        # defend — `project_claude_md_path` already did that at DISCOVERY time, in `for_project`.
+        self.project_instructions = project_instructions
 
     # -- HarnessAdapter -------------------------------------------------------------------
 
@@ -665,6 +721,7 @@ class ClaudeCodeAdapter(HarnessAdapter):
             transcripts=list(self._transcripts),
             memory_index=self.list_targets(),
             transcript_ids=self._transcript_ids,
+            project_instructions=self.project_instructions,
         )
 
     def list_targets(self) -> list[ArtifactRef]:

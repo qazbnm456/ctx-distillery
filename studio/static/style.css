@@ -125,11 +125,16 @@ button { font-family:var(--mono); cursor:pointer; }
 }
 .btn-primary { background:var(--signal); border-color:var(--signal); color:#04211e; font-weight:700; }
 .btn-primary:hover { box-shadow:0 0 0 2px var(--signal-glow); }
+.btn-danger { color:var(--bad); border-color:var(--bad); }
+.btn-danger:hover:not(:disabled) { box-shadow:0 0 0 2px color-mix(in srgb, var(--bad) 24%, transparent); }
+.btn:disabled { opacity:.45; cursor:default; }
 .arrow { margin-left:2px; }
 .hint { margin-top:8px; font-size:.7rem; color:var(--text-faint); }
 
 /* ── rail sizing: the review surface gets the height, the feed gets the remainder ──────────── */
 .load-panel { flex:0 0 auto; }
+.live-panel { flex:0 0 auto; }
+.live-actions { margin-top:8px; }
 .cand-panel { flex:1 1 60%; min-height:180px; }
 .feed-panel { flex:1 1 40%; min-height:160px; }
 

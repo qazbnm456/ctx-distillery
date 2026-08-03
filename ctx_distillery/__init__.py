@@ -1,7 +1,7 @@
 """ctx-distillery — distill an AI coding agent's transcripts + memory store, as a traced RLM harness.
 
 A downstream *consumer* of rlm-kit (a git-pinned dep; editable overlay for local co-dev): an RLM
-planner reads one or more session transcripts plus a persistent memory/skill index through five
+planner reads one or more session transcripts plus a persistent memory/skill index through six
 READ-ONLY tools, computes over them as code in a `pyodide` sandbox, and emits a judgement-only plan
 (keep / prune / promote_to_memory / promote_to_skill) whose drafted bytes are re-sourced from the
 trace on read. It PROPOSES; a human applies.
@@ -13,7 +13,9 @@ Public surface::
     from ctx_distillery import run_distillation_artifacts, DistillArtifacts  # ... + what it drew from
     from ctx_distillery import DistillPlan, DistillCandidate, DistillAction     # the SUBMIT shape
     from ctx_distillery import AssembledPlan, AssembledCandidate, assemble      # the read side
+    from ctx_distillery import AssembledExtraFile                          # ... skill supplementary files
     from ctx_distillery import HarnessAdapter, ArtifactRef, ClaudeCodeAdapter   # the harness seam
+    from ctx_distillery import CodexAdapter                        # ... the SECOND one, read-only
     from ctx_distillery import subagent_files, SubagentTranscript, TranscriptId # ... + subagents
     from ctx_distillery import render_plan, plan_as_dict, load_trace, plan_from_events
     from ctx_distillery import load_runs, export_dataset                  # reward-free RL export
@@ -54,12 +56,19 @@ from .adapters.claude_code import (
     SubagentTranscript,
     global_skills_root,
     memory_dir_for_project,
+    project_claude_md_path,
     project_skills_root,
     project_storage_dir,
     render_transcript_file,
     subagent_files,
     transcript_files,
 )
+
+# Only the class, deliberately: `codex.py` has its OWN `global_skills_root`/`codex_home` etc. —
+# same names as `claude_code.py`'s, a different harness's vocabulary that happens to coincide (see
+# `codex.py`'s own docstring on `SKILL_FILENAME`). Re-exporting both under one flat namespace here
+# would collide; reach Codex's own helpers via `ctx_distillery.adapters.codex` directly.
+from .adapters.codex import CodexAdapter
 from .config import PINNED_INTERPRETER, SUBSCRIPTION_PREFIX, DistillConfig, make_chat_fn, setup
 from .redact import REDACTIONS_ENV_VAR, load_operator_rules, redact_all, redact_transcript
 from .render import plan_as_dict, render_plan
@@ -86,6 +95,7 @@ from .rubric import (
 from .schema import (
     PROMOTION_ACTIONS,
     AssembledCandidate,
+    AssembledExtraFile,
     AssembledPlan,
     DistillAction,
     DistillCandidate,
@@ -95,6 +105,7 @@ from .schema import (
 from .tools import (
     FormatCheck,
     make_draft_memory_file_tool,
+    make_draft_skill_extra_file_tool,
     make_draft_skill_file_tool,
     make_list_memory_files_tool,
     make_read_memory_file_tool,
@@ -120,6 +131,7 @@ __all__ = [  # noqa: RUF022
     "DistillCandidate",
     "DistillPlan",
     "AssembledCandidate",
+    "AssembledExtraFile",
     "AssembledPlan",
     "PROMOTION_ACTIONS",
     "assemble",
@@ -136,9 +148,11 @@ __all__ = [  # noqa: RUF022
     "project_storage_dir",
     "global_skills_root",
     "project_skills_root",
+    "project_claude_md_path",
     "transcript_files",
     "subagent_files",
     "render_transcript_file",
+    "CodexAdapter",
     # the READ-ONLY tool set (closed — CLAUDE.md invariant 1)
     "FormatCheck",
     "make_list_memory_files_tool",
@@ -146,6 +160,7 @@ __all__ = [  # noqa: RUF022
     "make_read_transcript_chunk_tool",
     "make_draft_memory_file_tool",
     "make_draft_skill_file_tool",
+    "make_draft_skill_extra_file_tool",
     # redaction / rendering / trace reading
     "redact_transcript",
     "redact_all",

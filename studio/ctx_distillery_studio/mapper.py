@@ -12,7 +12,7 @@ this initiative's own motivating goal (seeing every step's
 context and results): `rlm_kit.task.record_main_trajectory` emits `main_step` UNCONDITIONALLY for
 every `RLMTask` run (not opt-in, and `DistillSession` does not disable it), and
 `rlm_kit.sub_lm.bind_recorder_to_sub_lm` emits `sub_call` for any recursive sub-LM escalation the
-root planner issues. For a judgement-only task with only five tools, the planner's OWN reasoning
+root planner issues. For a judgement-only task with only six tools, the planner's OWN reasoning
 turns are plausibly the richest part of the trace — dropping them from the live feed would have been
 a silent regression against the whole point of building a studio at all. Payload shapes confirmed
 against rlm_kit/trace.py's real `record_main_trajectory` (`turn`/`reasoning`/`code`/`output`) and
@@ -33,14 +33,26 @@ from rlm_kit.trace import (
     EVENT_TOOL_CALL,
 )
 
+# THE shared implementation (`CLAUDE.md` invariant 11) — moved out of this module once a third
+# consumer (`ctx_distillery_eval.score.score_run`, via `trace_io.transcript_facts`) needed the
+# identical guard. Re-imported (not re-derived) so `from ctx_distillery_studio.mapper import
+# transcript_composition` — this module's own tests, `iterations.py` — keeps resolving unchanged.
+# This is mapper.py's first real `ctx_distillery` import: `trace_io` is plain, dspy-free,
+# pure-function code (no network, no fastapi), so it costs this module nothing it doesn't already
+# pay for indirectly via `ctx_distillery_studio.app`'s own dependency on `ctx_distillery`.
+from ctx_distillery.trace_io import transcript_composition
+
 #: The three read-only, progressive-disclosure tools — no single "the" interesting field, so they
 #: fall through to a generic scalar-field passthrough (mirroring `_scalar_fields`'s own fallback
 #: role in `diff_sentry_studio.mapper`).
 _EVIDENCE_TOOLS = ("list_memory_files", "read_memory_file", "read_transcript_chunk")
-#: The two drafting tools — deliberately WITHOUT the full `draft` text (kept out of the live feed the
-#: same way diff-sentry keeps bulky fields out of `_scalar_fields`); the full text is what
-#: `GET /v1/runs/{run_id}` returns, paired with its plan entry.
-_DRAFT_TOOLS = ("draft_memory_file", "draft_skill_file")
+#: The three drafting tools — deliberately WITHOUT the full `draft` text (kept out of the live feed
+#: the same way diff-sentry keeps bulky fields out of `_scalar_fields`); the full text is what
+#: `GET /v1/runs/{run_id}` returns, paired with its plan entry. `draft_skill_extra_file` joined the
+#: other two once it existed — without it, a live run using the sixth tool would have those calls
+#: silently DROPPED from the feed (the tool_call branch's own `return None` for anything unrecognized),
+#: not merely under-detailed.
+_DRAFT_TOOLS = ("draft_memory_file", "draft_skill_file", "draft_skill_extra_file")
 
 #: Payload keys a bespoke tool event already surfaces (or that are bulky/nested) — dropped from the
 #: generic scalar-field passthrough so an evidence-read tool_call streams meaningful short fields
@@ -86,36 +98,6 @@ def _scalar_fields(p: dict) -> dict:
 
 def _ev(name: str, data: dict) -> dict[str, Any]:
     return {"event": name, "data": data}
-
-
-def transcript_composition(meta: Any) -> dict[str, int | None]:
-    """`{"sessions": a, "subagents": b}` from `run_start.meta["transcript_index"]`, or Nones.
-
-    THE one implementation (`CLAUDE.md` invariant 11): `iterations._initial` imports this rather
-    than keeping a second copy, because the guard is the interesting part and two copies of a guard
-    is exactly how one of them drifts.
-
-    A bare `transcripts=<n>` cannot say what those entries WERE, and once subagent transcripts can
-    be ingested a jump from 1 to 43 is silent semantic drift. The identity list added by
-    `ctx_distillery.adapters.base.TranscriptId` is what makes the composition answerable.
-
-    **Absent and MALFORMED both degrade to None, never to zero.** An old trace simply has no
-    `transcript_index` key; a corrupted or foreign one can carry anything at all there. Reporting
-    `sessions=0 subagents=0` for either would be a positive claim the trace never made — and
-    invariant 10 requires this member to degrade rather than 500 on a malformed trace, so the guard
-    is `isinstance(v, list)` PLUS a per-element `isinstance(e, dict)` filter, the same shape
-    `trace_io.dict_events` applies one level up.
-    """
-    if not isinstance(meta, dict):
-        return {"sessions": None, "subagents": None}
-    index = meta.get("transcript_index")
-    if not isinstance(index, list):
-        return {"sessions": None, "subagents": None}
-    kinds = [entry.get("kind") for entry in index if isinstance(entry, dict)]
-    return {
-        "sessions": sum(1 for kind in kinds if kind == "session"),
-        "subagents": sum(1 for kind in kinds if kind == "subagent"),
-    }
 
 
 def to_event(trace_event: dict) -> dict[str, Any] | None:
@@ -164,6 +146,9 @@ def to_event(trace_event: dict) -> dict[str, Any] | None:
                 {
                     "tool": tool,
                     "artifact_id": p.get("artifact_id"),
+                    # Only `draft_skill_extra_file` ever carries this — `None` for the other two,
+                    # never fabricated as an empty string (absent is a different claim than "").
+                    "relative_path": p.get("relative_path"),
                     "ok": p.get("ok"),
                     "errors": p.get("errors") or [],
                     "circuit_broken": bool(p.get("circuit_broken")),

@@ -107,7 +107,7 @@ function feedRow(eventName, data) {
 
   if (eventName === "distill.plan.step") {
     // The planner's OWN reasoning turn — plausibly the richest content in the feed for a
-    // judgement-only task with five tools, so it gets its own readable line, not a JSON dump.
+    // judgement-only task with six tools, so it gets its own readable line, not a JSON dump.
     body.appendChild(el("div", "fr-line", `turn ${data.turn}${data.has_code ? " (wrote code)" : ""}`));
     if (data.reasoning) body.appendChild(el("div", "fr-reasoning", data.reasoning));
   } else if (eventName === "distill.sub_lm.call") {
@@ -175,20 +175,20 @@ function stopReplay() {
   }
 }
 
-function startReplay(runId) {
-  stopReplay();
-  // The one place the live run id is set. `trajectory`'s `getRunId` reads THIS, at click time —
+// Shared by `startReplay` and the live-distill path below: both are about to stream a run's
+// `distill.*` events into the SAME feed/plan/rubric UI, from two different transports
+// (`EventSource` for a finished trace, a hand-parsed `fetch` body for a run still in progress) —
+// the reset the UI needs before either one starts is identical, so it lives in one place rather
+// than drifting between two copies (CLAUDE.md invariant 11's reasoning applied to this frontend).
+function resetRunUI(runId, statusText) {
+  // The one place the current run id is set. `trajectory`'s `getRunId` reads THIS, at click time —
   // this page can load a second run without a reload, and a snapshot would pin the drawer to the
   // first one.
   currentRunId = runId;
   trajectory.reset();
   trajectory.showHandle();
-  const feed = document.getElementById("feed");
-  clear(feed);
-  // "replaying…", not "streaming…" — the rows come from a FINISHED trace (there is no live-drive
-  // endpoint), and `?delay=` only PACES the replay to feel live. Saying "streaming" claimed a
-  // capability the backend does not have.
-  document.getElementById("feed-status").textContent = "replaying…";
+  clear(document.getElementById("feed"));
+  document.getElementById("feed-status").textContent = statusText;
   const planEmpty = document.getElementById("plan-empty");
   planEmpty.textContent = "Loading…";
   // `hidden = false` is REQUIRED, not redundant — found by review. `loadPlan` sets `hidden = true`
@@ -205,6 +205,7 @@ function startReplay(runId) {
   PLAN.filter = new Set();
   PLAN.runId = runId;
   PLAN.project = null;
+  PLAN.harness = null;
   renderCandidateList();
   renderStage();
   clear(document.getElementById("rubric-list"));
@@ -212,31 +213,180 @@ function startReplay(runId) {
   // The column empties here too, so it has to be re-asked here too. Without it, loading a SECOND
   // run left the three-track grid in place around an empty aside until telemetry arrived.
   syncMeta();
+}
+
+// One `distill.*` event, rendered into the feed — shared by the `EventSource` replay listener below
+// and the hand-parsed live SSE loop. Returns `true` when this was the run's terminal event, so each
+// caller knows whether to stop its own transport.
+function renderFeedEvent(name, dataRaw, runId, statusEl) {
+  let data = {};
+  try {
+    data = JSON.parse(dataRaw);
+  } catch {
+    data = {};
+  }
+  if (FEED_EVENTS.includes(name)) {
+    const feed = document.getElementById("feed");
+    feed.appendChild(feedRow(name, data));
+    feed.scrollTop = feed.scrollHeight;
+  }
+  if (name === "distill.run.completed") {
+    // `cancelled` is only ever present on a LIVE run's own terminal event — absent on a replayed
+    // one, where "done" is the only outcome a finished trace can mean.
+    statusEl.textContent = data.cancelled ? "cancelled" : "done";
+    loadPlan(runId);
+    return true;
+  }
+  return false;
+}
+
+function startReplay(runId) {
+  stopReplay();
+  // "replaying…", not "streaming…" — the rows come from a FINISHED trace (there is no live-drive
+  // endpoint for THIS transport), and `?delay=` only PACES the replay to feel live. Saying
+  // "streaming" claimed a capability this transport does not have.
+  resetRunUI(runId, "replaying…");
+  const statusEl = document.getElementById("feed-status");
 
   const source = new EventSource(`/v1/runs/${encodeURIComponent(runId)}/events`);
   activeSource = source;
 
   for (const name of FEED_EVENTS) {
     source.addEventListener(name, (evt) => {
-      let data = {};
-      try {
-        data = JSON.parse(evt.data);
-      } catch {
-        data = {};
-      }
-      feed.appendChild(feedRow(name, data));
-      feed.scrollTop = feed.scrollHeight;
-      if (name === "distill.run.completed") {
-        document.getElementById("feed-status").textContent = "done";
-        stopReplay();
-        loadPlan(runId);
-      }
+      if (renderFeedEvent(name, evt.data, runId, statusEl)) stopReplay();
     });
   }
   source.onerror = () => {
-    document.getElementById("feed-status").textContent = "connection closed";
+    statusEl.textContent = "connection closed";
     stopReplay();
   };
+}
+
+// -- live distill: POST /v1/distill, consumed by hand as SSE over a streamed fetch body ------
+//
+// `EventSource` cannot POST (no request body support), so a live run's own stream has no choice
+// but to be parsed by hand: buffer the response body as text, split on the SSE frame separator
+// ("\n\n"), and dispatch each frame through the SAME `renderFeedEvent` the replay listener above
+// uses — a live run and a replay share every event name and rendering rule, because the server's
+// `mapper.to_event` is what both paths are built on. The panel itself starts `hidden` and is only
+// shown once `GET /v1/projects` succeeds — a 404 means live mode is off server-side (CTXD_LIVE_
+// PROJECTS unset), and this frontend has nothing to offer in that case, not even a disabled control.
+
+let liveAbort = null;
+
+async function loadLiveProjects() {
+  const panel = document.getElementById("live-panel");
+  try {
+    const res = await fetch("/v1/projects");
+    if (!res.ok) {
+      panel.hidden = true;
+      return;
+    }
+    const body = await res.json();
+    const projects = body.projects || [];
+    const select = document.getElementById("live-project");
+    clear(select);
+    for (const dir of projects) {
+      const opt = document.createElement("option");
+      opt.value = dir;
+      opt.textContent = homeRelative(dir);
+      opt.title = dir;
+      select.appendChild(opt);
+    }
+    panel.hidden = projects.length === 0;
+  } catch {
+    panel.hidden = true;
+  }
+}
+
+// `cancelEnabled` is a SEPARATE flag from `running`, not derived from it — found by review. Between
+// clicking Distill and the server's own `distill.run.started` frame arriving, a run is "running"
+// but `currentRunId` still names whatever the PREVIOUS run was (or nothing, on a first use):
+// enabling Cancel for that whole window let a click target a stale run — a silent no-op at best, an
+// actual wrong-run cancel at worst. Cancel only becomes clickable once `startLiveDistill` has a real
+// id to hand it.
+function setLiveRunning(running, cancelEnabled) {
+  document.getElementById("live-start").disabled = running;
+  document.getElementById("live-cancel").disabled = !cancelEnabled;
+  document.getElementById("live-project").disabled = running;
+}
+
+// Splits an SSE byte stream into `{name, dataRaw}` frames. A bare generator, not a class, because
+// the two things that vary per event (rendering, and what "done" means) already live in
+// `renderFeedEvent` — this only knows about the wire format.
+async function* sseFrames(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (value) buf += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf("\n\n")) !== -1) {
+      const frame = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      const nameLine = /^event: (.*)$/m.exec(frame);
+      const dataLine = /^data: (.*)$/m.exec(frame);
+      if (nameLine) yield { name: nameLine[1], dataRaw: dataLine ? dataLine[1] : "{}" };
+    }
+    if (done) return;
+  }
+}
+
+async function startLiveDistill() {
+  const projectDir = document.getElementById("live-project").value;
+  if (!projectDir) return;
+  const status = document.getElementById("live-status");
+  status.textContent = "starting…";
+  setLiveRunning(true, false);
+  liveAbort = new AbortController();
+  let runId = null;
+  try {
+    const res = await fetch("/v1/distill", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project_dir: projectDir }),
+      signal: liveAbort.signal,
+    });
+    if (!res.ok || !res.body) {
+      status.textContent = `failed to start (HTTP ${res.status})`;
+      return;
+    }
+    for await (const { name, dataRaw } of sseFrames(res.body)) {
+      if (name === "distill.run.started") {
+        let started = {};
+        try {
+          started = JSON.parse(dataRaw);
+        } catch {
+          started = {};
+        }
+        runId = started.run_id;
+        resetRunUI(runId, "running…");
+        setLiveRunning(true, true); // NOW Cancel targets the right id — see setLiveRunning
+        continue;
+      }
+      // Every OTHER event is keyed to a run that has already been announced by
+      // `distill.run.started` — the server always sends that one first (`app.py::distill`'s own
+      // generator contract), so `runId` is set before this branch can ever run for real.
+      if (runId) renderFeedEvent(name, dataRaw, runId, status);
+    }
+  } catch (err) {
+    if (err.name !== "AbortError") status.textContent = "connection lost";
+  } finally {
+    setLiveRunning(false, false);
+    liveAbort = null;
+  }
+}
+
+async function cancelLiveDistill() {
+  if (!currentRunId) return;
+  document.getElementById("live-status").textContent = "cancelling…";
+  try {
+    await fetch(`/v1/runs/${encodeURIComponent(currentRunId)}/cancel`, { method: "POST" });
+  } catch {
+    // Best-effort: the stream loop above reports the actual outcome (or its own connection error)
+    // regardless of whether this request itself succeeded.
+  }
 }
 
 // -- plan review: a rail LIST of candidates, a middle STAGE showing the selected one ----------
@@ -254,7 +404,11 @@ const CATEGORY_LENS = {
 // The two actions that carry drafted bytes — mirrors `ctx_distillery.schema.PROMOTION_ACTIONS`.
 const PROMOTION_ACTIONS = ["promote_to_memory", "promote_to_skill"];
 
-// Mirrors `ctx_distillery.apply._blocking_problem` — the three conditions `apply_plan` refuses on
+// Mirrors `ctx_distillery.schema.SUPPORTED_WRITE_HARNESSES` — the only harnesses apply.py's write
+// shapes correspond to. If that tuple changes, this one must move with it.
+const SUPPORTED_WRITE_HARNESSES = ["claude_code"];
+
+// Mirrors `ctx_distillery.apply._blocking_problem` — the four conditions `apply_plan` refuses on
 // regardless of action kind. Returns the reason, or null. Keyed ONLY on state `assemble()` already
 // computed from the trace, never on the plan's own claim about what it drafted (CLAUDE.md
 // invariant 2). The third condition is why this is a function and not just `problems.length`: an
@@ -269,6 +423,20 @@ function applyBlocker(candidate) {
   }
   if (PROMOTION_ACTIONS.includes(candidate.action) && !String(candidate.draft || "").trim()) {
     return "no drafted text was assembled for this promotion (nothing to write)";
+  }
+  // `candidate.action !== "keep"` MUST live here, not in `notApplicable` — `notApplicable` checks
+  // this function FIRST and only falls through to its own "keep is a no-op" reason afterward, so a
+  // `keep` candidate under a mismatched harness must clear this check to report its own reason
+  // instead of this one. Placed BEFORE the two per-action-kind checks below (not after) so the
+  // ORDER here matches `_blocking_problem`'s real precedence exactly — `apply.py` runs its harness
+  // check ahead of `_promote_skill`'s scope gate and `_prune`'s target gate, so a candidate with
+  // both defects must report the SAME reason here as the writer will actually give.
+  if (
+    candidate.action !== "keep" &&
+    PLAN.harness != null &&
+    !SUPPORTED_WRITE_HARNESSES.includes(PLAN.harness)
+  ) {
+    return `this run's harness is "${PLAN.harness}" — apply_plan only understands ${SUPPORTED_WRITE_HARNESSES.join(", ")}`;
   }
   // The two ADDITIONAL refusals that are derivable from the trace alone — added after a review
   // found the console framed both of these teal ("backed") while `apply_plan` would refuse them.
@@ -311,7 +479,7 @@ function candidateState(candidate) {
 // questions about one row — "let me read this" and "I want this applied" — and conflating them is
 // how a reviewer applies something they only meant to open.
 const PLAN = { candidates: [], selected: 0, view: "entry", picked: new Set(), runId: null,
-               project: null, transcriptIndex: [], filter: new Set() };
+               project: null, harness: null, transcriptIndex: [], filter: new Set() };
 
 function candidateLabel(candidate) {
   const k = candidate.key_fields || {};
@@ -875,6 +1043,7 @@ async function loadPlan(runId) {
       candEmpty.hidden = true;
       PLAN.candidates = plan.candidates;
       PLAN.project = body.project || null;
+      PLAN.harness = plan.harness ?? null;
       PLAN.transcriptIndex = Array.isArray(body.transcript_index) ? body.transcript_index : [];
       renderCandidateList();
       renderStage();
@@ -1064,7 +1233,8 @@ const TELEMETRY_HELP = {
   elapsed: "Wall clock from the run's first event to its last, as recorded in the trace.",
   turns: "Planner turns: one REPL iteration each (reason, run code, read the output).",
   tools: "Read-only and drafting tool calls the planner made. Sub-LM escalations count too.",
-  drafts: "Calls to draft_memory_file / draft_skill_file: where a promotion's bytes come from.",
+  drafts: "Calls to draft_memory_file / draft_skill_file / draft_skill_extra_file: where a "
+    + "promotion's bytes (and a skill's supplementary files) come from.",
   reads: "Calls to the evidence tools. Zero is normal — `transcripts` is also a REPL variable, so "
     + "a planner can read every one of them without a tool call.",
 };
@@ -1248,6 +1418,12 @@ document.getElementById("load").addEventListener("click", () => {
 document.getElementById("load-id").addEventListener("keydown", (evt) => {
   if (evt.key === "Enter") document.getElementById("load").click();
 });
+document.getElementById("live-start").addEventListener("click", () => {
+  startLiveDistill();
+});
+document.getElementById("live-cancel").addEventListener("click", () => {
+  cancelLiveDistill();
+});
 
 initTheme();
 bindStageControls();
@@ -1259,3 +1435,6 @@ bindCandidateFilter();
 // path hidden for the whole session. Both are tiny and local, so config usually wins and the bug
 // only shows up somewhere else. Order it instead of relying on that.
 loadConfig().then(loadRunsList);
+// Independent of the above: live mode's own existence check has nothing to do with TRACES_DIR, so
+// it does not need to wait on either.
+loadLiveProjects();

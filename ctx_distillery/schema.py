@@ -65,11 +65,13 @@ from pydantic import BaseModel, Field
 from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT
 from rlm_kit.trace import EVENT_TOOL_CALL
 
-from .trace_io import dict_events, draft_cause
+from .trace_io import dict_events, draft_cause, run_start_meta
 
 __all__ = [
     "PROMOTION_ACTIONS",
+    "SUPPORTED_WRITE_HARNESSES",
     "AssembledCandidate",
+    "AssembledExtraFile",
     "AssembledPlan",
     "DistillAction",
     "DistillCandidate",
@@ -143,6 +145,25 @@ _DRAFT_TOOL_FOR_ACTION = {
 }
 PROMOTION_ACTIONS = tuple(_DRAFT_TOOL_FOR_ACTION)
 
+#: The tool that drafts a `promote_to_skill` artifact's SUPPLEMENTARY files (references/scripts),
+#: beside its main SKILL.md body. Only ever consulted for `promote_to_skill` — a memory candidate has
+#: no supplementary-file concept.
+_SKILL_EXTRA_TOOL = "draft_skill_extra_file"
+
+
+@dataclass
+class AssembledExtraFile:
+    """One `draft_skill_extra_file` call's result, re-sourced the same way the main draft is.
+
+    Kept even when its OWN draft failed (`draft_ok=False`), for the same reason
+    `AssembledCandidate.draft` is: a reviewer debugging a bad reference/script draft needs to see the
+    bad text to decide whether to retry, not just that it failed.
+    """
+
+    relative_path: str
+    draft: str | None = None
+    draft_ok: bool | None = None
+
 
 @dataclass
 class AssembledCandidate:
@@ -160,6 +181,11 @@ class AssembledCandidate:
     #: `apply._blocking_problem`, the studio's `applyBlocker` — needs the same answer either way.
     #: `_not_ok_problem` is where the three are told apart, in the `problems` line beside it.
     draft_ok: bool | None = None
+    #: `promote_to_skill` ONLY — its supplementary references/scripts files, keyed by relative_path.
+    #: A bad entry (empty draft, `ok=False`) never lands here silently: it is reported on `problems`
+    #: below instead (see `assemble`), which is what makes `apply._blocking_problem`'s existing
+    #: "any problems -> refuse the whole candidate" check block on a bad extra file for free.
+    extra_files: dict[str, AssembledExtraFile] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
 
 
@@ -169,6 +195,24 @@ class AssembledPlan:
 
     candidates: list[AssembledCandidate] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
+    #: Which harness produced this run ("claude_code", "codex", ...), read from the trace's own
+    #: run_start meta — never trusted from the plan's own claim (there is no such claim; a
+    #: DistillPlan has no harness field at all, matching invariant 2's "judgement only" shape).
+    #: `None` for a trace recorded before this field existed, or one with no run_start at all (e.g.
+    #: a hand-built plan in a test) — `apply.py` PERMITS `None` deliberately, since every trace
+    #: before this feature shipped is a Claude Code trace. A malformed (non-string) value is kept
+    #: VERBATIM rather than coerced to `None`: coercing garbage to `None` would wrongly permit it,
+    #: while `apply.py`'s `in SUPPORTED_WRITE_HARNESSES` membership check naturally refuses anything
+    #: that isn't the exact literal string it expects — the safer of the two failure modes.
+    harness: str | None = None
+
+
+#: The ONLY harnesses apply.py's write shapes (SKILL.md under .claude/skills/, memory files with
+#: Claude Code's own frontmatter, the _rescan collision authority) actually correspond to. Lives
+#: HERE, not in apply.py, so render.py can warn about a mismatch without an apply.py<->render.py
+#: import cycle (apply.py already imports render_plan for its own dry-run report). A run recorded
+#: under any OTHER harness_name gets every write action refused by apply._blocking_problem.
+SUPPORTED_WRITE_HARNESSES: tuple[str, ...] = ("claude_code",)
 
 
 def _draft_calls(events: Sequence[dict], tool: str) -> dict[str, dict]:
@@ -187,6 +231,32 @@ def _draft_calls(events: Sequence[dict], tool: str) -> dict[str, dict]:
         artifact_id = payload.get("artifact_id")
         if isinstance(artifact_id, str) and artifact_id:
             found[artifact_id] = payload
+    return found
+
+
+def _draft_extra_calls(events: Sequence[dict]) -> dict[str, dict[str, dict]]:
+    """`{artifact_id: {relative_path: payload}}` for `draft_skill_extra_file`'s tool_call events.
+
+    Last call per `(artifact_id, relative_path)` wins — the same repair-loop reasoning `_draft_calls`
+    gives, generalized to a compound key: a retry of ONE specific supplementary file replaces only
+    that file, never the others already drafted for the same skill artifact.
+    """
+    found: dict[str, dict[str, dict]] = {}
+    for event in events:
+        if event.get("type") != EVENT_TOOL_CALL:
+            continue
+        payload = event.get("payload") or {}
+        if payload.get("tool") != _SKILL_EXTRA_TOOL:
+            continue
+        artifact_id = payload.get("artifact_id")
+        relative_path = payload.get("relative_path")
+        if (
+            isinstance(artifact_id, str)
+            and artifact_id
+            and isinstance(relative_path, str)
+            and relative_path
+        ):
+            found.setdefault(artifact_id, {})[relative_path] = payload
     return found
 
 
@@ -255,7 +325,10 @@ def assemble(events: Sequence[dict], plan: DistillPlan) -> AssembledPlan:
     # here rather than inside `_draft_calls` (which runs once PER drafting tool), so the pass is
     # O(events), not O(events x tools).
     events = dict_events(events)
+    run_meta = run_start_meta(events)
+    assembled.harness = run_meta.get("harness") if isinstance(run_meta, dict) else None
     by_tool = {tool: _draft_calls(events, tool) for tool in _DRAFT_TOOL_FOR_ACTION.values()}
+    extra_by_artifact = _draft_extra_calls(events)
 
     for candidate in plan.candidates:
         out = AssembledCandidate(
@@ -312,5 +385,25 @@ def assemble(events: Sequence[dict], plan: DistillPlan) -> AssembledPlan:
             out.problems.append(f"artifact {candidate.artifact_id!r} recorded an empty draft")
         if not out.draft_ok:
             out.problems.append(_not_ok_problem(candidate.artifact_id, payload))
+        if candidate.action == "promote_to_skill":
+            # A bad entry here is never dropped silently: it lands in `out.problems` too, which is
+            # what makes `apply._blocking_problem`'s existing "any problems -> refuse" check block
+            # the WHOLE candidate for free — no separate blocking logic needed in apply.py.
+            for relative_path, extra_payload in extra_by_artifact.get(candidate.artifact_id, {}).items():
+                extra_draft = extra_payload.get("draft")
+                extra_text = extra_draft if isinstance(extra_draft, str) else None
+                extra_ok = bool(extra_payload.get("ok"))
+                out.extra_files[relative_path] = AssembledExtraFile(
+                    relative_path=relative_path, draft=extra_text, draft_ok=extra_ok
+                )
+                if not (extra_text or "").strip():
+                    out.problems.append(
+                        f"extra file {relative_path!r} for artifact {candidate.artifact_id!r} "
+                        f"recorded an empty draft"
+                    )
+                if not extra_ok:
+                    out.problems.append(
+                        _not_ok_problem(f"{candidate.artifact_id}:{relative_path}", extra_payload)
+                    )
         assembled.candidates.append(out)
     return assembled

@@ -170,6 +170,24 @@ def _pick_judge(force_stub: bool) -> tuple[Judge, str, str]:
     return make_eval_judge(config), config.model, PROMPT_VERSION
 
 
+def _transcripts_suffix(row: EvalRow) -> str:
+    """`  transcripts=<n> (sessions=<a> subagents=<b>)`, or `""` when the trace never recorded it.
+
+    `transcript_sessions`/`transcript_subagents` are only ever set TOGETHER by their one producer
+    (`ctx_distillery.trace_io.transcript_facts`), so guarding on `n_transcripts` for the bare form
+    and on `transcript_sessions` for the parenthetical is exhaustive for every row this package
+    itself constructs — never a fabricated `0` for either.
+    """
+    if row.n_transcripts is None:
+        return ""
+    if row.transcript_sessions is None:
+        return f"  transcripts={row.n_transcripts}"
+    return (
+        f"  transcripts={row.n_transcripts} "
+        f"(sessions={row.transcript_sessions} subagents={row.transcript_subagents})"
+    )
+
+
 def render_scorecard(report: EvalReport) -> str:
     """A terminal scorecard: one line per run, the per-category means (never a composite), then the
     provenance footer.
@@ -184,6 +202,11 @@ def render_scorecard(report: EvalReport) -> str:
     needs to see that the budgets were the same. They ride alongside `prompt=`, i.e. only when a
     prompt was actually rendered — the stub judge never called `build_prompt`, so claiming its caps
     would claim a provenance it does not have.
+
+    Each row also carries its own `transcripts=<n> (sessions=<a> subagents=<b>)` suffix when its
+    trace recorded that composition (`_transcripts_suffix`) — deliberately PER ROW, never folded
+    into the footer above: `EvalRow`'s docstring gives the reason (a `score` glob's rows each have
+    their own, unrelated composition, so there is no single report-level number to state).
     """
     header = "run_id".ljust(24) + "  TF    TA    TG    PA   notes"
     lines = [header]
@@ -191,12 +214,13 @@ def render_scorecard(report: EvalReport) -> str:
         if row.score is None:
             lines.append(
                 f"{row.run_id[:24].ljust(24)}  {'--':>4}  {'--':>4}  {'--':>4}  {'--':>4}  "
-                f"unscored: {row.unscored_reason}"
+                f"unscored: {row.unscored_reason}{_transcripts_suffix(row)}"
             )
             continue
         s = row.score
         lines.append(
-            f"{row.run_id[:24].ljust(24)}  {s.TF:4.1f}  {s.TA:4.1f}  {s.TG:4.1f}  {s.PA:4.1f}  {s.notes}"
+            f"{row.run_id[:24].ljust(24)}  {s.TF:4.1f}  {s.TA:4.1f}  {s.TG:4.1f}  {s.PA:4.1f}  "
+            f"{s.notes}{_transcripts_suffix(row)}"
         )
     if report.means:
         m = report.means
