@@ -2105,7 +2105,7 @@ wheels = [
 [[package]]
 name = "rlm-kit"
 version = "0.2.0"
-source = { git = "https://github.com/qazbnm456/rlm-kit.git?branch=main#489349998f56ea8c093c3a71bb3da5eef255f2a2" }
+source = { git = "https://github.com/qazbnm456/rlm-kit.git?branch=main#400495574c15340fb59876215ea6803361d8f2f7" }
 dependencies = [
     { name = "dspy" },
     { name = "pydantic" },
