@@ -237,7 +237,7 @@ def test_the_pin_reaches_the_real_sandbox_selection_call(snapshot, monkeypatch):
     _configure([{"reasoning": "r", "code": "SUBMIT(plan={})"}])
     seen: dict = {}
 
-    def spy(name, allow_insecure=False, container=None):
+    def spy(name, allow_insecure=False, container=None, turn_timeout_s=None, cancel_event=None):
         seen["name"] = name
         seen["allow_insecure"] = allow_insecure
 
