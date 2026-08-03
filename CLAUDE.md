@@ -426,8 +426,9 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    only the friendly early message), derives the filename as `slugify(frontmatter["name"]) + ".md"`
    with a degenerate slug being a hard refusal AND a slug longer than `_SLUG_MAX` (120) being one
    too — `slugify` REFUSES an over-long name rather than TRUNCATING it, which is the opposite
-   handling from the three run-id sluggers that share that same number (`cli._slug`, `studio`'s
-   `app._RUN_ID_MAX`, `eval`'s `cli._TASK_ID_MAX` all cut). A run id is machine bookkeeping, so
+   handling from the three run-id sluggers that share that same number and all CUT (`cli._slug`,
+   `studio`'s `app._slug_id`, `eval`'s `cli._slug` — the FUNCTIONS; their caps live in
+   `_RUN_ID_MAX` / `_RUN_ID_MAX` / `_TASK_ID_MAX`). A run id is machine bookkeeping, so
    shortening it loses nothing a human was relying on; a promotion slug is the identity the operator
    APPROVED, so installing under a shortened one substitutes a name they never saw. The input is
    untrusted MODEL output and one path component over ~255 bytes is an `OSError` from the first
@@ -465,8 +466,8 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    `OSError` (ENAMETOOLONG, reproduced at 300 characters) out of `apply_plan` mid-batch, breaking the
    guarantee the enclosing `try`'s own comment states: *a refusal is the right answer to an unusable
    slug — never an exception escaping `apply_plan` halfway through a run of candidates.*
-   `slugify`'s cap stops that particular input arriving, and this wall stands anyway; neither
-   replaces the other. Which root is chosen comes from the candidate's own
+   `slugify`'s callers refuse an over-long slug before that particular input arrives, and this wall
+   stands anyway; neither replaces the other. Which root is chosen comes from the candidate's own
    `key_fields["scope"]` ("global"/"project"), a documented convention exactly like `prune`'s
    `target_path` — a missing or bogus scope is REFUSED, never defaulted, and a scope whose root the
    caller did not pass is refused too (the caller decides where a skill may be installed). Derive the

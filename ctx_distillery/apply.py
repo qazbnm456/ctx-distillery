@@ -148,6 +148,33 @@ _SLUG_MAX = 120
 #: already-written `relative_path` is checked against (apply has no `kind` to consult).
 _ALLOWED_EXTRA_PREFIXES = ("references", "scripts")
 
+#: Per-SEGMENT byte cap on a supplementary file's `relative_path`. The same filesystem fact
+#: `_SLUG_MAX` guards — most filesystems cap ONE path component at 255 bytes — arriving through a
+#: second door that was opened LATER: the skill NAME is bounded (by a REFUSAL, never a truncation —
+#: see `slugify`), and when supplementary files landed the same bound was not applied to their
+#: `relative_path`. Both are untrusted MODEL output.
+#:
+#: Not an "unswept sibling" of the `_SLUG_MAX` fix, and the distinction is worth keeping because it
+#: says where to look next: `_SLUG_MAX` landed in `c4a3dfb` (2026-07-28) and supplementary files in
+#: `21b2ef1` (2026-08-01), so this surface did not exist to be swept. It is a later feature that did
+#: not inherit an earlier lesson — which is the failure a sibling sweep at REVIEW time catches and a
+#: sweep at FIX time cannot.
+#:
+#: Bytes, not characters, because that is what the filesystem counts: a 100-character segment of
+#: 3-byte CJK is 300 bytes and fails where 100 ASCII characters would not.
+#:
+#: Checked HERE, in `_skill_extra_target`, rather than being left to the `open()` below, and the
+#: difference is the whole point. `_promote_skill` validates every extra BEFORE it writes anything
+#: — including SKILL.md — precisely so a doomed candidate refuses while it is still entirely
+#: undoable. An over-long segment passed all four of the checks below and then failed at `open()`
+#: with ENAMETOOLONG (errno 63 on macOS / 36 on Linux), by which time SKILL.md was already on disk
+#: and the skill was LIVE and discoverable (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`) —
+#: while the outcome handed back to the operator said `refused`. Reproduced end to end through the
+#: real `apply_plan` at 400 characters. This is the same class as `_extra_path_conflict`, which
+#: closed the NESTING version of "individually valid, fatal at write time"; this closes the LENGTH
+#: version.
+_EXTRA_SEGMENT_MAX_BYTES = 255
+
 
 @dataclass(frozen=True)
 class ApplyOutcome:
@@ -748,8 +775,11 @@ def _skill_extra_target(skill_dir: Path, relative_path: str) -> tuple[Path | Non
     1. `relative_path` is non-blank, carries no backslash, is not absolute/home-relative, and no
        path segment is empty/`.`/`..` — checked directly (never assumed from the model's draft),
        because a caller deriving `relative_path` some other way must still hit this wall.
-    2. The FIRST segment must be one of `_ALLOWED_EXTRA_PREFIXES` — the closed set this project's
-       `draft_skill_extra_file` tool authors into.
+    2. No SEGMENT exceeds `_EXTRA_SEGMENT_MAX_BYTES`, and the FIRST segment must be one of
+       `_ALLOWED_EXTRA_PREFIXES` — the closed set this project's `draft_skill_extra_file` tool
+       authors into. The length half is checked HERE and not left to `open()`: see
+       `_EXTRA_SEGMENT_MAX_BYTES` for the reproduction, in which an over-long segment survived
+       every other check and then failed at write time with SKILL.md already on disk.
     3. EVERY filesystem call is inside a try catching `(OSError, ValueError)` — the SAME pair
        `_skill_target` already catches around its own `.resolve()` calls (a NUL byte raises
        `ValueError`; an overlong path raises `OSError`/ENAMETOOLONG). A refusal is the right answer
@@ -772,6 +802,14 @@ def _skill_extra_target(skill_dir: Path, relative_path: str) -> tuple[Path | Non
     parts = relative_path.split("/")
     if any(part in ("", ".", "..") for part in parts):
         return None, f"relative_path {relative_path!r} contains an empty/`.`/`..` path segment"
+    oversized = max((len(part.encode("utf-8")) for part in parts), default=0)
+    if oversized > _EXTRA_SEGMENT_MAX_BYTES:
+        return None, (
+            f"relative_path {relative_path!r} has a {oversized}-byte path segment, over the "
+            f"{_EXTRA_SEGMENT_MAX_BYTES}-byte limit most filesystems impose on ONE component — "
+            f"refusing here, before SKILL.md is written, rather than letting the write fail with "
+            f"ENAMETOOLONG once the skill is already live (see `_EXTRA_SEGMENT_MAX_BYTES`)"
+        )
     if parts[0] not in _ALLOWED_EXTRA_PREFIXES:
         return None, (
             f"relative_path {relative_path!r} must live under one of "

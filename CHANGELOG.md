@@ -638,7 +638,10 @@ never applies anything itself.
   bound closed the last two unbounded sluggers — `ctx_distillery.cli._slug` (reachable via
   `--run-id`, and the WRITE side: driving `_cmd_distill` really did raise) and `apply.slugify`.
   **They bound it DIFFERENTLY, and the asymmetry is deliberate rather than an oversight**: the three
-  run-id sluggers TRUNCATE at `_SLUG_MAX`, while `slugify` does not truncate at all — `_promote` and
+  run-id sluggers TRUNCATE at their own 120 (`cli._slug`'s `_RUN_ID_MAX`, `studio.app._slug_id`'s
+  `_RUN_ID_MAX`, `eval.cli._slug`'s `_TASK_ID_MAX` — none of them references `_SLUG_MAX`, which is
+  `apply.py`'s own and belongs to the one that does NOT cut), while `slugify` does not truncate at
+  all — `_promote` and
   `_promote_skill` REFUSE a slug longer than it. A run id is machine bookkeeping, so shortening it
   loses nothing a human was relying on; a promotion slug is the identity the operator approved, so
   installing under a shortened one substitutes a name they never saw, which is the same failure the

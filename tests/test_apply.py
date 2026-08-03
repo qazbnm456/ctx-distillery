@@ -1059,15 +1059,26 @@ def test_an_extra_path_with_an_embedded_NUL_is_refused_not_raised(tmp_path):
 
 
 @pytest.mark.parametrize("length", [300, 5000])
-def test_an_overlong_extra_filename_is_refused_at_the_write_not_the_containment_check(
+def test_an_overlong_extra_filename_is_refused_BEFORE_skill_md_is_written(
     memory_dir, tmp_path, length
 ):
-    """Unlike the NUL-byte case, an over-long FILENAME (as opposed to an over-long directory
-    component) does not make `.resolve()`/`.is_relative_to()` raise on this filesystem — measured:
-    `open()` is where `OSError`(ENAMETOOLONG) actually surfaces. `_skill_extra_target` is pure
-    computation with no stat call, so it cannot catch this itself; the write loop's own
-    `except OSError` (the same isolation `_skill_target`'s equivalent case already relies on) is
-    what refuses it instead of raising out of `apply_plan` mid-batch."""
+    """An over-long segment must be caught by the validate-before-write pass, like every other
+    doomed `relative_path` — not by the write loop's `except OSError`.
+
+    **This test previously asserted the OPPOSITE and pinned a real defect as correct.** It was
+    named `..._is_refused_at_the_write_not_the_containment_check`, asserted `"could not write"` in
+    the reason — a string only reachable once SKILL.md is already on disk — and justified it with
+    "`_skill_extra_target` is pure computation with no stat call, so it cannot catch this itself".
+    That reasoning is wrong: a LENGTH check is pure computation and needs no stat call either. The
+    behaviour it pinned left a LIVE, discoverable skill (`discover_skills` globs `*/SKILL.md`)
+    behind an outcome that told the operator `refused`, which is exactly what the
+    validate-before-write pass exists to prevent and what `_extra_path_conflict` already closes for
+    the nesting version of the same shape.
+
+    The missing assertion is the last line, and its absence is what made the hole look acceptable:
+    `test_a_bad_extra_relative_path_refuses_the_WHOLE_candidate_before_SKILL_md_is_written` has
+    made it for the wrong-prefix case all along.
+    """
     skills_root = tmp_path / "skills"
     outcomes = apply_plan(
         memory_dir,
@@ -1084,7 +1095,51 @@ def test_an_overlong_extra_filename_is_refused_at_the_write_not_the_containment_
         global_skills_dir=skills_root,
     )
     assert outcomes[0].status == "refused"
-    assert "could not write" in outcomes[0].reason
+    assert "over the 255-byte limit" in outcomes[0].reason
+    assert not skills_root.exists(), (
+        "SKILL.md must not exist when an extra file's path is doomed — an over-long segment is no "
+        "less doomed than a wrong prefix, and leaving the skill live while reporting `refused` is "
+        "the defect this test used to pin as correct"
+    )
+
+
+def test_the_extra_segment_cap_counts_BYTES_not_characters(memory_dir, tmp_path):
+    """A 100-character CJK segment is 300 bytes, and the filesystem counts bytes. Counting
+    characters would let it through to the same ENAMETOOLONG this cap exists to pre-empt."""
+    name = "references/" + "中" * 100 + ".md"
+    skills_root = tmp_path / "skills"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={name: AssembledExtraFile(relative_path=name, draft="x", draft_ok=True)}
+            )
+        ),
+        [0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "refused"
+    assert "over the 255-byte limit" in outcomes[0].reason
+    assert not skills_root.exists()
+
+
+def test_a_long_but_writable_extra_filename_still_applies(memory_dir, tmp_path):
+    """The cap must not refuse a segment the filesystem would have accepted — 200 ASCII bytes is
+    under it, so this is the boundary's other side."""
+    name = f"references/{'a' * 200}.md"
+    skills_root = tmp_path / "skills"
+    outcomes = apply_plan(
+        memory_dir,
+        plan(
+            skill_promotion(
+                extra_files={name: AssembledExtraFile(relative_path=name, draft="x", draft_ok=True)}
+            )
+        ),
+        [0],
+        global_skills_dir=skills_root,
+    )
+    assert outcomes[0].status == "applied", outcomes[0].reason
+    assert (skills_root / "deploy-runbook" / name).is_file()
 
 
 def test_a_symlinked_references_directory_cannot_redirect_the_write_outside_the_skill(tmp_path):
