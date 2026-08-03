@@ -156,7 +156,6 @@ class ApplyOutcome:
 def slugify(name: str) -> str:
     """Derive the filename stem from a drafted frontmatter `name` (gap #3).
 
-    Lowercase, `[\\s_]+` runs to a hyphen, then everything outside `[a-z0-9-]` dropped, then capped
     Lowercase, `[\\s_]+` runs to a hyphen, then everything outside `[a-z0-9-]` dropped. **It does
     NOT truncate**, and that is the point: nothing is invented here. An empty result, or one longer
     than `_SLUG_MAX`, means the CALLER must refuse — not fall back to a made-up name. The character

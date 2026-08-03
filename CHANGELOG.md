@@ -349,7 +349,7 @@ never applies anything itself.
   agrees with `VENDOR.md`. Recorded here so the same misreading does not get "fixed" next time.
 
 - **`apply_plan` no longer lets a raw `OSError` escape from a model-drafted skill name, and all four
-  sluggers in the workspace now cap at 120 characters.** `_skill_target`'s final
+  sluggers in the workspace now bound their output at 120 characters.** `_skill_target`'s final
   `is_symlink()`/`exists()`/`is_dir()` check sat OUTSIDE the `try/except (OSError, ValueError)` whose
   own comment states the guarantee it broke — *"a refusal is the right answer to an unusable slug —
   never an exception escaping `apply_plan` halfway through a run of candidates."* `_ignore_error`
@@ -358,11 +358,17 @@ never applies anything itself.
   it half-applied. The input is `slugify(frontmatter["name"])` — untrusted MODEL output, which is
   what made it reachable from a real plan; `promote_to_memory` and `prune` already refused correctly.
   Two independent fixes, both kept: the check is inside the `try` (so ANY caller deriving a slug
-  differently still hits a wall), and `slugify` now caps its output. The cap closed the last two
-  uncapped sluggers — `ctx_distillery.cli._slug` (reachable via `--run-id`, and the WRITE side:
-  driving `_cmd_distill` really did raise) and `apply.slugify`. `eval`'s docstring had cited
-  `ctx_distillery.cli._slug` as "same reasoning" while that function had no cap at all; the
-  cross-references are now true rather than aspirational.
+  differently still hits a wall), and an over-long slug is now bounded before it gets there. The
+  bound closed the last two unbounded sluggers — `ctx_distillery.cli._slug` (reachable via
+  `--run-id`, and the WRITE side: driving `_cmd_distill` really did raise) and `apply.slugify`.
+  **They bound it DIFFERENTLY, and the asymmetry is deliberate rather than an oversight**: the three
+  run-id sluggers TRUNCATE at `_SLUG_MAX`, while `slugify` does not truncate at all — `_promote` and
+  `_promote_skill` REFUSE a slug longer than it. A run id is machine bookkeeping, so shortening it
+  loses nothing a human was relying on; a promotion slug is the identity the operator approved, so
+  installing under a shortened one substitutes a name they never saw, which is the same failure the
+  empty-slug branch already refuses. `eval`'s docstring had cited `ctx_distillery.cli._slug` as
+  "same reasoning" while that function had no bound at all; the cross-references are now true rather
+  than aspirational.
 
 - **`endpoint_error` is tested with `is not None`, never for truthiness — in all three places.**
   rlm-kit declares it `Optional[str]` and fills it with `str(exc)`, which is the EMPTY STRING for

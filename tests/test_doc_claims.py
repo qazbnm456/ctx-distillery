@@ -12,10 +12,16 @@ those are mechanically checkable. This file is the home for that subset: **when 
 that a regex could verify, add it here.** The existing precedent is `test_redact_golden.py`, which
 already pins `len(_TIER1) == 7` / `len(_TIER2) == 120` for exactly this reason.
 
-Everything below reads source files as TEXT rather than importing them. Two reasons, both deliberate:
-the workspace members (`eval/`, `studio/`) are not importable from the root suite in a plain-pip
-install, and a textual scan is the idiom this repo already uses for cross-cutting guards
+Most of what follows reads source files as TEXT rather than importing them. Two reasons, both
+deliberate: the workspace members (`eval/`, `studio/`) are not importable from the root suite in a
+plain-pip install, and a textual scan is the idiom this repo already uses for cross-cutting guards
 (`test_no_write_capability.py`, `studio/tests/static-contract.test.js`).
+
+**Claim 5 is the one exception, and it has to be**: it pins a doc claim about BEHAVIOUR (does this
+slugger truncate, or refuse?), and the only honest way to check behaviour is to run it. It imports
+`ctx_distillery` — the ROOT package, which every other test in this suite already imports, so the
+plain-pip reason above does not apply to it. The two workspace members stay textual there, as
+everywhere else.
 """
 
 from __future__ import annotations
@@ -36,13 +42,17 @@ def _read(relative: str) -> str:
 
 
 # --------------------------------------------------------------------------------------------------
-# Claim 1: all four sluggers in the workspace share ONE cap, and CLAUDE.md states that number.
+# Claim 1: all four sluggers in the workspace share ONE bound, and CLAUDE.md states that number.
 #
-# CLAUDE.md invariant 8: the slug is "CAPPED at `_SLUG_MAX` (120, the same number every other slugger
-# in the workspace uses — `cli._slug`, `studio`'s `app._RUN_ID_MAX`, `eval`'s `cli._TASK_ID_MAX`". All
-# three source files repeat that cross-reference in their own comments. Nothing checked it: each
-# member's suite pins only its OWN cap (`eval/tests/test_cli.py`, `studio/tests/test_app.py`), so any
-# one of the four could move and leave the docs plus three comments quietly wrong.
+# CLAUDE.md invariant 8 names `_SLUG_MAX` (120) as "the same number" the other three sluggers use —
+# `cli._slug`, `studio`'s `app._RUN_ID_MAX`, `eval`'s `cli._TASK_ID_MAX`. All three source files
+# repeat that cross-reference in their own comments. Nothing checked it: each member's suite pins
+# only its OWN constant (`eval/tests/test_cli.py`, `studio/tests/test_app.py`), so any one of the
+# four could move and leave the docs plus three comments quietly wrong.
+#
+# This claim is about the NUMBER only. What the four DO with it differs, and claim 5 below is what
+# pins that half — the split exists because the number agreeing is exactly what made three
+# simultaneously-wrong prose claims about the behaviour look fine.
 #
 # The number matters because the input is untrusted MODEL output and a slug becomes ONE path
 # component — over ~255 bytes it is an OSError from the first stat that touches it.
@@ -151,4 +161,120 @@ def test_the_writer_hosts_its_own_entry_point() -> None:
     assert scripts == EXPECTED_SCRIPTS, (
         "CLAUDE.md invariant 8 requires exactly two console scripts, with the human-gated writer "
         f"hosting its own in `apply.py`. Found: {scripts}"
+    )
+
+
+# --------------------------------------------------------------------------------------------------
+# Claim 5: the four sluggers share a NUMBER but not a BEHAVIOUR — three TRUNCATE, `apply.slugify`
+# REFUSES — and the docs must not describe the refusing one as truncating.
+#
+# This claim exists because claim 1 was not enough, and the way it failed is the interesting part.
+# Claim 1 pins that all four constants equal 120, and it stayed green while THREE separate prose
+# claims said the opposite of what the code does:
+#
+#   * `apply.py`'s own `slugify` docstring carried a superseded draft line ("then capped") directly
+#     above the line that replaced it ("**It does NOT truncate**") — a paragraph contradicting itself
+#     in two consecutive lines;
+#   * CLAUDE.md invariant 8 said "the slug CAPPED at `_SLUG_MAX`" and listed the three run-id
+#     sluggers as using "the same number", which reads as the same handling;
+#   * CHANGELOG.md's `[Unreleased]` entry said "`slugify` now caps its output".
+#
+# The code was right in all three cases. That is what makes this a docs test rather than a bug fix:
+# an agent implementing from the invariant would have written the truncation `slugify`'s own
+# docstring spends a paragraph arguing against, and the reason it argues that way is a SAFETY
+# property, not a style preference — a run id is machine bookkeeping, so shortening it loses nothing
+# a human relied on, while a promotion slug is the identity the operator APPROVED, so installing
+# under a shortened one substitutes a name they never saw.
+#
+# Pinned by BEHAVIOUR for the two root-package sluggers (see the module docstring on why this claim
+# imports), and textually for all three that truncate — textual is the only check available for the
+# two workspace members, and it also names WHICH constant each cut is against.
+# --------------------------------------------------------------------------------------------------
+
+#: Longer than every cap in `SLUGGERS`, and made of characters `slugify`'s own class keeps, so the
+#: only thing that can shorten the result is a truncation.
+_OVER_LONG = "a" * 300
+
+#: The three that DO truncate, and the slice each one must keep. `apply.py` is deliberately absent.
+TRUNCATING_SLUGGERS: dict[str, str] = {
+    "ctx_distillery/cli.py": "[:_RUN_ID_MAX]",
+    "studio/ctx_distillery_studio/app.py": "[:_RUN_ID_MAX]",
+    "eval/ctx_distillery_eval/cli.py": "[:_TASK_ID_MAX]",
+}
+
+
+def test_apply_slugify_refuses_rather_than_truncating() -> None:
+    """`slugify` returns the over-long slug INTACT — the caller is what refuses it.
+
+    Would have failed on a `slugify` "fixed" to match the three run-id sluggers, which is precisely
+    what the three wrong prose claims described.
+    """
+    from ctx_distillery.apply import _SLUG_MAX, slugify
+
+    produced = slugify(_OVER_LONG)
+    assert len(produced) == len(_OVER_LONG), (
+        "`apply.slugify` truncated its output. It must NOT: a promotion slug is the identity the "
+        "operator approved, so `_promote`/`_promote_skill` REFUSE one over `_SLUG_MAX` instead of "
+        "silently installing under a name nobody saw. If this changed on purpose, CLAUDE.md "
+        "invariant 8 and `slugify`'s own docstring have to change with it."
+    )
+    assert len(produced) > _SLUG_MAX, "the probe is no longer over the bound — raise `_OVER_LONG`"
+
+
+def test_the_refusal_lives_in_both_promotion_paths() -> None:
+    """Both write paths must carry the length refusal `slugify` deliberately does not do itself."""
+    source = _read("ctx_distillery/apply.py")
+    assert source.count("len(slug) > _SLUG_MAX") == 2, (
+        "`apply.py` must refuse an over-long slug in BOTH `_promote` and `_promote_skill`. Since "
+        "`slugify` does not truncate, a missing branch here is an unbounded path component reaching "
+        "the filesystem — an OSError (ENAMETOOLONG) out of a half-applied `--approve` run."
+    )
+    assert "[:_SLUG_MAX]" not in source, (
+        "`apply.py` now truncates with `[:_SLUG_MAX]` — see "
+        "`test_apply_slugify_refuses_rather_than_truncating` for why that is the wrong bound here."
+    )
+
+
+def test_the_run_id_slugger_in_this_package_does_truncate() -> None:
+    """The other half of the asymmetry, so "they differ" is pinned from both sides rather than
+    asserted about one of them."""
+    from ctx_distillery.cli import _RUN_ID_MAX, _slug
+
+    assert len(_slug(_OVER_LONG)) == _RUN_ID_MAX, (
+        "`cli._slug` stopped truncating. A run id names a trace file nobody approved, so it caps "
+        "where `apply.slugify` refuses — if that changed, CLAUDE.md invariant 8's statement of the "
+        "asymmetry has to change with it."
+    )
+
+
+@pytest.mark.parametrize(("relative", "slice_form"), sorted(TRUNCATING_SLUGGERS.items()))
+def test_every_truncating_slugger_keeps_its_slice(relative: str, slice_form: str) -> None:
+    """All THREE, textually — the only check available for `eval/` and `studio/`, which are not
+    importable from the root suite. `ctx_distillery/cli.py` is in here too even though the test
+    above already pins it by behaviour: this one names the exact slice form, so it says WHICH
+    constant the cut is against, and the duplication costs a line."""
+    assert slice_form in _read(relative), (
+        f"{relative}'s slugger no longer truncates with `{slice_form}`. All three run-id sluggers "
+        f"cut; only `apply.slugify` refuses. Both halves are stated in CLAUDE.md invariant 8."
+    )
+
+
+def test_claude_md_states_the_refusal_and_never_calls_it_a_cap() -> None:
+    """The doc wording itself — the thing that actually drifted, three times, while everything else
+    in this module stayed green."""
+    sentence = re.search(r"`_SLUG_MAX` \(\d+\)(.{0,600})", _read("CLAUDE.md"), re.DOTALL)
+    assert sentence is not None, "CLAUDE.md invariant 8 no longer states `_SLUG_MAX` (<n>)"
+    text = sentence.group(1)
+    assert re.search(r"REFUSE", text, re.IGNORECASE), (
+        "CLAUDE.md invariant 8 no longer says `apply.slugify` REFUSES an over-long name. It must: "
+        "the previous wording ('the slug CAPPED at `_SLUG_MAX`', beside the three sluggers that "
+        "really do cap) described the opposite behaviour, and nothing here caught it."
+    )
+    # A NEGATED mention of truncation, in any of the natural phrasings. Bare "TRUNCAT" would not do:
+    # a rewrite to "the slug is TRUNCATED at `_SLUG_MAX`" — the exact drift this catches — contains
+    # it. The old wording ("the slug CAPPED at ...") contains neither this nor the refusal above.
+    assert re.search(r"(not|never|rather than|instead of)\s+TRUNCAT", text, re.IGNORECASE), (
+        "CLAUDE.md invariant 8 must say explicitly that `slugify` does NOT truncate. Naming the "
+        "refusal alone is not enough — the wording that drifted read as a cap precisely because it "
+        "sat next to three sluggers that cap."
     )
