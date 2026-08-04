@@ -1,11 +1,24 @@
 name: Release
 
 # Publish to PyPI via Trusted Publishing (OIDC) — NO API token. This file is INERT until a GitHub
-# Release is published, and requires one-time setup before the first release:
-#   1. On PyPI, add a Trusted Publisher for project `ctx-distillery`:
-#        owner = qazbnm456, repo = ctx-distillery, workflow = release.yml, environment = pypi
-#   2. In this repo's settings, create an environment named `pypi`.
-# Then publishing a GitHub Release (from a `vX.Y.Z` tag) builds + uploads automatically.
+# Release is published. Both one-time setup steps are DONE:
+#   1. PyPI Trusted Publisher for project `ctx-distillery`
+#        (owner = qazbnm456, repo = ctx-distillery, workflow = release.yml, environment = pypi).
+#   2. A `pypi` environment in this repo's settings, restricted to `v*` TAGS.
+# Publishing a GitHub Release (from a `vX.Y.Z` tag) now builds + uploads automatically.
+#
+# **The environment gate here is WEAKER than the sibling's, and not by choice.** `rlm-harness`'s
+# `pypi` environment carries a `required_reviewers` rule, so every publish pauses for a human — the
+# same posture this project takes everywhere else about irreversible actions. GitHub refuses that
+# rule on a PRIVATE repository without a paid plan (422, "Please ensure the billing plan supports the
+# required reviewers protection rule"); `rlm-harness` can have it because it is public. What this
+# environment has instead is a deployment policy admitting only `v*` tags, which is a free feature.
+# **When this repository goes public, add the reviewer rule to match the sibling.**
+#
+# One honest caveat about that tag policy: it has NOT been exercised end to end, because doing so
+# means cutting a real release. If the ref a `release: published` run reports does not match `v*`,
+# the publish job is BLOCKED, not broken — a visible, re-runnable failure (and repo admins can
+# bypass), which is the right direction to fail for something that cannot be undone.
 #
 # Adding this file does NOT cut a version. `CHANGELOG.md` still has `## [Unreleased]` as its only
 # heading, and `CLAUDE.md ## Versioning` is explicit that cutting one is the owner's statement that
