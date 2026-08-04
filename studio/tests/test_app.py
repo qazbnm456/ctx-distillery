@@ -1,5 +1,5 @@
 """The FastAPI surface — no real model, no Deno, no dspy: traces are built via a REAL
-`rlm_kit.trace.TraceRecorder` (this project's established fixture style — see `tests/test_apply.py`/
+`rlm_harness.trace.TraceRecorder` (this project's established fixture style — see `tests/test_apply.py`/
 `tests/test_session.py`), never hand-rolled JSON, so these tests exercise the actual trace/v1 shape
 `TraceRecorder` writes rather than a guessed one."""
 
@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("fastapi")
 from ctx_distillery_studio import app as appmod
 from fastapi.testclient import TestClient
-from rlm_kit.trace import TraceRecorder, record_tool_call
+from rlm_harness.trace import TraceRecorder, record_tool_call
 
 from ctx_distillery.rubric import default_rubric, rubric_to_meta
 from ctx_distillery.task import DistillCandidate, DistillPlan
@@ -141,7 +141,7 @@ def test_get_run_502_on_a_genuinely_corrupted_trace_file(tmp_path, monkeypatch):
 
 
 def test_get_run_never_500s_on_a_syntactically_valid_but_non_dict_jsonl_line(tmp_path, monkeypatch):
-    """FIXED per adversarial review: `rlm_kit.trace.load_events` does NO shape validation — a line
+    """FIXED per adversarial review: `rlm_harness.trace.load_events` does NO shape validation — a line
     that IS valid JSON but not an object (`42`, `"x"`, `[1,2,3]`, `null`) parses fine (no
     `ValueError`, so the 502 guard above never fires) and used to reach `plan_from_events` as-is,
     which called `.get("type")` on it unconditionally and raised a raw `AttributeError` — a genuine
@@ -244,7 +244,7 @@ def test_replay_streams_every_mapped_event_type_exactly_once_in_order(tmp_path, 
     monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
     plan = DistillPlan(candidates=[DistillCandidate(action="promote_to_memory", artifact_id="a1")])
     with TraceRecorder(str(tmp_path / "r0.jsonl"), run_id="r0", meta={"transcripts": 1}) as rec:
-        # A real main-LM trajectory, recorded the same way rlm_kit.task does at finalize time.
+        # A real main-LM trajectory, recorded the same way rlm_harness.task does at finalize time.
         prediction = SimpleNamespace(
             trajectory=[{"reasoning": "read the transcript first", "code": "x = 1", "output": "ok"}],
             final_reasoning="submitting the plan",

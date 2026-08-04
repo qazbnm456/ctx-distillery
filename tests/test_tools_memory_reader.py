@@ -11,8 +11,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from rlm_kit.testing import assert_repl_safe
-from rlm_kit.trace import EVENT_TOOL_CALL, TraceRecorder, load_events
+from rlm_harness.testing import assert_repl_safe
+from rlm_harness.trace import EVENT_TOOL_CALL, TraceRecorder, load_events
 
 from ctx_distillery.tools.memory_reader import (
     MAX_READ_CHARS,

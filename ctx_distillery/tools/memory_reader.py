@@ -1,6 +1,6 @@
 """`list_memory_files` / `read_memory_file` — progressive disclosure over the memory store.
 
-Mirrors `rlm_kit.skills`'s `list_skills` -> `read_skill` shape: the planner first sees a cheap
+Mirrors `rlm_harness.skills`'s `list_skills` -> `read_skill` shape: the planner first sees a cheap
 name+description+kind index, then pulls one file's full body on demand. Both tools are READ-ONLY.
 
 Two design points worth stating outright, because both were decided rather than defaulted:
@@ -37,7 +37,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from rlm_kit.trace import record_tool_call
+from rlm_harness.trace import record_tool_call
 
 from ..adapters.base import ArtifactRef
 
@@ -64,7 +64,7 @@ def make_list_memory_files_tool(
             for ref in snapshot
         ]
         # Record the COUNT, not the full listing — same "record size, not body" convention as
-        # rlm-kit's `fetch_url`.
+        # rlm-harness's `fetch_url`.
         record_tool_call(
             "list_memory_files",
             args={},

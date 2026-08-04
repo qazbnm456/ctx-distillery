@@ -10,7 +10,7 @@ SUBPROCESS so no module some earlier test already imported can mask a violation:
 2. importing this package must pull `ctx_distillery` one way AND STAY LIGHT — no `dspy`, no
    `openai`. Scoring with the stub judge needs neither, and until parity pass 1 it got both:
    `score.py` reached `assemble` through `ctx_distillery.session`, which imports `ctx_distillery.task`,
-   which does `from rlm_kit import RLMTask`. That is the whole point of `ctx_distillery.schema`
+   which does `from rlm_harness import RLMTask`. That is the whole point of `ctx_distillery.schema`
    existing, and a docstring cannot enforce it — this can.
 
 The textual scan below is KEPT, exactly as diff-sentry keeps its own third test: it is belt and

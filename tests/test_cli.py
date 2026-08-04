@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from rlm_kit.trace import TraceRecorder, record_tool_call
+from rlm_harness.trace import TraceRecorder, record_tool_call
 
 from ctx_distillery import cli, config, task
 from ctx_distillery.adapters.claude_code import project_storage_dir
@@ -169,12 +169,12 @@ def test_from_env_reads_the_endpoint_and_budget_vars(monkeypatch):
 def test_the_planner_generation_cap_and_adapter_are_reachable_from_the_env(monkeypatch):
     """Both were UNPASSED to `RLMConfig` and unreachable from `CD_*` — a real, reported defect.
 
-    `max_tokens` is not a tuning knob here, it is a failure mode. rlm-kit defaults it to 8192, and
+    `max_tokens` is not a tuning knob here, it is a failure mode. rlm-harness defaults it to 8192, and
     dspy reads `content` while DISCARDING `reasoning_content` — so a reasoning planner's
     chain-of-thought is billed against a cap it never appears in. It then dies one of two ways
     (reasoning exhausts the cap -> empty `content`; or the answer is cut mid-JSON), and BOTH are
     terminal because `setup` pins `max_retries=1` on purpose. A sibling project hit exactly this on
-    its first live turn. The default is the recommended planner value, not rlm-kit's.
+    its first live turn. The default is the recommended planner value, not rlm-harness's.
     """
     monkeypatch.setenv("CD_ROOT_LM", "planner")
     assert config.DistillConfig.from_env().planner_max_tokens == 16384
@@ -190,15 +190,15 @@ def test_a_bogus_adapter_is_refused_in_from_env_like_every_other_CD_mistake(monk
     """`CD_ADAPTER` refuses HERE, with the same clean `SystemExit` the rest of the surface gives.
 
     Two rounds. This test first pinned only that `setup` PASSED `adapter` to `RLMConfig` at all —
-    while it went unpassed, any value of `CD_ADAPTER` was silently inert, so reaching rlm-kit's own
+    while it went unpassed, any value of `CD_ADAPTER` was silently inert, so reaching rlm-harness's own
     `KNOWN_ADAPTERS` validation was the property worth having. A review then pointed out that
     `CD_ADAPTER` was the ONE variable on this surface whose typo produced a raw traceback from deep
     inside `RLMConfig.__post_init__`, where `CD_ROOT_LM`, `CD_INTERPRETER` and every non-integer
     budget give a clean, actionable `SystemExit`. Consistency on an env surface is not cosmetic —
     it is the difference between "I typed it wrong" and "the tool is broken".
 
-    rlm-kit still validates independently; this is a second gate, not a replacement, and the mirrored
-    vocabulary is pinned by `test_the_known_adapters_match_rlm_kits` below.
+    rlm-harness still validates independently; this is a second gate, not a replacement, and the mirrored
+    vocabulary is pinned by `test_the_known_adapters_match_rlm_harnesss` below.
     """
     monkeypatch.setenv("CD_ROOT_LM", "planner")
     monkeypatch.setenv("CD_ADAPTER", "nonsense")
@@ -206,15 +206,15 @@ def test_a_bogus_adapter_is_refused_in_from_env_like_every_other_CD_mistake(monk
         config.DistillConfig.from_env()
     assert "nonsense" in str(excinfo.value) and "json" in str(excinfo.value)
 
-    # Case matters, and saying so beats a mysterious failure: rlm-kit's set is lower-case.
+    # Case matters, and saying so beats a mysterious failure: rlm-harness's set is lower-case.
     monkeypatch.setenv("CD_ADAPTER", "JSON")
     with pytest.raises(SystemExit):
         config.DistillConfig.from_env()
 
 
-def test_the_known_adapters_match_rlm_kits(monkeypatch):
-    """Our mirrored vocabulary must equal rlm-kit's, or we would refuse a value the kit accepts."""
-    from rlm_kit.config import KNOWN_ADAPTERS
+def test_the_known_adapters_match_rlm_harnesss(monkeypatch):
+    """Our mirrored vocabulary must equal rlm-harness's, or we would refuse a value the kit accepts."""
+    from rlm_harness.config import KNOWN_ADAPTERS
 
     assert set(config._KNOWN_ADAPTERS) == set(KNOWN_ADAPTERS)
 
@@ -338,7 +338,7 @@ def seeded_project(tmp_path, claude_home, monkeypatch):
     )
     monkeypatch.setenv("CD_ROOT_LM", "planner")
     # `setup` would build real dspy LMs from placeholder credentials; the seam under test is the
-    # wiring `_cmd_distill` does, not rlm-kit's own configure.
+    # wiring `_cmd_distill` does, not rlm-harness's own configure.
     monkeypatch.setattr(cli, "setup", lambda cfg: cfg)
     return project
 

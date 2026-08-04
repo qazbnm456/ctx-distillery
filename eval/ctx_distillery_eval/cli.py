@@ -266,7 +266,7 @@ def _score_command(args: argparse.Namespace) -> int:
     transcript_texts = _read_transcripts(args.transcript_path)
     references = _references_for(args.taskset)
     judge, judge_model, prompt_version = _pick_judge(args.stub)
-    # `load_trace`, never `load_events(..., run_id=...)`: rlm-kit's own run_id filter is an
+    # `load_trace`, never `load_events(..., run_id=...)`: rlm-harness's own run_id filter is an
     # unguarded `event.get("run_id")`, so a non-dict trace line crashed INSIDE `load_events` — i.e.
     # upstream of every `ctx_distillery` function, where no amount of hardening there could reach
     # it. This call site is the only place that gap could be closed (see `trace_io.py`).

@@ -11,8 +11,8 @@ Two things this file exists to pin down beyond the happy path:
 
 from __future__ import annotations
 
-from rlm_kit.testing import assert_repl_safe
-from rlm_kit.trace import EVENT_TOOL_CALL, TraceRecorder, load_events
+from rlm_harness.testing import assert_repl_safe
+from rlm_harness.trace import EVENT_TOOL_CALL, TraceRecorder, load_events
 
 from ctx_distillery.adapters.base import ArtifactRef
 from ctx_distillery.tools.drafting import (

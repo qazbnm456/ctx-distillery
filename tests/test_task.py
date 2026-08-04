@@ -1,7 +1,7 @@
 """`DistillSession` wiring, driven through a REAL offline forward pass.
 
 The last known risk this project named for itself was untested tool wiring, and the stated answer was
-to exercise it OFFLINE via `rlm_kit.testing.ScriptedInterpreter`. So this drives `dspy.RLM.aforward`
+to exercise it OFFLINE via `rlm_harness.testing.ScriptedInterpreter`. So this drives `dspy.RLM.aforward`
 with a scripted `DummyLM` + `ScriptedInterpreter`, so the planner -> list_memory_files ->
 read_memory_file -> read_transcript_chunk -> draft_memory_file -> SUBMIT chain executes for real
 (each tool's own tracing runs) with no live model, no Deno, and no network.
@@ -20,10 +20,10 @@ import pytest
 
 dspy = pytest.importorskip("dspy")
 
-import rlm_kit.runtime as rt
-from rlm_kit import RLMConfig
-from rlm_kit.testing import ScriptedInterpreter, assert_repl_safe, scripted_lm
-from rlm_kit.trace import (
+import rlm_harness.runtime as rt
+from rlm_harness import RLMConfig
+from rlm_harness.testing import ScriptedInterpreter, assert_repl_safe, scripted_lm
+from rlm_harness.trace import (
     EVENT_RESULT,
     EVENT_TOOL_CALL,
     TraceRecorder,
@@ -241,7 +241,7 @@ def test_the_pin_reaches_the_real_sandbox_selection_call(snapshot, monkeypatch):
         seen["name"] = name
         seen["allow_insecure"] = allow_insecure
 
-    monkeypatch.setattr("rlm_kit.task.build_interpreter", spy)
+    monkeypatch.setattr("rlm_harness.task.build_interpreter", spy)
     _build(snapshot, config=RLMConfig(main_model="x", sub_model="x", interpreter="local"))._build_rlm()
     assert seen == {"name": "pyodide", "allow_insecure": False}
 

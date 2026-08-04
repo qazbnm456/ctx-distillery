@@ -1,5 +1,5 @@
 """Process-signal -> graceful run cancellation: bridge SIGINT/SIGTERM to the studio's per-run
-`cancel_event`s so a terminal Ctrl+C (or `kill`) stops in-flight live runs COOPERATIVELY — rlm-kit's
+`cancel_event`s so a terminal Ctrl+C (or `kill`) stops in-flight live runs COOPERATIVELY — rlm-harness's
 own sandbox watchdog does the actual killing now (see `live.py`), so this genuinely stops a run
 blocked inside a sandbox turn, not just one blocked on an LM call.
 

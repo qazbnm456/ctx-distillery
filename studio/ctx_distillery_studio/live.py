@@ -4,8 +4,8 @@ two names its own exception-handling tail needs by name — see `run_live`'s doc
 two are safe to import eagerly here) — see the module-level comment in `app.py` for why (this
 module must be importable, at zero cost, even when CTXD_LIVE_PROJECTS is unset).
 
-No `asyncio.Task` wrapping, no polling loop: cancellation is real now, built into rlm-kit's own
-sandbox interpreter (`RLMTask(cancel_event=...)`, `rlm_kit.SandboxCancelled`) — this module's only
+No `asyncio.Task` wrapping, no polling loop: cancellation is real now, built into rlm-harness's own
+sandbox interpreter (`RLMTask(cancel_event=...)`, `rlm_harness.SandboxCancelled`) — this module's only
 job is to build a plain `threading.Event`, hand it straight to `run_distillation_artifacts`, and
 await normally.
 """
@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from rlm_kit import SandboxCancelled
+from rlm_harness import SandboxCancelled
 
 from .iterations import _project_label
 
@@ -44,7 +44,7 @@ def _build_studio_callback(sink: Callable[[dict], None]) -> Any:
     """A dspy callback for the planner's per-turn REASONING, live — built lazily (dspy imported
     inside this function, never at module top). A ROOT-planner turn is the only
     `on_adapter_parse_end` payload carrying BOTH `reasoning` and `code` — the same filter
-    `rlm_kit.task._MainStepTimer` uses internally. dspy parses each turn TWICE; drop the
+    `rlm_harness.task._MainStepTimer` uses internally. dspy parses each turn TWICE; drop the
     consecutive duplicate. Emits `distill.plan.step` — REUSING the exact event name `mapper.to_event`
     already emits for a REPLAYED `main_step` (`{"turn", "reasoning", "has_code"}`), so the frontend
     needs NO new event handler for this to render live — except that `turn` is absent here (dspy's
@@ -86,7 +86,7 @@ def run_live(
     they run under.
 
     `cancel_event` is threaded STRAIGHT INTO `run_distillation_artifacts(..., cancel_event=...)` —
-    no wrapping needed. rlm-kit's own sandbox watchdog (inside the interpreter `_build_rlm()`
+    no wrapping needed. rlm-harness's own sandbox watchdog (inside the interpreter `_build_rlm()`
     constructs) is what actually kills a wedged sandbox turn; this function's only job is to build
     the Event and hand it over. If the caller never sets `cancel_event`, the run behaves exactly
     like a plain `distill`.
@@ -95,7 +95,7 @@ def run_live(
     below) because the `except`/fallback-tail code needs them by name regardless of which line
     raised — moving them inside the try would trade an (already extremely unlikely) `ImportError`
     escaping this function for a `NameError` doing the same, no better. This is a cache hit, never a
-    fresh load that could fail: by the time `run_live` is reachable at all, `rlm_kit` and this
+    fresh load that could fail: by the time `run_live` is reachable at all, `rlm_harness` and this
     module's own siblings are ALREADY in `sys.modules` (the studio app imported them to even define
     the route that calls this function). Only the imports needed EXCLUSIVELY by the happy path stay
     inside the try, below.

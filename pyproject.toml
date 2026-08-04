@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Boik Su" }]
 keywords = [
     "rlm",
-    "rlm-kit",
+    "rlm-harness",
     "memory",
     "distillation",
     "claude-code",
@@ -26,9 +26,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "rlm-kit",
+    "rlm-harness",
     "pydantic>=2.9",
-    # Memory/skill frontmatter is real YAML with a NESTED `metadata.type` key; rlm_kit.skills's own
+    # Memory/skill frontmatter is real YAML with a NESTED `metadata.type` key; rlm_harness.skills's own
     # reader only handles flat `key: value` lines, so `ctx_distillery/frontmatter.py` parses it here.
     "pyyaml>=6.0",
 ]
@@ -39,7 +39,7 @@ dependencies = [
 # and the whole `ctx-distillery-apply` path are fully offline, so a library-only install stays lean.
 cli = ["openai>=1.0"]
 # Run the PLANNER + sub LM on a Claude Pro/Max subscription (CD_ROOT_LM / CD_SUB_LM =
-# `claude-agent-sdk/<id>`) via rlm-kit's `rlm_kit.ClaudeAgentLM`. Installs the Claude Agent SDK the
+# `claude-agent-sdk/<id>`) via rlm-harness's `rlm_harness.ClaudeAgentLM`. Installs the Claude Agent SDK the
 # adapter needs; also needs the Claude Code CLI installed + logged in — a runtime prerequisite pip
 # can't express (see .env.example). The DRAFTER may NEVER ride it: `config.make_chat_fn` builds an
 # OpenAI client directly, so `DistillConfig.from_env` REFUSES a `claude-agent-sdk/…` CD_DRAFT_LM,
@@ -89,12 +89,12 @@ target-version = "py311"
 [tool.uv]
 default-groups = ["dev", "subscription-sdk"]
 
-# rlm-kit is public but not on PyPI yet, so it comes in via a commit-pinned git source
+# rlm-harness is public but not on PyPI yet, so it comes in via a commit-pinned git source
 # rather than a normal PyPI dependency; uv.lock pins the exact commit. Never `pip install`
-# it directly. For local co-development against an in-progress rlm-kit checkout, overlay
-# an editable install on top: `uv pip install -e ../rlm-kit` (see CLAUDE.md).
+# it directly. For local co-development against an in-progress rlm-harness checkout, overlay
+# an editable install on top: `uv pip install -e ../rlm-harness` (see CLAUDE.md).
 [tool.uv.sources]
-rlm-kit = { git = "https://github.com/qazbnm456/rlm-kit.git", branch = "main" }
+rlm-harness = { git = "https://github.com/qazbnm456/rlm-harness.git", branch = "main" }
 
 [tool.uv.workspace]
 members = ["eval", "studio"]

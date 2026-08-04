@@ -24,21 +24,21 @@ must fail like a missing one, not degrade quietly:
 * **A `claude-agent-sdk/` DRAFTER** — see `SUBSCRIPTION_PREFIX` and `from_env` below.
 
 **The subscription path.** A role whose model reads `claude-agent-sdk/<id>` runs on the operator's
-own Claude Pro/Max subscription through rlm-kit's `ClaudeAgentLM` rather than an OpenAI-compatible
+own Claude Pro/Max subscription through rlm-harness's `ClaudeAgentLM` rather than an OpenAI-compatible
 proxy. That is squarely this project's audience — a harness that distills *Claude Code* sessions is
 used by people who hold a Claude subscription, not necessarily a proxy key. It applies to the two
-rlm-kit-built seats ONLY (planner, sub LM); `_maybe_subscription_lm` routes them, and the drafter is
+rlm-harness-built seats ONLY (planner, sub LM); `_maybe_subscription_lm` routes them, and the drafter is
 structurally excluded, because `make_chat_fn` below builds an `openai.OpenAI` client directly and
 would ship the sentinel to that endpoint as a bogus model id.
 
 **Divergence from the siblings, in our favour.** `cve-reverser`/`diff-sentry`/`toolscout` all put
 `_maybe_subscription_lm` in their dspy-BEARING task module, because their `config.py` must stay
-import-clean. Ours already imports `rlm_kit` *inside* `setup()`'s body, so the router lives here,
-with `from rlm_kit import ClaudeAgentLM` inside the sentinel branch — a branch only reachable from
+import-clean. Ours already imports `rlm_harness` *inside* `setup()`'s body, so the router lives here,
+with `from rlm_harness import ClaudeAgentLM` inside the sentinel branch — a branch only reachable from
 `setup()`, which already needs dspy. The MODULE level stays dspy-free either way, and that is not a
 stylistic claim: `tests/test_public_api.py` and `tests/test_subscription.py` both assert it.
 
-No `dspy` import, and no `rlm_kit` import at module scope — `from_env()` is plain stdlib so it can
+No `dspy` import, and no `rlm_harness` import at module scope — `from_env()` is plain stdlib so it can
 be exercised without paying for the model stack, matching the sibling projects' `config.py`
 convention. `setup()` and `make_chat_fn()` import their dependencies lazily, at the point they are
 actually about to talk to a model.
@@ -57,7 +57,7 @@ from typing import Any
 PINNED_INTERPRETER = "pyodide"
 
 #: The sentinel model-string prefix that routes a ROLE onto the operator's Claude Pro/Max
-#: SUBSCRIPTION via rlm-kit's `ClaudeAgentLM` (see `_maybe_subscription_lm`). A naming convention,
+#: SUBSCRIPTION via rlm-harness's `ClaudeAgentLM` (see `_maybe_subscription_lm`). A naming convention,
 #: so it lives in this dspy-free module beside the env surface that carries it.
 SUBSCRIPTION_PREFIX = "claude-agent-sdk/"
 
@@ -84,7 +84,7 @@ def _env_int(name: str, default: int) -> int:
     return value
 
 
-#: rlm-kit's own `KNOWN_ADAPTERS`, mirrored so a typo is refused HERE with the same clean `SystemExit`
+#: rlm-harness's own `KNOWN_ADAPTERS`, mirrored so a typo is refused HERE with the same clean `SystemExit`
 #: every other `CD_*` mistake gets. Passing it through unvalidated meant `CD_ADAPTER=Json` died deep
 #: inside `RLMConfig.__post_init__` as a raw traceback — the one variable on this surface that
 #: behaved differently from all the others. Found by review.
@@ -109,13 +109,13 @@ class DistillConfig:
 
     #: The RLM PLANNER (root LM) driving the REPL loop. Required for a live run.
     main_model: str = ""
-    #: The sub LM rlm-kit hands to `llm_query`. Defaults to the planner — one model is a fine
+    #: The sub LM rlm-harness hands to `llm_query`. Defaults to the planner — one model is a fine
     #: default for a task whose escalations are rare, and `CD_SUB_LM` splits them when they aren't.
     sub_model: str = ""
     api_key: str | None = None
     base_url: str | None = None
 
-    #: The model behind `draft_memory_file` / `draft_skill_file` (rlm-kit's `make_model_tool`
+    #: The model behind `draft_memory_file` / `draft_skill_file` (rlm-harness's `make_model_tool`
     #: `chat_fn`). Its own endpoint/key may differ from the planner's, exactly as toolscout's
     #: `TS_RUBRIC_LM` may; unset falls back to the sub model, then to the planner.
     draft_model: str = ""
@@ -139,19 +139,19 @@ class DistillConfig:
     #: `CD_PLANNER_MAX_TOKENS`.
     planner_max_tokens: int = 16384
 
-    #: The per-REPL-OUTPUT truncation cap rlm-kit hands `dspy.RLM`, and the LAST field of the same
+    #: The per-REPL-OUTPUT truncation cap rlm-harness hands `dspy.RLM`, and the LAST field of the same
     #: shape as `planner_max_tokens` — a full audit of `RLMConfig` found exactly these two. dspy
     #: head+tail-truncates every REPL output before it enters the planner's prompt, and THIS
     #: project's transcripts arrive as a REPL variable, so a bare `print(transcripts[0])` silently
-    #: lost the middle of any transcript over rlm-kit's 10,000 default with no way to raise it.
+    #: lost the middle of any transcript over rlm-harness's 10,000 default with no way to raise it.
     #: Measured over 25 real Claude Code transcripts: median 2,739 chars, max 32,920, 2 already past
     #: the default. Milder than the `max_tokens` trap — dspy leaves a visible "(N characters
     #: omitted)" marker and `read_transcript_chunk` is the deliberate paging escape hatch — but it is
     #: the same class, so it gets the same exit: `CD_MAX_OUTPUT_CHARS`.
     max_output_chars: int = 40000
 
-    #: The structured-output adapter rlm-kit hands dspy (`json` / `chat` / `default`). `json` is
-    #: rlm-kit's own default and the right one here: the decoder ENFORCES the schema, so a model
+    #: The structured-output adapter rlm-harness hands dspy (`json` / `chat` / `default`). `json` is
+    #: rlm-harness's own default and the right one here: the decoder ENFORCES the schema, so a model
     #: that formats imperfectly still produces a valid plan. `chat` sends no `response_format` at
     #: all and needs the model to follow text field-markers by discipline alone — a dropped field
     #: has no recovery. Switch only for an endpoint with no structured-output support.
@@ -179,7 +179,7 @@ class DistillConfig:
         explicit_draft = (os.getenv("CD_DRAFT_LM") or "").strip()
         draft = explicit_draft or sub
         # The DRAFTER is a SEPARATE OpenAI-compatible client (`make_chat_fn` -> `openai.OpenAI` ->
-        # rlm-kit's `make_model_tool`), NOT the subscription Agent SDK adapter — so its model may
+        # rlm-harness's `make_model_tool`), NOT the subscription Agent SDK adapter — so its model may
         # never be a `claude-agent-sdk/…` sentinel. The gate is UNCONDITIONAL (diff-sentry's form,
         # not toolscout's conditional one) because BOTH drafting tools are ALWAYS wired in
         # `DistillSession.__init__`: there is no configuration in which the drafter goes unused, so
@@ -225,7 +225,7 @@ class DistillConfig:
 def _maybe_subscription_lm(model: str):
     """A `ClaudeAgentLM` when a role's model uses the `claude-agent-sdk/` sentinel, else `None`.
 
-    `from rlm_kit import ClaudeAgentLM` is NOT dspy-free — rlm-kit's package `__getattr__` pulls the
+    `from rlm_harness import ClaudeAgentLM` is NOT dspy-free — rlm-harness's package `__getattr__` pulls the
     framework in on that attribute access — so the import sits inside the SENTINEL BRANCH only. It
     is reached from `setup()`, which already needs dspy; a proxy-only run never executes it, and
     this module's TOP stays stdlib-only (asserted, not assumed: `tests/test_public_api.py`).
@@ -238,7 +238,7 @@ def _maybe_subscription_lm(model: str):
     """
     if not model.startswith(SUBSCRIPTION_PREFIX):
         return None
-    from rlm_kit import ClaudeAgentLM
+    from rlm_harness import ClaudeAgentLM
 
     try:
         return ClaudeAgentLM(model[len(SUBSCRIPTION_PREFIX) :])
@@ -253,27 +253,27 @@ def _maybe_subscription_lm(model: str):
 
 
 def setup(config: DistillConfig) -> DistillConfig:
-    """Configure rlm-kit (planner + sub LM) for this process, and return `config` unchanged.
+    """Configure rlm-harness (planner + sub LM) for this process, and return `config` unchanged.
 
     The sibling projects' `setup(config)` shape. `DistillSession` reads the process-wide config
-    through `rlm_kit.runtime.get_config()` when no `config=` is passed, so without this call a live
+    through `rlm_harness.runtime.get_config()` when no `config=` is passed, so without this call a live
     run would silently inherit whatever `RLMConfig.from_env()`'s own `RLM_*` defaults produced
     rather than the `CD_*` values the operator set. `task._forced_config` still re-pins the
     interpreter afterwards — this does not replace that, it feeds it.
 
     A role whose model is `claude-agent-sdk/<id>` runs on the operator's Claude Pro/Max SUBSCRIPTION
-    (rlm-kit's `ClaudeAgentLM`, injected through `configure`'s public `main_lm=` / `sub_lm=` seam);
+    (rlm-harness's `ClaudeAgentLM`, injected through `configure`'s public `main_lm=` / `sub_lm=` seam);
     every other role is built from the `CD_*` proxy config exactly as before. MIXED auth is the
     supported shape, not an accident: the DRAFTER always stays on its own OpenAI-compatible endpoint
     and is never routed through the subscription (`from_env` refuses a sentinel there outright).
     """
-    import rlm_kit
-    from rlm_kit.config import RLMConfig
+    import rlm_harness
+    from rlm_harness.config import RLMConfig
 
     # None -> configure builds a dspy.LM from the config below (the pre-existing proxy behaviour).
     main_lm = _maybe_subscription_lm(config.main_model)
     sub_lm = _maybe_subscription_lm(config.sub_model)
-    rlm_kit.configure(
+    rlm_harness.configure(
         RLMConfig(
             # Inert for a seat whose LM is injected below (configure builds from the config ONLY for
             # un-supplied seats), but still what LABELS the trace; on the proxy path it is the real
@@ -285,7 +285,7 @@ def setup(config: DistillConfig) -> DistillConfig:
             interpreter=config.interpreter,
             max_iterations=config.max_iterations,
             max_llm_calls=config.max_llm_calls,
-            # Both were previously UNPASSED, so rlm-kit's defaults applied with no way to reach
+            # Both were previously UNPASSED, so rlm-harness's defaults applied with no way to reach
             # them from this project's env surface. `max_tokens` in particular is not a tuning
             # knob but a failure mode — see `DistillConfig.planner_max_tokens`.
             max_tokens=config.planner_max_tokens,
@@ -310,7 +310,7 @@ def make_chat_fn(config: DistillConfig) -> Callable[[str], Any]:
     actually survive — no cancel seam, no `live`-extra valve, and a project directory as the input.
     Don't re-derive it here. The closure shape (`Callable[[str], Any]`, `openai` imported inside it so
     an offline `show`/`apply` never pays for it) is `toolscout.cli._rubric_chat_fn`'s, verbatim in
-    spirit — rlm-kit's `make_model_tool` normalises whatever it returns.
+    spirit — rlm-harness's `make_model_tool` normalises whatever it returns.
     """
 
     def _chat(spec: str) -> str:

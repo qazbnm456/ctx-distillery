@@ -7,7 +7,7 @@ shape guard; `draft_cause` is the cause classifier that `schema._not_ok_problem`
 `rl_export.run_metrics` both read — see `draft_cause`'s own docstring for why having had TWO of
 those was the bug, not the redundancy.
 
-`rlm_kit.trace.load_events` does NO shape validation: a line that is syntactically valid JSON but
+`rlm_harness.trace.load_events` does NO shape validation: a line that is syntactically valid JSON but
 NOT an object (`42`, `null`, `"x"`, `[1, 2, 3]`) parses fine — no `ValueError` — and lands in the
 returned list as-is. Every consumer in this workspace calls `.get(...)` on each entry
 unconditionally (`rubric.plan_from_events`, `rubric.rubric_from_meta`, `rubric.trace_facts`,
@@ -30,8 +30,8 @@ and that is LOAD-BEARING, not a style preference: `load_events`'s own filter is
 `event.get("run_id") == run_id`, an unguarded `.get` on exactly the lines this module exists to
 drop. Delegating it would put the crash UPSTREAM of our filter and defeat the whole point —
 verified: `load_events(path)` on such a file returns fine, while `load_events(path, run_id="r0")`
-raises `AttributeError` inside rlm-kit. Hardening `load_events` upstream is a reasonable follow-up
-in the rlm-kit repo, but rlm-kit is a commit-pinned dependency of a DIFFERENT project shared with
+raises `AttributeError` inside rlm-harness. Hardening `load_events` upstream is a reasonable follow-up
+in the rlm-harness repo, but rlm-harness is a commit-pinned dependency of a DIFFERENT project shared with
 sibling consumers; this module stays correct either way.
 """
 
@@ -39,19 +39,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
-from rlm_kit.trace import load_events
-from rlm_kit.trace import payload_cause as _kit_payload_cause
+from rlm_harness.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
+from rlm_harness.trace import load_events
+from rlm_harness.trace import payload_cause as _kit_payload_cause
 
-#: rlm-kit's own CLOSED cause vocabulary, re-exported so a reader of a RECORDED payload and a reader
+#: rlm-harness's own CLOSED cause vocabulary, re-exported so a reader of a RECORDED payload and a reader
 #: of a LIVE `ModelToolResult` name the four outcomes with the same four strings. Imported rather
 #: than restated: a parallel vocabulary is exactly the drift this module exists to prevent, and
-#: `rlm_kit.tools` is dspy-free (verified), so `schema.py`'s no-dspy property is untouched by it.
+#: `rlm_harness.tools` is dspy-free (verified), so `schema.py`'s no-dspy property is untouched by it.
 DRAFT_CAUSES = (CAUSE_OK, CAUSE_INVALID, CAUSE_ENDPOINT, CAUSE_CIRCUIT_BROKEN)
 
 
 def draft_cause(payload: dict) -> str:
-    """Which of rlm-kit's four outcomes a RECORDED drafting `tool_call` payload describes.
+    """Which of rlm-harness's four outcomes a RECORDED drafting `tool_call` payload describes.
 
     Returns one of `DRAFT_CAUSES` — `"ok"` / `"invalid"` / `"endpoint"` / `"circuit_broken"` — never
     `None`, so a caller counts by cause rather than by "is it None".
@@ -66,7 +66,7 @@ def draft_cause(payload: dict) -> str:
     classification has one implementation and `tests/test_draft_cause.py` pins that the two surfaces
     cannot disagree.
 
-    **Prefer the RECORDED cause; derive only as a fallback.** Since rlm-kit `4fcd50b2`,
+    **Prefer the RECORDED cause; derive only as a fallback.** Since rlm-harness `4fcd50b2`,
     `ModelToolResult` exposes `cause`/`validator_ran` directly and `tools/drafting.py` records both
     onto every drafting `tool_call`, so a fresh trace SAYS what happened instead of leaving it to be
     reconstructed. Every trace recorded before that has no `cause` key at all, and `rl_export` /
@@ -75,7 +75,7 @@ def draft_cause(payload: dict) -> str:
     verdict) so an old trace classifies identically to a new one. A recorded value outside the closed
     vocabulary is ignored rather than trusted; deriving is always available.
 
-    **The derivation is rlm-kit's `trace.payload_cause`, called — not reimplemented.** This function
+    **The derivation is rlm-harness's `trace.payload_cause`, called — not reimplemented.** This function
     is now exactly "prefer a recorded `cause`, else ask the kit", which is one definition of the
     classification in the workspace instead of two.
 
@@ -164,7 +164,7 @@ def dict_events(events: Iterable[object]) -> list[dict]:
 def load_trace(path: str, run_id: str | None = None) -> list[dict]:
     """Read a trace JSONL file into dict-shaped events only, optionally filtered to one `run_id`.
 
-    A drop-in replacement for `rlm_kit.trace.load_events(path, run_id=...)` everywhere in this
+    A drop-in replacement for `rlm_harness.trace.load_events(path, run_id=...)` everywhere in this
     workspace. Only the SHAPE of a successfully-parsed line is normalized here: an unreadable file
     or a genuinely torn, non-JSON line still propagates `OSError` / `ValueError` unchanged, because
     those are external failures a caller decides how to surface (the studio turns them into a 502,

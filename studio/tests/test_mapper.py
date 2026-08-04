@@ -1,7 +1,7 @@
 """The trace-event -> SSE mapping (the public event surface), verified per event type. Pure — no
 server, mirroring `diff_sentry_studio.mapper`'s own test-file separation. Hand-rolled event dicts
 here are fine (unlike `test_app.py`) because `to_event` is a pure function over `{type, payload}`
-shapes already pinned by `rlm_kit`'s own trace/v1 contract — no `TraceRecorder` round trip is needed
+shapes already pinned by `rlm_harness`'s own trace/v1 contract — no `TraceRecorder` round trip is needed
 to exercise its branches."""
 
 import pytest
@@ -98,7 +98,7 @@ def test_main_step_has_code_false_when_no_code_was_emitted():
 
 
 def test_sub_call_is_a_sub_lm_call_preferring_processed_over_raw():
-    # rlm-kit's sub-LM records input/processed/raw — NOT question/answer.
+    # rlm-harness's sub-LM records input/processed/raw — NOT question/answer.
     ev = to_event(
         {"type": "sub_call", "payload": {"input": "escalate this", "processed": "cleaned", "raw": "dirty"}}
     )

@@ -5,7 +5,7 @@ members read a finished run's trace and rebuild the plan from it; neither ever c
 `RLMTask`, opens a sandbox, or talks to a model. Yet before this module existed, importing either
 member's entry module (`eval/`'s CLI, `studio/`'s app) pulled dspy into `sys.modules`, because the
 only route to `assemble` / `AssembledPlan` was `ctx_distillery.session`, which imports
-`ctx_distillery.task`, which does `from rlm_kit import RLMTask`. Measured before the split:
+`ctx_distillery.task`, which does `from rlm_harness import RLMTask`. Measured before the split:
 
 (The two member packages are named by DIRECTORY here, never by import name, and that is deliberate
 rather than coy: `eval/tests/test_boundary.py`'s one-way fence is a TEXTUAL scan over every `.py` in
@@ -30,8 +30,8 @@ LM framework it never calls.
 * `PROMOTION_ACTIONS` (and the `_DRAFT_TOOL_FOR_ACTION` map it is derived from) — the action ->
   drafting-tool correspondence that `assemble` and `apply.py` both read. A constant, not a behaviour.
 * `AssembledCandidate` / `AssembledPlan` / `assemble` — VERIFIED dspy-free, not assumed. `assemble`'s
-  entire dependency set is `EVENT_TOOL_CALL` (a string constant from `rlm_kit.trace`),
-  `trace_io.dict_events`, and the dataclasses below; `rlm_kit.trace` itself imports no dspy. It is a
+  entire dependency set is `EVENT_TOOL_CALL` (a string constant from `rlm_harness.trace`),
+  `trace_io.dict_events`, and the dataclasses below; `rlm_harness.trace` itself imports no dspy. It is a
   pure function over `(events, plan)` — it does no I/O, holds no state, and would give the same
   answer replayed a year later from the same JSONL. That is exactly what makes it safe to move away
   from the async driver that happens to call it once.
@@ -62,8 +62,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT
-from rlm_kit.trace import EVENT_TOOL_CALL
+from rlm_harness.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT
+from rlm_harness.trace import EVENT_TOOL_CALL
 
 from .trace_io import dict_events, draft_cause, run_start_meta
 
@@ -263,7 +263,7 @@ def _draft_extra_calls(events: Sequence[dict]) -> dict[str, dict[str, dict]]:
 def _not_ok_problem(artifact_id: str | None, payload: dict) -> str:
     """The problem line for a drafting call that came back `ok=False` — naming the REAL cause.
 
-    `rlm_kit.tools.model.make_model_tool` sets `ok=False` for THREE distinct reasons:
+    `rlm_harness.tools.model.make_model_tool` sets `ok=False` for THREE distinct reasons:
 
     * the breaker short-circuited and the model was NEVER CALLED (`raw=""`).
     * the model call failed after its transient retries. The validator never ran either;

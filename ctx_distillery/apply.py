@@ -27,7 +27,7 @@ one is load-bearing rather than cosmetic:
 3. **Filename derivation is specified**: `slugify(frontmatter["name"]) + ".md"`, and a name that
    slugifies to nothing is a hard refusal rather than some invented fallback filename.
 4. **The archive lives OUTSIDE `memory_dir`** (`<memory_dir's parent>/_ctx_distillery_archive/`), so
-   neither `list_targets()`'s own `*.md` glob nor `rlm_kit.skills.discover_skills`'s
+   neither `list_targets()`'s own `*.md` glob nor `rlm_harness.skills.discover_skills`'s
    `*/SKILL.md`-one-level-down discovery can ever re-surface an archived file as if it were live.
 5. **Write-side containment mirrors the read side.** `list_targets()` only enumerates a resolved
    path whose parent is still `memory_dir` (an adversarial review reproduced a symlink escaping the
@@ -168,7 +168,7 @@ _ALLOWED_EXTRA_PREFIXES = ("references", "scripts")
 #: — including SKILL.md — precisely so a doomed candidate refuses while it is still entirely
 #: undoable. An over-long segment passed all four of the checks below and then failed at `open()`
 #: with ENAMETOOLONG (errno 63 on macOS / 36 on Linux), by which time SKILL.md was already on disk
-#: and the skill was LIVE and discoverable (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`) —
+#: and the skill was LIVE and discoverable (`rlm_harness.skills.discover_skills` globs `*/SKILL.md`) —
 #: while the outcome handed back to the operator said `refused`. Reproduced end to end through the
 #: real `apply_plan` at 400 characters. This is the same class as `_extra_path_conflict`, which
 #: closed the NESTING version of "individually valid, fatal at write time"; this closes the LENGTH
@@ -569,7 +569,7 @@ def _promote_skill(
     # SKILL.md. Pure computation, no filesystem mutation: catches a bad `relative_path` (wrong
     # prefix, traversal, a symlinked directory) while the candidate is still entirely undoable,
     # rather than after SKILL.md has already made the skill LIVE and discoverable
-    # (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`). `_blocking_problem` already refused any
+    # (`rlm_harness.skills.discover_skills` globs `*/SKILL.md`). `_blocking_problem` already refused any
     # candidate whose extras failed to DRAFT (see `schema.assemble`); this is the analogous check for
     # extras that drafted fine but whose `relative_path` cannot be safely written.
     extra_targets: dict[str, Path] = {}

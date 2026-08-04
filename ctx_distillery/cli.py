@@ -247,7 +247,7 @@ def _cmd_distill(args) -> int:
 def _cmd_show(args) -> int:
     """Re-read a finished run's plan from its trace. Offline: no model, no network, no sandbox.
 
-    Reads through `trace_io.load_trace`, never `rlm_kit.trace.load_events` directly (`CLAUDE.md`
+    Reads through `trace_io.load_trace`, never `rlm_harness.trace.load_events` directly (`CLAUDE.md`
     invariant 11) — a JSON-valid non-dict line must be dropped before anything calls `.get()` on it,
     and delegating the `run_id` filter downstream would put the crash upstream of that guard.
     """
@@ -288,7 +288,7 @@ def _cmd_export(args) -> int:
         # `export_dataset` is INSIDE the try deliberately — found by review, with a real traceback.
         # `trace_io.dict_events` guarantees dict-NESS, not key presence: it was written for the
         # `42`/`null`/`[1,2,3]` class of bad line. A dict-shaped line missing `type` (or `payload`,
-        # or carrying a non-dict `payload`) sails through it and reaches rlm-kit's own direct
+        # or carrying a non-dict `payload`) sails through it and reaches rlm-harness's own direct
         # `e["type"]` indexing in `export_actions`, raising `KeyError` from a frame two libraries
         # deep. `TraceRecorder` always writes both keys, so reaching this needs a hand-edited or
         # foreign JSONL — but "a bad trace must not produce a traceback" is what this command

@@ -5,12 +5,30 @@ All notable changes to `ctx-distillery` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-`ctx-distillery` is an RLM-driven distillation planner, built on [`rlm-kit`](https://github.com/qazbnm456/rlm-kit),
+`ctx-distillery` is an RLM-driven distillation planner, built on [`rlm-harness`](https://github.com/qazbnm456/rlm-harness),
 that reads AI coding-agent session transcripts plus a persistent memory store and proposes a plan —
 what to prune, what to merge across sessions, and what to promote into a memory file or a Skill. It
 never applies anything itself.
 
 ## [Unreleased]
+
+- **`rlm-kit` was renamed upstream to `rlm-harness` (package, import name and GitHub repository), and
+  this project followed it: 334 replacements across 59 files, plus `uv.lock`.** The upstream version
+  went 0.2.0 -> 1.0.0 at the same time, but this is a PURE rename here — every name this project
+  imports (`RLMTask`, `RLMConfig`, `SandboxCancelled`, `ClaudeAgentLM`, and the `config`/`dataset`/
+  `rubric`/`runtime`/`testing`/`tools`/`trace` submodule surfaces) was verified present on
+  `rlm_harness` 1.0.0 BEFORE any file was touched, and the diff is symmetric at 334 insertions /
+  334 deletions.
+
+  **The way this surfaced is the part worth keeping.** `make check` stayed green throughout, because
+  `uv.lock` pinned the old commit — while `uv tool install ... @ git+https://…/ctx-distillery`, the
+  command this repository had just published in `README.md` and in the shipped skill, was already
+  dead for everyone: `[tool.uv.sources]` tracks `branch = "main"`, so it resolved a package whose
+  metadata now said `rlm-harness` and failed with `Package metadata name 'rlm-harness' does not match
+  given name 'rlm-kit'`. A green suite and a broken published install command is a state nothing here
+  can currently detect — the lockfile that makes local development reproducible is exactly what hides
+  upstream drift from CI. Recorded as a known gap: tracking a BRANCH is what makes a published
+  install command a moving target, and no job installs from the unlocked tree.
 
 - **This project now ships itself as a Claude Code Skill: `skills/ctx-distillery-plan/`, installable
   without cloning** — `npx skills add qazbnm456/ctx-distillery` (which is what indexes it on
@@ -32,9 +50,9 @@ never applies anything itself.
   than at startup; and `litellm` (transitive, via `dspy`) ships no macOS wheel at 1.95+, so it
   builds from an sdist that now needs Rust and dies in `maturin`. A `uv sync` checkout is unaffected
   (`uv.lock` pins a buildable version; `uv tool install` does not read a lockfile). No PyPI release:
-  `rlm-kit` is not on PyPI and this project's git pin for it lives in `[tool.uv.sources]`, which
+  `rlm-harness` is not on PyPI and this project's git pin for it lives in `[tool.uv.sources]`, which
   does not survive into published wheel metadata (verified by building the wheel —
-  `Requires-Dist: rlm-kit`, bare), so `pip install ctx-distillery` could not resolve.
+  `Requires-Dist: rlm-harness`, bare), so `pip install ctx-distillery` could not resolve.
 
   `tests/test_skill_contract.py` pins what is mechanical (a case count is deliberately not quoted —
   nothing enforces one, and the first draft of this entry was already stale by a case): frontmatter
@@ -76,11 +94,11 @@ never applies anything itself.
   named as sufficient to revisit it — all four are now met, and `studio/README.md`'s "Scope: replay
   + opt-in live" section and `studio/CLAUDE.md`'s invariant 10 hold the full argument:
 
-  1. A real cancel seam now exists UPSTREAM, in `rlm-kit`: `rlm_kit.SandboxCancelled` +
+  1. A real cancel seam now exists UPSTREAM, in `rlm-harness`: `rlm_harness.SandboxCancelled` +
      `RLMTask(cancel_event=...)` reach into the sandbox interpreter's own watchdog thread and can
      kill a wedged `deno`/`pyodide` subprocess mid-call — the thing `asyncio.Task.cancel()`
      fundamentally cannot do (the sandbox's blocking read has no `await` inside it). This project's
-     `rlm-kit` pin moved to the commit that adds it; ZERO ctx-distillery signature changes were
+     `rlm-harness` pin moved to the commit that adds it; ZERO ctx-distillery signature changes were
      needed to wire it through, since `run_distillation_artifacts`'s existing `**kw` already
      forwards `cancel_event=` into `DistillSession.__init__` -> `RLMTask.__init__`.
   2. The route genuinely does not exist unless `CTXD_LIVE_PROJECTS` is set — `GET /v1/projects` and
@@ -284,7 +302,7 @@ never applies anything itself.
   reasoning as why that one is already separate from the flat memory-file check: a possibly-nested
   relative path needs its own wall. Every entry is validated BEFORE anything is written, including
   `SKILL.md` itself — a candidate doomed by one bad `relative_path` must never leave a half-written,
-  DISCOVERABLE skill behind (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`).
+  DISCOVERABLE skill behind (`rlm_harness.skills.discover_skills` globs `*/SKILL.md`).
 
   **Found by TWO rounds of adversarial review before this shipped, and the second round is the one
   worth reading closely.** Round one: `_skill_extra_target` uses `Path.is_relative_to()` rather than
@@ -436,7 +454,7 @@ never applies anything itself.
   console's actual product — had no behavioural coverage at all.
 
 - **Reported and fixed a `payload_cause` defect UPSTREAM, then collapsed this project's copy into
-  it.** rlm-kit's `trace.payload_cause` documents itself as the read-side mirror of
+  it.** rlm-harness's `trace.payload_cause` documents itself as the read-side mirror of
   `ModelToolResult.cause`, and the two disagreed on the case that matters most: the write side has
   always read `endpoint_error is not None`, the read side shipped as `endpoint_error or error`. They
   differ on the EMPTY STRING, which is the common case rather than a corner one — the field is
@@ -444,7 +462,7 @@ never applies anything itself.
   `TimeoutError`, `OSError` and `RemoteDisconnected`. Under truthiness every one of those read as a
   validator rejection: a dropped connection labelled a content decline. `dataset.export_actions`
   carried the same trap one field over (`a or b` skips a present-but-empty `endpoint_error`), so a
-  record could reach a trainer saying `cause: endpoint` beside `error: null`. Fixed in rlm-kit
+  record could reach a trainer saying `cause: endpoint` beside `error: null`. Fixed in rlm-harness
   `6d010447` with a test asserting the two agree over every shape — not merely that each behaves.
   `trace_io.draft_cause` had taken the kit's KEY SET while pinning the divergence rather than
   adopting it; a differential over all 81 cause-less payload shapes now shows ZERO disagreement, so
@@ -458,7 +476,7 @@ never applies anything itself.
   into the SFT bundle at `sft_turns[*].input.initial.rubric[*].description`, so the wording is read
   by a model being trained. It now names the unit and the blind spot in the same breath, pinned by a
   test. (It never reached the eval judge — `judge.py` is rubric-free by design.)
-- **rlm-kit pin `4fcd50b2` → `fe00f401`.** Brings the classifier fix above, `export_actions`'
+- **rlm-harness pin `4fcd50b2` → `fe00f401`.** Brings the classifier fix above, `export_actions`'
   `outcome.cause` / `outcome.error` (ADDITIVE — `rl_export` reads neither, and its own per-cause
   metrics keep coming from `draft_cause`), and the ROOT-CAUSE fix that followed: `make_model_tool`
   now records the exception TYPE when `str(exc)` is empty, so `endpoint_error` can no longer be
@@ -632,7 +650,7 @@ never applies anything itself.
   be made to fail is not necessarily strong; it may just be unreachable.
 
 - **A drafting call's cause is now RECORDED by the source and READ by every consumer, and the two
-  places that used to derive it are one shared helper.** rlm-kit `4fcd50b2` added
+  places that used to derive it are one shared helper.** rlm-harness `4fcd50b2` added
   `ModelToolResult.cause` (`"ok"` / `"invalid"` / `"endpoint"` / `"circuit_broken"`) and
   `.validator_ran`, plus the `CAUSE_*` constants; the pin moved to it. Three changes, in order of how
   much they matter:
@@ -645,7 +663,7 @@ never applies anything itself.
      not dataclass fields — they never reach a trace unless someone puts them there.
   2. **`rl_export._draft_cause` and `schema._not_ok_problem` no longer each derive the cause** —
      both call the new `trace_io.draft_cause`, which PREFERS the recorded `cause` and falls back to
-     rlm-kit's own chain (`circuit_broken` → `endpoint_error is not None` → `ok`) for the traces
+     rlm-harness's own chain (`circuit_broken` → `endpoint_error is not None` → `ok`) for the traces
      recorded before the key existed. This is the part that was a real finding rather than an
      adoption: the two derivations AGREED on every payload shape in the suite, but nothing pinned
      that they must, and one implementation per job is `CLAUDE.md` invariant 11. The argument came
@@ -659,7 +677,7 @@ never applies anything itself.
      payload shapes, `_not_ok_problem`'s wording and `run_metrics`'s bucket name the same cause).
      Verified by sabotaging each surface in turn: re-forking `schema`'s derivation with the old
      truthiness bug reddens 2 cases, re-forking `rl_export`'s reddens 4.
-  3. `run_metrics`'s counters now count rlm-kit's constants directly, and `draft_not_ok` is the
+  3. `run_metrics`'s counters now count rlm-harness's constants directly, and `draft_not_ok` is the
      complement of the `CAUSE_OK` count rather than "everything the classifier declined to label" —
      the four causes partition the calls, so the slices sum to the aggregate as arithmetic rather
      than as a property this module has to defend. The public metric key names are unchanged.
@@ -708,7 +726,7 @@ never applies anything itself.
   than aspirational.
 
 - **`endpoint_error` is tested with `is not None`, never for truthiness — in all three places.**
-  rlm-kit declares it `Optional[str]` and fills it with `str(exc)`, which is the EMPTY STRING for
+  rlm-harness declares it `Optional[str]` and fills it with `str(exc)`, which is the EMPTY STRING for
   `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`, `OSError` and
   `RemoteDisconnected`. Under truthiness every one of those fell through to the validator branch:
   reported to a human as ``artifact 'a1' failed its format check: no detail recorded``
@@ -1124,7 +1142,7 @@ never applies anything itself.
     offline fixture also now scrubs `CD_*` alongside `CDEVAL_*`, so a developer machine with
     `CD_ROOT_LM` exported cannot start a live billed distillation from the suite.
 - **FIXED: three different drafting failures were labelled as one, and the label named the wrong
-  half — the user-visible surface said a 502 was the model's fault.** `rlm_kit.tools.model.make_model_tool`
+  half — the user-visible surface said a 502 was the model's fault.** `rlm_harness.tools.model.make_model_tool`
   reports `ok=False` for THREE distinct causes (its `ModelToolResult` field comments say so three
   lines apart): the deterministic host-side validator declined the text, the model ENDPOINT failed
   after its transient retries (`endpoint_error`, `raw=""` — the validator never ran), or the CIRCUIT
@@ -1224,17 +1242,17 @@ never applies anything itself.
   an audit measured ~55 lines with four distinct failure paths. The point survives the correction;
   the rhetoric did not.) The endpoint is STILL declined, now on three reasons that survive the CLI:
   (1) **no cancel seam** — a distillation is a multi-minute, up-to-30-turn sandboxed episode, and
-  neither `run_distillation` nor anything in rlm-kit takes a `cancel_event`, so an HTTP-started run
+  neither `run_distillation` nor anything in rlm-harness takes a `cancel_event`, so an HTTP-started run
   could only be hung or SIGKILLed into exactly the truncated trace the studio papers over with its
   synthesized terminal event; `diff-sentry`/`toolscout` ship live endpoints without cancel because
   their operations are SHORT, and `cve-reverser` — whose profile matches ours — is the one sibling
   that needed it, at the cost of a threaded `cancel_event`, a cancel route, a dedicated
   `shutdown.py` + tests, and SIGINT/SIGTERM wrapping to defeat a real uvicorn deadlock. The fix
-  belongs upstream in rlm-kit. (2) **the import-level `live`-extra valve is unavailable** — every
+  belongs upstream in rlm-harness. (2) **the import-level `live`-extra valve is unavailable** — every
   sibling gates its live path behind `live = ["<parent>"]` so a replay-only deploy physically cannot
   spend; ours makes `ctx-distillery` a CORE dependency because replay itself calls `assemble`.
   **Stated as contingent, not structural**, per an audit: `live = ["openai"]` would not restore it
-  either (the planner spends through dspy/litellm, a core rlm-kit dep, long before any drafting
+  either (the planner spends through dspy/litellm, a core rlm-harness dep, long before any drafting
   call), and neither does the `schema.py` split, because `assemble` ships in the same distribution
   as the driver — splitting a package is the only route and is out of scope. The same audit killed
   the phrase "armed the moment `CD_ROOT_LM` is in the environment": route existence and credential
@@ -1246,7 +1264,7 @@ never applies anything itself.
   `ctx-distillery distill` writes into `$CTXD_TRACES_DIR`, the SAME directory the studio globs, so
   `distill` → refresh → **Load** already delivers what a live endpoint would, from a process that
   owns its credentials and can be Ctrl-C'd. And the refusal is made FALSIFIABLE, with named
-  reopening conditions: a cancel seam in rlm-kit; an opt-in gate that makes the route not exist by
+  reopening conditions: a cancel seam in rlm-harness; an opt-in gate that makes the route not exist by
   default; an allowlist of drivable project dirs sourced from the ENVIRONMENT, never the request
   body; a stated loopback-bind/auth posture.
   **Five sites, not four.** `CLAUDE.md` invariant 10, `studio/README.md` §Scope (the canonical long
@@ -1314,7 +1332,7 @@ never applies anything itself.
   `eval/pyproject.toml` had declared `judge = ["openai>=1.0"]` since this package existed and NOTHING
   imported it: a dead extra, and an eval harness that could never be pointed at a real model is not a
   peer of the three siblings. `judge.make_eval_judge(config, chat_fn=...)` now builds it on
-  `rlm_kit.tools.make_model_tool` — the same chat → transient-retry → validate → circuit-breaker core
+  `rlm_harness.tools.make_model_tool` — the same chat → transient-retry → validate → circuit-breaker core
   the rollout side's drafting tools use — with `from openai import OpenAI` LAZY inside the chat
   closure, `max_retries=0` (the retry loop has ONE owner; leaving the client's own retries on would
   multiply the two and turn a hard 60s timeout into minutes), `temperature=0.0`, and a strict
@@ -1377,11 +1395,11 @@ never applies anything itself.
   would then crash; `dev` must stay listed because `default-groups` REPLACES uv's default rather
   than appending), the ~17-line `.env.example` block, and `config.SUBSCRIPTION_PREFIX` +
   `config._maybe_subscription_lm` wired as `main_lm=` / `sub_lm=` into the existing
-  `rlm_kit.configure(...)` call. `ModuleNotFoundError` re-raise with the actionable
+  `rlm_harness.configure(...)` call. `ModuleNotFoundError` re-raise with the actionable
   `uv sync --extra subscription` hint follows diff-sentry/toolscout (cve-reverser omits it — the
   minority). **Divergence, in our favour:** all three siblings put the router in their dspy-BEARING
-  task module because their `config.py` must stay import-clean; ours already imports `rlm_kit`
-  inside `setup()`'s body, so it lives in `config.py` with `from rlm_kit import ClaudeAgentLM` inside
+  task module because their `config.py` must stay import-clean; ours already imports `rlm_harness`
+  inside `setup()`'s body, so it lives in `config.py` with `from rlm_harness import ClaudeAgentLM` inside
   the SENTINEL BRANCH — the module top stays dspy-free, asserted in a fresh interpreter by both
   `tests/test_public_api.py` and the new `tests/test_subscription.py` (13 tests).
   **The load-bearing piece is an UNCONDITIONAL `CD_DRAFT_LM` sentinel refusal in
@@ -1397,7 +1415,7 @@ never applies anything itself.
   variable it was inherited from. `studio/app.py` needed no mirrored prefix — its `/v1/config`
   reports no model at all.
 - **`ctx_distillery/rl_export.py` + `ctx-distillery export` — the reward-free SFT/RL dataset bundle,
-  narrowed to fit this project's invariants.** Built on `rlm_kit.dataset`'s `export_actions` /
+  narrowed to fit this project's invariants.** Built on `rlm_harness.dataset`'s `export_actions` /
   `export_sft_turns` / `run_label_bundle`, emitting `{actions, drafting, orchestrator_tools, planner,
   sft_turns, labels, metrics, rubric_signal}` with `reward: null` on every record. Role split:
   `drafting` = the two `make_model_tool` tools (the analogue of the siblings' generator/classifier),
@@ -1423,11 +1441,11 @@ never applies anything itself.
      n_draft_not_ok, plan_problems}` — every field recomputable from the same JSONL, zero oracle,
      zero fabrication, and a test asserts no `valid`/`complete`/`correct`/`score`/`reward`/`met` key
      ever appears.
-  3. **Reads through `trace_io.load_trace` / `dict_events`**, never `rlm_kit.trace.load_events`
+  3. **Reads through `trace_io.load_trace` / `dict_events`**, never `rlm_harness.trace.load_events`
      (invariant 11's non-dict-line guard applies to a new reader exactly as to the old ones).
   4. **The `drafting` split is NOT filtered on `outcome.output`**, unlike cve-reverser's and
      diff-sentry's generator/classifier splits. `tools/drafting.py` records the authored bytes under
-     `draft=`, and rlm-kit's `_action_record` reads only `raw`/`result`/`results`/`preview` — so
+     `draft=`, and rlm-harness's `_action_record` reads only `raw`/`result`/`results`/`preview` — so
      `outcome.output` is `None` for EVERY ctx-distillery tool call and that filter would silently
      produce an empty split. Pinned by a test, with the reason, so the fix for an empty-looking split
      is not to re-add it. Re-source a draft's text the way invariant 2 already requires: from the
@@ -1488,7 +1506,7 @@ never applies anything itself.
 - **`VENDOR.md` stub rot fixed.** Its `configure`/`RLMConfig` bullet still described `task.py` as an
   unwired stub — "not yet imported", the pyodide pin "not yet reflected in code" — and its
   `make_model_tool` bullet still pointed at a `task.py` TODO enumeration that no longer exists. All
-  three claims were false: `config.setup()` calls `rlm_kit.configure(RLMConfig(...))`,
+  three claims were false: `config.setup()` calls `rlm_harness.configure(RLMConfig(...))`,
   `task._forced_config` enforces the pin via `dataclasses.replace`, and `DistillConfig.from_env`
   additionally refuses a non-`pyodide` `CD_INTERPRETER` loudly. (The `rl_export` paragraph is
   untouched — a later pass owns it.)
@@ -1499,7 +1517,7 @@ never applies anything itself.
   member's entry module put `dspy` in `sys.modules` (`eval` cli -> True, `studio` app -> True), while
   the same check on `diff_sentry_eval.cli` and `toolscout_eval.cli` returned False. Root cause was
   purely structural — the only route to `assemble` ran through `session.py`, which imports `task.py`,
-  which does `from rlm_kit import RLMTask` — so a fully-offline `ctx-distillery-eval score --stub`
+  which does `from rlm_harness import RLMTask` — so a fully-offline `ctx-distillery-eval score --stub`
   run, and EVERY studio HTTP request, imported an LM framework neither one calls. `assemble` was
   verified to qualify rather than assumed to: its whole dependency set is `EVENT_TOOL_CALL` (a string
   constant), `trace_io.dict_events` and the dataclasses, i.e. a pure function over `(events, plan)`.
@@ -1590,7 +1608,7 @@ never applies anything itself.
   attached. Fixed once, in the one place; the two sections are now independent, which changes
   nothing for a plan that has candidates or a plan that has neither.
 - **Closed the non-dict trace-line gap the Studio pass explicitly deferred — the shared library
-  functions are now hardened, with ONE implementation instead of three.** `rlm_kit.trace.load_events`
+  functions are now hardened, with ONE implementation instead of three.** `rlm_harness.trace.load_events`
   does no shape validation, so a JSONL line that is valid JSON but not an object (`42`, `null`,
   `[1,2,3]`, `"x"`) reached every `.get(...)` consumer as-is. Reproduced end to end:
   `ctx-distillery-eval score '<glob>' <transcript>` over one clean trace plus one carrying a single
@@ -1609,7 +1627,7 @@ never applies anything itself.
   own inline copy — a de-duplication, not a removal, with its non-dict regression test unchanged and
   still green. `load_trace` re-implements the `run_id` filter rather than delegating `run_id=`, which
   is load-bearing: delegating puts the crash upstream of the guard. Hardening `load_events` upstream
-  in `rlm-kit` remains a reasonable follow-up **there**, not a prerequisite here. New
+  in `rlm-harness` remains a reasonable follow-up **there**, not a prerequisite here. New
   `tests/test_trace_io.py`, `eval/tests/test_taskset.py` (that module had zero coverage, and it was
   where the batch's first crash lived) and a batch-survival regression in `eval/tests/test_cli.py`
   asserting BOTH runs still score, not merely that the command exits 0.
@@ -1650,7 +1668,7 @@ never applies anything itself.
   "duplicate it a third time" was an acceptable choice). `eval/ctx_distillery_eval/score.py` now
   imports and calls it instead of keeping its own local copy — deleting a real duplicate (and the
   three now-unused imports that deletion left behind: `pydantic.ValidationError`,
-  `rlm_kit.trace.EVENT_RESULT`, `ctx_distillery.task.DistillPlan`, confirmed unused with `ruff`, not
+  `rlm_harness.trace.EVENT_RESULT`, `ctx_distillery.task.DistillPlan`, confirmed unused with `ruff`, not
   just by eye — F401 is a default-enabled rule and this repo's `lint` CI job runs a bare `ruff check
   .`). `tests/test_rubric.py`'s existing tests are renamed to match, with a new
   `eval/tests/test_score.py` regression guard asserting `ctx_distillery_eval.score` no longer
@@ -1671,7 +1689,7 @@ never applies anything itself.
   `dependencies` resolve, not whether the shared venv already has pytest from the root's dev
   group. So `--extra dev` was never load-bearing for either job; it is added anyway because it is
   more explicit/self-contained and does not hurt, not because anything was broken.
-- **Fixed a real 500 in the Studio, found by the same adversarial review**: `rlm_kit.trace.load_events`
+- **Fixed a real 500 in the Studio, found by the same adversarial review**: `rlm_harness.trace.load_events`
   does no shape validation, so a JSONL line that is syntactically valid JSON but NOT an object
   (`42`, `null`, `[1,2,3]`, `"x"`) parsed fine and reached `plan_from_events`/`trace_facts`/
   `mapper.to_event`'s `.get(...)` calls as-is — a raw `AttributeError`, i.e. a genuine 500,
@@ -1698,7 +1716,7 @@ never applies anything itself.
   three bugs lived in.
 - **ATLAS rubric facts + `ctx-distillery-eval` (Phase 1 of the rubric/eval/studio initiative)** —
   `ctx_distillery/rubric.py` (new): a reward-free, deterministic TF/TA/TG/PA rubric on top of
-  `rlm_kit.rubric`. `default_rubric()` is the same fixed four-criterion skeleton every run carries
+  `rlm_harness.rubric`. `default_rubric()` is the same fixed four-criterion skeleton every run carries
   (`DistillSession`'s task shape never varies); `trace_facts(events)` sources candidate-level facts
   from `session.assemble()`'s output (never re-derived from raw events) plus two trace-only facts
   `assemble` doesn't surface — `min_read_step`/`min_draft_step` (the MINIMUM `step_id` among
@@ -1842,12 +1860,12 @@ never applies anything itself.
   (`list_memory_files`, `read_memory_file`, `read_transcript_chunk`, `draft_memory_file`,
   `draft_skill_file`), the `pyodide` pin ENFORCED in code (`dataclasses.replace` on the config
   before `super().__init__`, not just documented), and a real scripted forward pass through
-  `rlm_kit.testing.ScriptedInterpreter` covering planner → tools → SUBMIT.
+  `rlm_harness.testing.ScriptedInterpreter` covering planner → tools → SUBMIT.
 - `ClaudeCodeAdapter` — the one in-scope harness adapter. Enumerates `memory/*.md` with real,
   NESTED-YAML frontmatter, plus `MEMORY.md` itself as a third `ArtifactKind`, `"index"` (needed so
   the plan can flag candidate `MEMORY.md` index lines at all: a kind that is never enumerated is
   unreachable through `read_memory_file`'s allowlist). Every path is stored `.resolve()`d.
-- `ctx_distillery/frontmatter.py` (+ a `pyyaml` dependency) — `rlm_kit.skills`'s frontmatter reader
+- `ctx_distillery/frontmatter.py` (+ a `pyyaml` dependency) — `rlm_harness.skills`'s frontmatter reader
   only handles flat `key: value` lines and cannot express the memory schema's nested
   `metadata.type`, so parsing lives here and is used by BOTH the adapter and the drafting validators.
 - `ctx_distillery/redact.py` — pattern-based, best-effort host-side redaction, applied immediately
@@ -1861,4 +1879,4 @@ never applies anything itself.
 - `tests/test_no_write_capability.py` — the design-mandated write-capability scan.
 - Initial scaffold: `RLMTask` declaration stub (`DistillSession`, no tools wired yet),
   harness-adapter seam interface (Claude Code adapter deferred, not yet implemented), the planning
-  reference doc, CI, project conventions synced from rlm-kit's downstream sibling consumers.
+  reference doc, CI, project conventions synced from rlm-harness's downstream sibling consumers.

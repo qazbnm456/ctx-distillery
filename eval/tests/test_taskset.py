@@ -6,7 +6,7 @@ gap) — and it is where a batch scoring run's FIRST crash on a malformed trace 
 
 Traces are built with a REAL `TraceRecorder` rather than hand-written JSON, because the field under
 test here is the `run_id` ENVELOPE key, and hand-rolling that would be asserting against a guess at
-the trace/v1 shape instead of the shape rlm-kit really writes.
+the trace/v1 shape instead of the shape rlm-harness really writes.
 
 The second half covers the taskset pass. `demo_taskset` is the interesting one: it is the only
 `demo_taskset` in the family that MATERIALIZES rather than returning a constant, because a Claude
@@ -27,7 +27,7 @@ from ctx_distillery_eval.taskset import (
     demo_taskset,
     load_taskset,
 )
-from rlm_kit.trace import EVENT_RESULT, TraceRecorder
+from rlm_harness.trace import EVENT_RESULT, TraceRecorder
 
 from ctx_distillery.adapters.claude_code import (
     ClaudeCodeAdapter,

@@ -3,8 +3,8 @@
 ctx-distillery is the ROLLOUT source (rollout -> reward -> training), NOT the trainer. This module
 emits raw materials only: the trajectory splits (`sft_turns` / `drafting` / `orchestrator_tools` /
 `planner`), per-run STRUCTURAL labels, per-run objective metrics, and the ATLAS rubric plus its
-deterministic per-criterion facts. No reward scalar is attached (`reward=None` to rlm-kit's
-exporters), and rlm-kit's `run_label_bundle` *structurally refuses* a surface literally named
+deterministic per-criterion facts. No reward scalar is attached (`reward=None` to rlm-harness's
+exporters), and rlm-harness's `run_label_bundle` *structurally refuses* a surface literally named
 `reward` — so "trajectories, never reward" is enforced at the transport, not merely intended.
 
 **Three deliberate divergences from the sibling exporters, each with a reason.**
@@ -36,7 +36,7 @@ exporters), and rlm-kit's `run_label_bundle` *structurally refuses* a surface li
    `was_the_right_call`-shaped field later would be the fabrication the original objection feared,
    and it stays out.
 
-3. **Reads through `trace_io.load_trace`, never `rlm_kit.trace.load_events`.** `CLAUDE.md`
+3. **Reads through `trace_io.load_trace`, never `rlm_harness.trace.load_events`.** `CLAUDE.md`
    invariant 11 and `trace_io.py`'s own docstring: `load_events` does no shape validation, so a
    JSON-valid non-dict line (`42`, `null`, `[1,2,3]`) would reach the unguarded `e["type"]` /
    `.get(...)` calls below and raise a raw `TypeError`/`AttributeError`. A new reader is a new call
@@ -45,7 +45,7 @@ exporters), and rlm-kit's `run_label_bundle` *structurally refuses* a surface li
 **What the `drafting` split does and does NOT carry.** `cve-reverser` and `diff-sentry` narrow their
 generator/classifier split to records whose `outcome.output` is non-empty. That filter is WRONG here
 and would silently produce an EMPTY split: `drafting.py` records the authored bytes under a `draft=`
-key, and rlm-kit's `_action_record` only reads `raw`/`result`/`results`/`preview`, so
+key, and rlm-harness's `_action_record` only reads `raw`/`result`/`results`/`preview`, so
 `outcome.output` is `None` for EVERY ctx-distillery tool call. The split is therefore by tool name
 alone, and it carries the call's args + `ok`/`errors`, not the drafted text. Re-source the text the
 way `CLAUDE.md` invariant 2 requires anyway — from the `tool_call` event keyed by `artifact_id`, via
@@ -58,9 +58,9 @@ Usage::
 
 from __future__ import annotations
 
-from rlm_kit.dataset import export_actions, export_sft_turns, run_label_bundle
-from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
-from rlm_kit.trace import EVENT_MAIN_STEP, EVENT_RUN_START, EVENT_SUB_CALL, EVENT_TOOL_CALL, group_by_run
+from rlm_harness.dataset import export_actions, export_sft_turns, run_label_bundle
+from rlm_harness.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
+from rlm_harness.trace import EVENT_MAIN_STEP, EVENT_RUN_START, EVENT_SUB_CALL, EVENT_TOOL_CALL, group_by_run
 
 from .rubric import criteria_facts, default_rubric, plan_from_events, rubric_from_meta
 from .schema import PROMOTION_ACTIONS, assemble
@@ -109,7 +109,7 @@ def _resolve_max_iterations(events: list[dict]) -> int:
 def load_runs(*trace_paths: str) -> dict[str, list[dict]]:
     """Read trace files into `{run_id: [events...]}`.
 
-    Through `trace_io.load_trace`, never `rlm_kit.trace.load_events` — see divergence 3 in the
+    Through `trace_io.load_trace`, never `rlm_harness.trace.load_events` — see divergence 3 in the
     module docstring. Unlike the siblings' version this one is part of the PUBLIC surface, because
     without a writing `main()` it is the entry a library caller needs to reach `export_dataset`.
     """
@@ -147,7 +147,7 @@ def run_labels(events: list[dict]) -> dict:
       action/tool mismatch, an empty draft, or a drafting call that produced no usable draft.
       `toolscout`'s `unbacked_*`, and exactly the set `apply.apply_plan` refuses.
     * `n_draft_not_ok` — promotion candidates whose drafting call produced NO USABLE DRAFT, for ANY
-      of the three causes `rlm_kit.tools.model.make_model_tool` reports as `ok=False` (see
+      of the three causes `rlm_harness.tools.model.make_model_tool` reports as `ok=False` (see
       `schema._not_ok_problem`): the validator declined the text, the endpoint failed after its
       retries, or the circuit breaker short-circuited before the model was called. This is a
       deliberate aggregate — it reads `AssembledCandidate.draft_ok`, which is per-candidate and by
@@ -213,7 +213,7 @@ def run_metrics(events: list[dict]) -> dict:
         # `draft_not_ok` is the AGGREGATE (every drafting call that yielded no usable draft, whatever
         # the cause); the three below are its DISJOINT parts and sum back to it exactly — a
         # containment relation, so a reader can slice or total without double-counting. That holds
-        # because `draft_cause` returns exactly one of rlm-kit's four CLOSED causes per payload, so
+        # because `draft_cause` returns exactly one of rlm-harness's four CLOSED causes per payload, so
         # `CAUSE_OK` and its three complements PARTITION the calls; the counts are then arithmetic,
         # not a claim this module has to defend. It was named `draft_rejects`, and "reject" named
         # three causes only one of which is a rejection — the harm invariant 12 exists to prevent.
@@ -261,7 +261,7 @@ def export_dataset(runs: dict[str, list[dict]]) -> dict:
     complete, step-ordered record, so nothing is lost if a future tool matches neither list.
 
     Every ACTION record carries `reward: None` — an SFT turn is `{run_id, turn, input, output}` and
-    has no reward key at all — and the three per-run LABEL surfaces ride via rlm-kit's
+    has no reward key at all — and the three per-run LABEL surfaces ride via rlm-harness's
     shared `run_label_bundle` — the canonical `{surface: {run_id: fn(events)}}` seam, which refuses
     a surface named `reward` by raising. That makes the reward-free property structural at the
     transport rather than a convention this module could quietly drop.

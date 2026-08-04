@@ -255,7 +255,7 @@ The five things that make it safe, each one closing a gap an independent design 
    message; the exclusive create is what makes a collision impossible to lose to a race. Overwriting
    is opt-in per candidate (`overwrite_ids=`), never a global flag.
 5. **`prune` archives, never deletes**, and the archive lives OUTSIDE `memory_dir` so neither
-   `list_targets()`'s `*.md` glob nor `rlm_kit.skills.discover_skills`'s `*/SKILL.md` walk can
+   `list_targets()`'s `*.md` glob nor `rlm_harness.skills.discover_skills`'s `*/SKILL.md` walk can
    re-surface an archived file as live. A `purge` that really deletes is future work.
 
 On top of that, any candidate whose `problems` list is non-empty, whose `draft_ok is False`, or whose

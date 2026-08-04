@@ -11,8 +11,8 @@ that test alone builds a real recorder; the rest of this file does not generaliz
 
 from __future__ import annotations
 
-from rlm_kit.rubric import Criterion, CriterionFact, RubricCriteria
-from rlm_kit.trace import EVENT_RESULT, EVENT_RUN_START, EVENT_TOOL_CALL, TraceRecorder, load_events
+from rlm_harness.rubric import Criterion, CriterionFact, RubricCriteria
+from rlm_harness.trace import EVENT_RESULT, EVENT_RUN_START, EVENT_TOOL_CALL, TraceRecorder, load_events
 
 from ctx_distillery.rubric import (
     _CATEGORY_LENS,
@@ -147,7 +147,7 @@ def test_plan_from_events_is_none_with_a_malformed_result_output():
 
 def test_plan_from_events_ignores_a_non_dict_trace_line():
     """A SECOND, distinct malformed-trace mode from the `ValidationError` case above: a line that is
-    valid JSON but not an object at all (`rlm_kit.trace.load_events` does no shape validation).
+    valid JSON but not an object at all (`rlm_harness.trace.load_events` does no shape validation).
 
     It raised ORDER-DEPENDENTLY, which is why it hid: `reversed()` returns at the first `result`
     event, so a bad line BEFORE the last result was never visited and the bug looked absent, while
@@ -302,7 +302,7 @@ def test_min_read_step_and_min_draft_step_are_the_minimum_step_id_per_kind():
 
 
 def test_drafting_before_any_read_is_still_surfaced_as_a_raw_ordering_fact_not_a_bool():
-    """A pure fact-surface (per `rlm_kit.rubric.criteria_facts`'s contract): `trace_facts` never
+    """A pure fact-surface (per `rlm_harness.rubric.criteria_facts`'s contract): `trace_facts` never
     collapses this into a met/unmet verdict — it hands back both raw step ids, even when drafting
     happened FIRST, so the comparison stays the reader's job."""
     events = [
@@ -396,7 +396,7 @@ def test_trace_facts_ignores_non_dict_trace_lines():
 
 
 def test_rubric_from_meta_ignores_a_non_dict_trace_line():
-    """rlm-kit's own `rubric_from_meta` tolerates a malformed CRITERION entry inside
+    """rlm-harness's own `rubric_from_meta` tolerates a malformed CRITERION entry inside
     `meta["rubric"]`, but its top-level `for e in events` loop is an unguarded `.get` — a different
     tolerance from the one it documents, and the one that took `criteria_facts` down."""
     rubric = default_rubric()

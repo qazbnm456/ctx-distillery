@@ -1,10 +1,10 @@
 """ATLAS rubric facts for a `DistillSession` run — reward-free, deterministic, trace-sourced.
 
 Follows `CLAUDE.md`'s known-simplification bullet on this module and the same convention
-`rlm_kit.rubric`'s docstring describes: rlm-kit owns the generic types + structural lint +
+`rlm_harness.rubric`'s docstring describes: rlm-harness owns the generic types + structural lint +
 per-criterion fact-assembly loop; THIS module supplies the taxonomy (`TF`/`TA`/`TG`/`PA`), the fixed
 criterion skeleton (`default_rubric`), the trace -> facts function (`trace_facts`), and the
-category -> fact-keys lens (`_CATEGORY_LENS`). `category` stays opaque to rlm-kit; the meaning below
+category -> fact-keys lens (`_CATEGORY_LENS`). `category` stays opaque to rlm-harness; the meaning below
 is entirely ours.
 
 `DistillSession` decomposes the same way every run (ingest -> propose a plan over
@@ -22,22 +22,22 @@ that reason was REAL while both names lived beside an `RLMTask`: a module-level 
 made every consumer of this module pay for dspy. `schema.py` removes the weight entirely (plain
 pydantic + dataclasses, no dspy anywhere in its import graph), so deferring them now buys nothing
 and only hides the dependency. There is no cycle to dodge either: `schema.py` imports only
-`trace_io` and `rlm_kit.trace`, and imports nothing from here.
+`trace_io` and `rlm_harness.trace`, and imports nothing from here.
 """
 
 from __future__ import annotations
 
 from pydantic import ValidationError
-from rlm_kit.rubric import (
+from rlm_harness.rubric import (
     Criterion,
     CriterionFact,
     RubricCriteria,
     rubric_to_meta,  # noqa: F401 - re-exported for `session.py`'s import
 )
-from rlm_kit.rubric import criteria_facts as _kit_criteria_facts
-from rlm_kit.rubric import rubric_from_meta as _kit_rubric_from_meta
-from rlm_kit.rubric import validate_rubric as _kit_validate_rubric
-from rlm_kit.trace import EVENT_RESULT, EVENT_TOOL_CALL
+from rlm_harness.rubric import criteria_facts as _kit_criteria_facts
+from rlm_harness.rubric import rubric_from_meta as _kit_rubric_from_meta
+from rlm_harness.rubric import validate_rubric as _kit_validate_rubric
+from rlm_harness.trace import EVENT_RESULT, EVENT_TOOL_CALL
 
 from .schema import DistillPlan, assemble
 from .trace_io import dict_events, transcript_facts
@@ -131,10 +131,10 @@ def default_rubric(task: str = "") -> RubricCriteria:
 def rubric_from_meta(events: list[dict]) -> RubricCriteria:
     """Recover the rubric this run's `run_start` meta actually carried (empty if none recorded).
 
-    `dict_events` first (see `trace_io.py`): rlm-kit's own `rubric_from_meta` IS tolerant of a
+    `dict_events` first (see `trace_io.py`): rlm-harness's own `rubric_from_meta` IS tolerant of a
     malformed CRITERION entry inside `meta["rubric"]`, but its top-level `for e in events: if
     e.get("type")` loop is not — a non-dict trace line raised a raw `AttributeError` there, which
-    took `criteria_facts` down with it. Two different tolerances; only one of them was rlm-kit's.
+    took `criteria_facts` down with it. Two different tolerances; only one of them was rlm-harness's.
     """
     return _kit_rubric_from_meta(dict_events(events), categories=CRITERION_CATEGORIES)
 
@@ -144,7 +144,7 @@ def plan_from_events(events: list[dict]):
 
     `trace_facts`'s single-arg signature (matching `diff_sentry.rubric.trace_facts`) has no `plan=`
     parameter, unlike `session.assemble(events, plan)` — so this rebuilds the plan `assemble` needs
-    from the trace itself, via `rlm_kit.trace.record_result`'s recorded `EVENT_RESULT` payload
+    from the trace itself, via `rlm_harness.trace.record_result`'s recorded `EVENT_RESULT` payload
     (`payload["output"]`). Returns None if no result event carries a dict output (no run, or a run
     that failed before SUBMIT), OR if that dict does not actually validate as a `DistillPlan` —
     `assemble(events, None)` already handles a missing plan as a run-level problem, and `assemble`'s
@@ -156,7 +156,7 @@ def plan_from_events(events: list[dict]):
     the entire scoring run down with it.
 
     ALSO FIXED, a second and distinct failure mode: a non-dict trace LINE (`42`, `null`, `"x"`,
-    `[1,2,3]` — `rlm_kit.trace.load_events` does no shape validation) raised a raw `AttributeError`
+    `[1,2,3]` — `rlm_harness.trace.load_events` does no shape validation) raised a raw `AttributeError`
     here, ORDER-DEPENDENTLY, which is why it hid for so long: `reversed()` returns at the first
     `result` event, so a bad line BEFORE the last result was never visited and the bug looked
     absent, while a bad line AFTER it — trailing garbage, a truncated tail, a concatenated file —
@@ -289,7 +289,7 @@ def trace_facts(events: list[dict]) -> dict:
 
 # Design decision (flagged during an implementation-plan audit, resolved here): TA's fact is the raw
 # min_read_step / min_draft_step step-id PAIR, not a pre-computed `evidence_before_drafting: bool`.
-# This keeps `trace_facts` a pure fact-surface per `rlm_kit.rubric.criteria_facts`'s own contract
+# This keeps `trace_facts` a pure fact-surface per `rlm_harness.rubric.criteria_facts`'s own contract
 # ("never decides met/unmet") — the ordering COMPARISON is left to whatever reads `observed` later
 # (the eval judge, a future trainer). `any_circuit_broken` stays a bool because it IS already a raw,
 # undebatable observation (the breaker either tripped or it didn't) rather than a derived comparison.
@@ -326,7 +326,7 @@ _OBSERVABLE_VOCAB = (
 
 
 def validate_rubric(rubric: RubricCriteria) -> list[str]:
-    """A structural lint of `rubric` — see `rlm_kit.rubric.validate_rubric` for what this checks."""
+    """A structural lint of `rubric` — see `rlm_harness.rubric.validate_rubric` for what this checks."""
     return _kit_validate_rubric(rubric, categories=CRITERION_CATEGORIES, observable_vocab=_OBSERVABLE_VOCAB)
 
 

@@ -20,7 +20,7 @@ be CHECKED rather than claimed, and folding it into `PROMPT_VERSION` would make 
 two things and destroy its usefulness for the thing it does mean.
 
 Rubric-free: the judge prompt asks artifact-framed questions directly (`JUDGE_QUESTIONS` below) — it
-never imports or references `rlm_kit.rubric` / `ctx_distillery.rubric`, and never sees a criterion's
+never imports or references `rlm_harness.rubric` / `ctx_distillery.rubric`, and never sees a criterion's
 deterministic `observed` facts. This keeps the judge a genuinely independent, artifact-level read,
 decoupled from the rollout side's own fact-surfacing.
 
@@ -94,7 +94,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from rlm_kit.tools import make_model_tool
+from rlm_harness.tools import make_model_tool
 
 from .schema import EVAL_CATEGORIES, EvalScore
 
@@ -119,7 +119,7 @@ PROMPT_VERSION = "atlas-ctxd-eval-v3"
 #: Per-ENTRY, TOTAL and PLAN character budgets for `build_prompt`. They exist because the judge was
 #: uncapped end to end, and that already failed today, without any feature attached: a real
 #: cve-reverser run is a ~10.6 M-character prompt from the transcripts alone. It does not even fail
-#: cleanly — an over-length prompt raises from the ENDPOINT, and `rlm_kit/tools/model.py` is explicit
+#: cleanly — an over-length prompt raises from the ENDPOINT, and `rlm_harness/tools/model.py` is explicit
 #: that an endpoint error is infra flakiness and must NOT trip the breaker, so `make_model_tool`'s
 #: `max_consecutive_invalid` never fires and a batch burns a full retry cycle per row returning
 #: nothing. Hence: cap BEFORE the call, never catch the failure after it.
@@ -377,7 +377,7 @@ class EvalJudgeConfig:
 class _EvalValidation:
     """The validator's read of the judge's raw output — `.ok` / `.errors` for `make_model_tool`.
 
-    Duck-typed against `rlm_kit.tools.make_model_tool`, which reads `getattr(validated, "ok")` and
+    Duck-typed against `rlm_harness.tools.make_model_tool`, which reads `getattr(validated, "ok")` and
     `getattr(validated, "errors")` and passes the whole object back on `ModelToolResult.validated`.
     """
 
@@ -498,7 +498,7 @@ def make_eval_judge(
 ) -> Judge:
     """Build the live batch judge: `judge(plan_text, transcript_texts, reference="") -> JudgeVerdict`.
 
-    Built on `rlm_kit.tools.make_model_tool`, exactly the same generic core the rollout side's
+    Built on `rlm_harness.tools.make_model_tool`, exactly the same generic core the rollout side's
     drafting tools use: chat -> transient-retry -> validate -> circuit-breaker. This module supplies
     only the chat closure, the prompt, and the strict validator.
 

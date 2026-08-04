@@ -33,7 +33,7 @@ This is a documented reopening of a prior refusal, not a reversal of the reasoni
 it — `CLAUDE.md` invariant 10 named four conditions under which the endpoint should exist, and all
 four are now met:
 
-1. **A cancel seam exists, upstream, in `rlm-kit`.** `rlm_kit.SandboxCancelled` +
+1. **A cancel seam exists, upstream, in `rlm-harness`.** `rlm_harness.SandboxCancelled` +
    `RLMTask(cancel_event=...)` reach all the way into the sandbox interpreter's own watchdog thread,
    which can kill a wedged `deno`/`pyodide` process mid-call — the thing `asyncio.Task.cancel()`
    fundamentally cannot do, because the sandbox's blocking read has no `await` inside it. A live run
@@ -89,7 +89,7 @@ truncated, ever-changing snapshot — a live run's own progress is watched throu
 | `GET /v1/runs/{run_id}/events` | SSE replay of a FINISHED trace, mapped through `mapper.to_event` to a stable `distill.*` event vocabulary, paced by an optional `?delay=`. 409 while `run_id` is still live — see `POST /v1/distill` for that case. |
 | `GET /v1/runs/{run_id}/iterations` | the Trajectory drawer's per-turn breakdown (`iterations.build_iterations`): the run's `initial` state, its REPL turns (reasoning + code + output), and a flat tool/sub-LM `timeline`. 409 while `run_id` is still live. |
 | `POST /v1/distill` | opt-in only (404 when `CTXD_LIVE_PROJECTS` is unset). Starts a live distillation over `{"project_dir": ..., "run_id": null, "include_subagents": false}` and streams it as SSE — the SAME `distill.*` vocabulary as replay, plus one live-only event, `distill.run.started`, carrying the resolved `run_id` before anything else exists to key events off of. 403 off-loopback or cross-origin; 400 on a `project_dir` outside the allowlist or a `run_id` collision. |
-| `POST /v1/runs/{run_id}/cancel` | cooperatively cancels an in-flight live run (sets its `cancel_event`; rlm-kit's own sandbox watchdog does the rest). 404 if live mode is off or `run_id` isn't currently live; 403 off-loopback or cross-origin. |
+| `POST /v1/runs/{run_id}/cancel` | cooperatively cancels an in-flight live run (sets its `cancel_event`; rlm-harness's own sandbox watchdog does the rest). 404 if live mode is off or `run_id` isn't currently live; 403 off-loopback or cross-origin. |
 
 `run_id` is sanitized (`_slug_id`) before it ever becomes a path component — a studio reachable over
 HTTP must not open a path-traversal hole on itself just because this project's own trace files are

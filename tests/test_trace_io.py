@@ -4,7 +4,7 @@ Hand-rolled lists for `dict_events` (a pure predicate over a list needs no file 
 files under `tmp_path` for `load_trace` — reading bytes off disk is plain host-side file I/O, the
 same reasoning `tests/test_apply.py` gives for running against real files. The recorder-built
 fixtures use `TraceRecorder.record` rather than hand-written JSON so the `run_id`/`step_id`/`type`
-envelope is the actual trace/v1 shape rlm-kit writes, not a guess at it; the non-dict lines are then
+envelope is the actual trace/v1 shape rlm-harness writes, not a guess at it; the non-dict lines are then
 appended by hand, exactly the "recorder-built, then edited by hand" pattern
 `studio/tests/test_app.py::test_replay_of_a_truncated_trace_still_ends_with_a_synthesized_completed`
 already established.
@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from rlm_kit.trace import EVENT_RESULT, TraceRecorder, load_events
+from rlm_harness.trace import EVENT_RESULT, TraceRecorder, load_events
 
 from ctx_distillery.trace_io import (
     dict_events,
@@ -76,10 +76,10 @@ def test_load_trace_drops_non_dict_lines_from_a_real_file(tmp_path):
 
 def test_load_trace_filters_by_run_id_without_delegating_to_load_events(tmp_path):
     """THE load-bearing case, and why `load_trace` re-implements the run_id filter rather than
-    passing `run_id=` down: `rlm_kit.trace.load_events`'s own filter is `event.get("run_id") ==
+    passing `run_id=` down: `rlm_harness.trace.load_events`'s own filter is `event.get("run_id") ==
     run_id`, an unguarded `.get` on exactly the lines this module exists to drop — so delegating
     would put the `AttributeError` UPSTREAM of our filter, where nothing in `ctx_distillery` could
-    reach it. That is stated here rather than asserted against `load_events` directly: the rlm-kit
+    reach it. That is stated here rather than asserted against `load_events` directly: the rlm-harness
     pin tracks a branch, so pinning third-party raising behaviour would go red on an upstream fix
     that is a GOOD outcome, not a regression.
     """

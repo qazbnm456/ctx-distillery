@@ -13,7 +13,7 @@ So: one implementation, and the two surfaces are pinned to it here — by IDENTI
 function object) and by BEHAVIOUR (over a payload matrix, the counter's bucket and the sentence's
 wording name the same cause). Make them disagree and this file goes red.
 
-The vocabulary is rlm-kit's own `CAUSE_*` constants, never a parallel local one — `ModelToolResult`
+The vocabulary is rlm-harness's own `CAUSE_*` constants, never a parallel local one — `ModelToolResult`
 now exposes `cause`/`validator_ran` directly, `tools/drafting.py` records both, and the derivation
 below survives only as the fallback for traces recorded before that key existed.
 """
@@ -21,15 +21,15 @@ below survives only as the fallback for traces recorded before that key existed.
 from __future__ import annotations
 
 import pytest
-from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
-from rlm_kit.trace import EVENT_TOOL_CALL
+from rlm_harness.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT, CAUSE_INVALID, CAUSE_OK
+from rlm_harness.trace import EVENT_TOOL_CALL
 
 from ctx_distillery import rl_export, schema, trace_io
 from ctx_distillery.trace_io import DRAFT_CAUSES, draft_cause
 
 #: `(id, cause, old-shaped payload)` — the four outcomes as a trace recorded BEFORE `cause` existed
 #: wrote them: `ok` plus the two infrastructure fields, and no `cause` key anywhere. The fifth row is
-#: the SAME cause as the third by a different route, and it is the sibling's actual second bug: rlm-kit
+#: the SAME cause as the third by a different route, and it is the sibling's actual second bug: rlm-harness
 #: fills `endpoint_error` with `str(exc)`, which is `''` for a whole family of real connection
 #: failures, so a truthiness test quietly reclassifies it as a validator decline.
 LEGACY_SHAPES = [
@@ -62,7 +62,7 @@ NOT_OK_SHAPES = [row for row in ALL_SHAPES if row[1] != CAUSE_OK]
                          ids=[row[0] for row in LEGACY_SHAPES])
 def test_an_old_trace_with_no_cause_key_still_classifies_correctly(cause, payload):
     """The fallback is the whole reason the derivation survives: every trace recorded before
-    rlm-kit `4fcd50b2` has no `cause` key, and `rl_export` / `schema` / the studio all read
+    rlm-harness `4fcd50b2` has no `cause` key, and `rl_export` / `schema` / the studio all read
     historical traces."""
     assert "cause" not in payload
     assert draft_cause(payload) == cause
@@ -78,7 +78,7 @@ def test_the_recorded_cause_WINS_over_the_derivation():
     """Preference, stated as a behaviour rather than an implementation detail.
 
     The source (`tools/drafting.py`) holds the live `ModelToolResult` and knows the answer; a reader
-    reconstructing it from two fields is strictly worse-informed. If a future rlm-kit adds a fifth
+    reconstructing it from two fields is strictly worse-informed. If a future rlm-harness adds a fifth
     cause whose flags look like an existing one, the recorded value is the one that stays right.
     """
     payload = {"ok": False, "circuit_broken": True, "cause": CAUSE_ENDPOINT}
@@ -98,14 +98,14 @@ def test_a_recorded_cause_outside_the_closed_vocabulary_is_ignored_not_trusted()
 
 
 def test_an_endpoint_error_that_STRINGIFIED_TO_NOTHING_is_not_a_validator_decline():
-    """`endpoint_error` is `Optional[str]` and rlm-kit fills it with `str(exc)` — which is `''` for
+    """`endpoint_error` is `Optional[str]` and rlm-harness fills it with `str(exc)` — which is `''` for
     `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`, `OSError` and
     `RemoteDisconnected`. A truthiness test sends every one of those down the validator branch."""
     assert draft_cause({"ok": False, "endpoint_error": ""}) == CAUSE_ENDPOINT
 
 
 def test_the_endpoint_string_is_read_under_error_as_well_as_endpoint_error():
-    """The key set is rlm-kit's (`trace.payload_cause`, `f217cfad`): the consumer convention has
+    """The key set is rlm-harness's (`trace.payload_cause`, `f217cfad`): the consumer convention has
     recorded the endpoint string under EITHER name, so reading only one classifies the other as a
     validator rejection — a bare connection failure rendered as the model failing its format check."""
     assert draft_cause({"ok": False, "error": "502 Bad Gateway"}) == CAUSE_ENDPOINT
@@ -149,7 +149,7 @@ def test_draft_cause_delegates_the_derivation_rather_than_copying_it():
     """
     from itertools import product
 
-    from rlm_kit.trace import payload_cause
+    from rlm_harness.trace import payload_cause
 
     fields = {
         "ok": (True, False, None),
@@ -170,7 +170,7 @@ def test_the_breaker_outranks_the_endpoint_because_it_is_the_stronger_claim():
     assert draft_cause(both) == CAUSE_CIRCUIT_BROKEN
 
 
-def test_the_vocabulary_is_rlm_kits_own_not_a_parallel_copy():
+def test_the_vocabulary_is_rlm_harnesss_own_not_a_parallel_copy():
     """A local `"circuit_break"`/`"validator_reject"` vocabulary is exactly the drift this
     consolidation removes: the kit owns the cause set, and it is CLOSED."""
     assert DRAFT_CAUSES == (CAUSE_OK, CAUSE_INVALID, CAUSE_ENDPOINT, CAUSE_CIRCUIT_BROKEN)

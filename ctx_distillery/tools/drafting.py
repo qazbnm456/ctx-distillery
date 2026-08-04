@@ -1,7 +1,7 @@
 """`draft_memory_file` / `draft_skill_file` — the only two tools that AUTHOR text, and they
 author it into the TRACE, never onto disk.
 
-Base/wrap split, per rlm-kit's convention: the kit owns the generic "call a model, retry transient
+Base/wrap split, per rlm-harness's convention: the kit owns the generic "call a model, retry transient
 endpoint errors, run a deterministic validator, break the circuit on repeated declines" core
 (`make_model_tool`); this module supplies the project half — the two tool names, the two validators,
 the result wording, and the tracing.
@@ -9,7 +9,7 @@ the result wording, and the tracing.
 Three project invariants live here:
 
 * **Write boundary.** Both tools return TEXT ONLY. Neither touches the memory directory, a
-  `skill_dir`, or any other path — `rlm_kit.skills`'s own discovery being directory-based makes
+  `skill_dir`, or any other path — `rlm_harness.skills`'s own discovery being directory-based makes
   "helpfully write it where it belongs" a tempting mistake, so it is called out rather than assumed
   (`CLAUDE.md` invariant 1, and its explicit note that the read-only tool set is CLOSED).
 * **`output_model` carries judgement only** (`CLAUDE.md` invariant 2), so the drafted bytes must be
@@ -22,7 +22,7 @@ Three project invariants live here:
   circuit breaker after three calls, silently. The dataclass makes that impossible.
 
 **The recorded payload names its own CAUSE.** Each `tool_call` carries `cause` / `validator_ran`
-straight off the live `ModelToolResult` (rlm-kit `4fcd50b2`), beside the `endpoint_error` /
+straight off the live `ModelToolResult` (rlm-harness `4fcd50b2`), beside the `endpoint_error` /
 `circuit_broken` fields it already recorded. This module is the only place with the live object, so
 recording what it already knows beats every downstream reader reconstructing it — `CLAUDE.md`
 invariant 12. The derivation still exists, in `trace_io.draft_cause`, purely as the fallback for
@@ -38,9 +38,9 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
-from rlm_kit.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT
-from rlm_kit.tools.model import ChatFn, make_model_tool
-from rlm_kit.trace import record_tool_call
+from rlm_harness.tools import CAUSE_CIRCUIT_BROKEN, CAUSE_ENDPOINT
+from rlm_harness.tools.model import ChatFn, make_model_tool
+from rlm_harness.trace import record_tool_call
 
 from .. import frontmatter
 from ..adapters.base import ARTIFACT_SCOPES, ArtifactRef
@@ -325,7 +325,7 @@ def _spec_for_skill(procedure: str, scope: str, evidence: str) -> str:
 def _errors_with_infra(result) -> list[str]:
     """`errors`, with an INFRASTRUCTURE failure's own message substituted when it recorded none.
 
-    Branches on `result.cause` — rlm-kit's own name for which of the four outcomes this is — rather
+    Branches on `result.cause` — rlm-harness's own name for which of the four outcomes this is — rather
     than re-deriving it from `circuit_broken` / `endpoint_error`. That is the kit's stated advice
     ("read one of them before writing any string or label that attributes a failure"), and it means
     the message written here and the `cause` recorded beside it cannot disagree by construction. The

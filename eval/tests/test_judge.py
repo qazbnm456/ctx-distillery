@@ -302,7 +302,7 @@ def test_the_circuit_breaker_short_circuits_a_hopeless_judge():
 
 
 def test_a_recovering_judge_resets_the_breaker():
-    """The counter resets on any valid reply (rlm-kit's contract) — one bad reply mid-batch must not
+    """The counter resets on any valid reply (rlm-harness's contract) — one bad reply mid-batch must not
     doom the runs after it."""
     replies = iter(["not json", GOOD, "not json", GOOD])
     judge = make_eval_judge(EvalJudgeConfig(max_consecutive_invalid=2), chat_fn=lambda p: next(replies))

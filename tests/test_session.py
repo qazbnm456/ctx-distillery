@@ -15,10 +15,10 @@ import pytest
 
 dspy = pytest.importorskip("dspy")
 
-import rlm_kit.runtime as rt
-from rlm_kit import RLMConfig
-from rlm_kit.testing import ScriptedInterpreter, scripted_lm
-from rlm_kit.trace import EVENT_RUN_START, EVENT_TOOL_CALL, load_events
+import rlm_harness.runtime as rt
+from rlm_harness import RLMConfig
+from rlm_harness.testing import ScriptedInterpreter, scripted_lm
+from rlm_harness.trace import EVENT_RUN_START, EVENT_TOOL_CALL, load_events
 
 from ctx_distillery.adapters.claude_code import ClaudeCodeAdapter
 from ctx_distillery.session import (
@@ -178,7 +178,7 @@ def test_a_circuit_break_is_not_reported_as_a_format_check_failure():
 
 
 def test_an_endpoint_failure_that_STRINGIFIED_TO_NOTHING_is_still_an_endpoint_failure():
-    """`endpoint_error` is `Optional[str]` and rlm-kit sets `str(exc)` — which is `''` for a whole
+    """`endpoint_error` is `Optional[str]` and rlm-harness sets `str(exc)` — which is `''` for a whole
     family of real faults: `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`,
     `OSError`, `RemoteDisconnected`. A truthiness test dropped every one of them through to the
     validator branch, rendering a dropped connection as ``failed its format check: no detail
@@ -233,7 +233,7 @@ def test_no_plan_at_all_is_a_run_level_problem():
 def test_assemble_ignores_non_dict_trace_lines(action):
     """`assemble`'s "none of them raise" was literally false for a malformed trace: `_draft_calls`
     scans EVERY event before the candidate loop, so a line that is valid JSON but not an object
-    (`rlm_kit.trace.load_events` does no shape validation) raised a raw `AttributeError` for ANY
+    (`rlm_harness.trace.load_events` does no shape validation) raised a raw `AttributeError` for ANY
     non-`None` plan — including an all-`keep` plan with no artifact to assemble at all, which is why
     `keep` is parametrized here and not just the promotion. Only `assemble(events, None)` escaped,
     and only because it returns before touching `events`.
@@ -464,7 +464,7 @@ def test_on_event_receives_every_recorded_event_live(memory_dir, tmp_path):
 
 def test_cancel_event_reaches_the_constructed_sandbox_interpreter():
     """The ctx-distillery-side half of the REVISION's own claim: `cancel_event` needs ZERO
-    signature changes here to reach rlm-kit's real sandbox watchdog — it rides the EXISTING `**kw`
+    signature changes here to reach rlm-harness's real sandbox watchdog — it rides the EXISTING `**kw`
     forwarding (`run_distillation_artifacts` -> `DistillSession.__init__` -> `RLMTask.__init__`).
     Checked directly on `DistillSession`/`RLMTask`, one layer below `run_distillation_artifacts`,
     with the REAL (never-executed) pyodide interpreter — a `ScriptedInterpreter` override would
