@@ -27,6 +27,14 @@ Prefer to drive it from your agent instead of the shell? It ships as an Agent Sk
 npx skills add qazbnm456/ctx-distillery
 ```
 
+Want to see what a plan looks like before spending anything? [`examples/demo-run.jsonl`](examples/)
+is a real finished run — read it offline, with no credentials and no model:
+
+```bash
+curl -sO https://raw.githubusercontent.com/qazbnm456/ctx-distillery/main/examples/demo-run.jsonl
+ctx-distillery show demo-run.jsonl
+```
+
 ## What it proposes
 
 Four judgements, one per candidate, each backed by the transcripts it was drawn from:

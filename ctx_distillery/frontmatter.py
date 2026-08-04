@@ -30,18 +30,33 @@ def parse(text: str) -> tuple[dict[str, Any], str]:
     the YAML fails to parse, or when it parses to something other than a mapping — a malformed
     draft is a *validation* outcome for the caller to report, never an exception thrown into the
     REPL from here.
+
+    **Leading BLANK lines are skipped, and that is a deliberate loosening found by a live run.** The
+    opening delimiter used to have to be the very first line, on the reasoning that tolerating blank
+    lines would let a body's own `---` horizontal rule look like frontmatter. The cost of that
+    strictness turned out to be wildly asymmetric: a real drafting call returned
+    `'\\n\\n---\\nname: ...'` — a complete, correct memory file — and it was rejected with "no
+    parseable YAML frontmatter" for two leading newlines, which is a shape language models emit
+    constantly. The risk it was guarding against needs a document whose first non-blank line is a
+    horizontal rule, AND a second `---` later, AND the text between them to parse as a YAML mapping;
+    a body that opens with a horizontal rule is already pathological. Only genuinely EMPTY lines are
+    skipped: a line carrying any content still means there is no frontmatter, so a body that merely
+    CONTAINS a `---` cannot be reinterpreted as one. (An INDENTED delimiter has always been accepted,
+    because the comparison strips the line — that is pre-existing behaviour, unchanged here, and
+    stated only because an earlier draft of this docstring claimed the opposite and a test caught it.)
     """
     if not text:
         return {}, ""
     lines = text.splitlines(keepends=True)
-    # The opening delimiter must be the very first line (leading blank lines included would make
-    # a body's own `---` horizontal rule look like frontmatter).
-    if lines[0].strip() != _DELIM:
+    start = 0
+    while start < len(lines) and not lines[start].strip():
+        start += 1
+    if start >= len(lines) or lines[start].strip() != _DELIM:
         return {}, text
-    for index in range(1, len(lines)):
+    for index in range(start + 1, len(lines)):
         if lines[index].strip() != _DELIM:
             continue
-        block = "".join(lines[1:index])
+        block = "".join(lines[start + 1:index])
         body = "".join(lines[index + 1:])
         try:
             loaded = yaml.safe_load(block)

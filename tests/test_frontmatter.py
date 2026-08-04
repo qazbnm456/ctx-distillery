@@ -47,7 +47,7 @@ def test_parses_the_flat_agent_skills_shape_as_a_degenerate_case():
     [
         "",
         "no frontmatter at all\n",
-        "\n---\nname: x\n---\nbody\n",                 # delimiter not on the FIRST line
+        "intro\n---\nname: x\n---\nbody\n",            # CONTENT before the delimiter, not blank lines
         "---\nname: unterminated\nbody with no closing delimiter\n",
         "---\n\tname: [oops\n---\nbody\n",             # malformed YAML
     ],
@@ -78,3 +78,26 @@ def test_empty_frontmatter_block_is_a_mapping_free_but_valid_split():
     meta, body = parse("---\n---\nbody\n")
     assert meta == {}
     assert body == "body\n"
+
+
+@pytest.mark.parametrize("prefix", ["\n", "\n\n", "\n\n\n\n"])
+def test_leading_blank_lines_before_the_delimiter_are_skipped(prefix):
+    """Found by a LIVE run, not by review. A drafting call returned `'\\n\\n---\\nname: ...'` — a
+    complete, correct memory file — and the old "delimiter must be line 0" rule rejected it with "no
+    parseable YAML frontmatter". Leading newlines are a shape language models emit constantly, and
+    the whole drafted artifact was being thrown away for two of them."""
+    meta, body = parse(f"{prefix}---\nname: n\ndescription: d\n---\nbody\n")
+    assert meta == {"name": "n", "description": "d"}
+    assert body == "body\n"
+
+
+def test_only_blank_lines_are_skipped_not_content() -> None:
+    """The loosening is narrow on purpose: a non-blank line before the delimiter still means there
+    is no frontmatter, so a body that merely CONTAINS a `---` cannot be reinterpreted as one."""
+    text = "intro\n---\nname: n\n---\nbody\n"
+    assert parse(text) == ({}, text)
+
+
+def test_a_document_that_is_only_blank_lines_degrades() -> None:
+    """The skip loop must not run off the end of the line list."""
+    assert parse("\n\n\n") == ({}, "\n\n\n")
