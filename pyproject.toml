@@ -1,7 +1,7 @@
 [project]
 name = "ctx-distillery"
 version = "0.1.0"
-description = "RLM-driven distillation planner for AI coding-agent session transcripts + persistent memory stores — proposes, never applies."
+description = "Distil your coding agent's accumulated history into durable memory and reusable Skills: propose what to prune and what to promote, with every write gated on your explicit per-candidate approval."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -16,7 +16,7 @@ keywords = [
     "agent",
 ]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",

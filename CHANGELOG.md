@@ -12,6 +12,8 @@ never applies anything itself.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-04
+
 - **A `release.yml` now publishes to PyPI over Trusted Publishing (OIDC), with no API token.** Adapted
   from the sibling `rlm-harness` workflow. **Adding it cuts no version**: it is inert until a human
   publishes a GitHub Release, and `CLAUDE.md ## Versioning` is explicit that a release heading is the
