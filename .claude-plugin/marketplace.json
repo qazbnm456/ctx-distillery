@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "ctx-distillery",
+  "description": "Distil a project's Claude Code history into a reviewable plan — what to prune, what to promote into a memory file or a Skill. Proposes, never applies.",
+  "owner": {
+    "name": "Boik Su",
+    "url": "https://github.com/qazbnm456"
+  },
+  "plugins": [
+    {
+      "name": "ctx-distillery",
+      "description": "Propose a distillation plan over a project's Claude Code transcripts and memory store. Read-only: it runs the planner and explains the result, and never runs the human-gated apply step.",
+      "source": "./",
+      "skills": ["./skills"],
+      "strict": false,
+      "category": "development",
+      "homepage": "https://github.com/qazbnm456/ctx-distillery"
+    }
+  ]
+}

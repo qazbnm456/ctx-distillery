@@ -453,6 +453,25 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    indices, `--confirm` is a second deliberate act (the default is a dry run that writes nothing),
    and `tests/test_apply_cli.py::test_no_flag_ever_approves_the_whole_plan` is the tripwire against
    an `--all` creeping back in.
+   **The SHIPPED SKILL (`skills/ctx-distillery-plan/`) is the planner half ONLY, and there is no
+   apply skill — that omission IS the mechanism, so do not "complete the set" later.** This
+   invariant guards an IMPORT GRAPH: no module the RLM can reach imports `apply.py`. It says nothing
+   about the OUTER agent — Claude Code driving this project's CLI from a shell — and a Skill is
+   exactly that surface. An adversarial review of the first draft (which shipped an apply skill
+   too) established the limits precisely, and both corrections are worth keeping because each looks
+   like a gate and is not: **`disable-model-invocation: true` constrains SKILL LOADING, never
+   `Bash`** — a model that can call `Bash` can run the writer whether or not any skill is loaded, so
+   it is a `/`-menu property and must never be described as protecting the writer; and a
+   `permissions.ask` rule, the one thing that survives `bypassPermissions`, lives in a
+   `.claude/settings.json` that a `npx skills add` installer never receives — enforcement is not
+   shippable, only prose is. What IS shippable is not writing the procedure down: the plan skill
+   PRINTS the `ctx-distillery-apply … --approve <indices>` line for a human to run, exactly as
+   `cli.py`'s own `_cmd_distill` already does, and carries no steps for driving it. The residual
+   risk is prose-guarded and stated rather than papered over. `tests/test_skill_contract.py` pins
+   the parts that are mechanical: no shipped skill pre-approves ANY tool (an allowlist — the
+   `allowed-tools` key must be ABSENT, never a blocklist naming spellings, since `Bash(uv run *)`
+   and a bare `Bash` defeat one), and every command a skill prints parses through the REAL
+   `build_parser().parse_args()` rather than merely containing flag names that exist somewhere.
 9. **`apply_plan`'s roots are PER KIND, and a skill's containment check is its OWN check.** A skill is
    NOT a flat `<slug>.md` in the memory store: it is `<skills_root>/<slug>/SKILL.md` — one directory
    deeper, under a root that is never `memory_dir` (`~/.claude/skills` for global,

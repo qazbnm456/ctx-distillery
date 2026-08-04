@@ -75,6 +75,48 @@ prefix and the planner runs on your own Claude Pro/Max plan instead of an API ke
 to a real model id; leaving it unset makes it inherit the sentinel and the run refuses to start rather
 than 404ing mid-trajectory. See the subscription block in `.env.example`.
 
+## Install it as a Claude Code Skill
+
+The workflow above is also packaged as a Skill, so an agent can drive the reading half of it for
+you. It is one skill, `ctx-distillery-plan`, and it is **read-only by construction**: it runs
+`distill` / `show` / `export`, explains the resulting plan, and then prints the
+`ctx-distillery-apply …` command for *you* to run. It never runs the writer itself — that stays a
+human's deliberate act, which is the same reason applying lives in its own binary.
+
+```bash
+# the skill (works in Claude Code, Codex, Cursor and the other agents the CLI supports)
+npx skills add qazbnm456/ctx-distillery
+
+# ... or natively in Claude Code
+/plugin marketplace add qazbnm456/ctx-distillery
+/plugin install ctx-distillery@ctx-distillery
+```
+
+The skill is markdown; the CLI it drives is a separate install, and `distill` needs the `cli` extra:
+
+```bash
+uv tool install "ctx-distillery[cli] @ git+https://github.com/qazbnm456/ctx-distillery"
+
+# on macOS, add a constraint — see below
+uv tool install --with "litellm<1.95" "ctx-distillery[cli] @ git+https://github.com/qazbnm456/ctx-distillery"
+```
+
+**The macOS constraint is not superstition.** `litellm` arrives transitively through `dspy`, and
+from 1.95 it ships wheels for manylinux and Windows only. On macOS it is built from its sdist, which
+now needs a Rust toolchain, and the failure surfaces as a `maturin` error naming nothing you
+recognise. `litellm<1.95` still builds. A `git clone && uv sync` checkout is unaffected — `uv.lock`
+already pins a buildable version, and `uv tool install` does not read a lockfile.
+
+No PyPI release yet — `rlm-kit` is not on PyPI, and this project's git pin for it lives in
+`[tool.uv.sources]`, which does not survive into published wheel metadata. `uv tool install` from
+git resolves it correctly; `pip install ctx-distillery` could not, so it is not offered.
+
+The skill declares no `allowed-tools`, so it never pre-approves a tool on your behalf; what actually
+prompts you is decided by your own permission settings, not by anything shippable in a skill file.
+That the skill grants nothing is deliberate rather than unfinished — `distill` bills your account
+and sends your project's (redacted) history to whatever endpoint `CD_BASE_URL` names, which is not
+something to hand over once and forget.
+
 ## Point it at a project
 
 The CLI does this for you; in Python it is one line:
@@ -93,11 +135,14 @@ for exactly what's derived and how confirmed each piece is.
 
 Two things worth knowing, because they are honest limits rather than polish:
 
-- **Transcripts are rendered lossily on purpose.** A real long conversation's raw log is
-  multi-megabyte; feeding it back verbatim would defeat the point of distilling it. What survives is
-  what was said and decided — message text and thinking verbatim, tool calls as short
-  `[used tool: X]` labels, tool results as size labels. Subagent conversations are stored separately
-  and aren't read yet.
+- **Transcripts are rendered lossily on purpose, and it costs more than it sounds.** A real long
+  conversation's raw log is multi-megabyte; feeding it back verbatim would defeat the point of
+  distilling it. What survives is message text; tool calls become short `[used tool: X]` labels and
+  tool results become size labels. **Assistant thinking survives not at all** — not because this
+  renderer drops it, but because Claude Code does not persist the thinking text (measured across 60
+  session files: 2,384 thinking blocks, 0 with content). Between those two, a rendered transcript is
+  mostly the *user's* side of the conversation. Subagent conversations are stored separately and are
+  read only when you pass `--include-subagents`.
 - **A project skill can be silently shadowed by a global one of the same name.** Claude Code gives a
   personal/global skill precedence over a project skill sharing its name — confirmed by a direct
   empirical test, not assumed — so both `draft_skill_file` and `apply_plan` refuse a project-scope

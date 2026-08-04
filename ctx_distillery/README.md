@@ -172,7 +172,10 @@ carry one, each a direct child, holding 51 `.md` files and 9 `MEMORY.md` indexes
 `render_transcript_events` / `render_transcript_file` turn raw JSONL into the `list[str]` the pipeline
 expects. Deliberately lossy, and the rules are pinned by tests rather than left implicit: filter to
 `user`/`assistant` FIRST (no other event type carries `message` at all); `message.content` may be a
-plain string OR a list of blocks; `text`/`thinking` verbatim; `tool_use` → `[used tool: X]`;
+plain string OR a list of blocks; `text`/`thinking` verbatim — though `thinking` yields NOTHING in
+practice, because Claude Code stores the block with an empty `thinking` field (measured: 2,384
+blocks across 60 session files, 0 with content), so this is a renderer that is correct about a
+source that carries nothing; `tool_use` → `[used tool: X]`;
 `tool_result` → `N chars` or `N blocks` depending on ITS OWN content's shape; anything unrecognized →
 `[unrecognized content block: X]`, never dropped. `home=` exists so no test ever reads the real
 `~/.claude`.

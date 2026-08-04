@@ -12,6 +12,52 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **This project now ships itself as a Claude Code Skill: `skills/ctx-distillery-plan/`, installable
+  without cloning** — `npx skills add qazbnm456/ctx-distillery` (which is what indexes it on
+  skills.sh and what makes it work in Codex/Cursor/the other agents that CLI supports), or natively
+  via the new `.claude-plugin/marketplace.json`. **It is the PLANNER half ONLY, and the absent apply
+  skill IS the safety mechanism** — an adversarial review of the first draft (two skills, one per
+  binary) killed the apply half along with two claims made for it, both of which look like gates and
+  are not; `CLAUDE.md` invariant 8's closing paragraph holds the argument. The plan skill PRINTS the
+  `ctx-distillery-apply … --approve <indices>` line for a human to run, exactly as `_cmd_distill`
+  already does, and carries no steps for driving it. It also declares no `allowed-tools` at all: the
+  drafted grant would have pre-approved `distill`, which bills the operator and ships their redacted
+  history off-box, for every project on the machine (`*` matches spaces).
+
+  The CLI it drives stays a separate install:
+  `uv tool install "ctx-distillery[cli] @ git+https://github.com/qazbnm456/ctx-distillery"`, adding
+  `--with "litellm<1.95"` on macOS. Both halves of that are load-bearing and were found by testing
+  the command rather than reasoning about it: the `[cli]` extra is required because `openai` is
+  imported INSIDE `config.make_chat_fn`'s closure, so a bare install fails mid-trajectory rather
+  than at startup; and `litellm` (transitive, via `dspy`) ships no macOS wheel at 1.95+, so it
+  builds from an sdist that now needs Rust and dies in `maturin`. A `uv sync` checkout is unaffected
+  (`uv.lock` pins a buildable version; `uv tool install` does not read a lockfile). No PyPI release:
+  `rlm-kit` is not on PyPI and this project's git pin for it lives in `[tool.uv.sources]`, which
+  does not survive into published wheel metadata (verified by building the wheel —
+  `Requires-Dist: rlm-kit`, bare), so `pip install ctx-distillery` could not resolve.
+
+  `tests/test_skill_contract.py` pins what is mechanical (a case count is deliberately not quoted —
+  nothing enforces one, and the first draft of this entry was already stale by a case): frontmatter
+  carries `name` +
+  `description` (**required** by the `npx skills` CLI, which SKIPS a skill missing either — stricter
+  than Claude Code, where both are optional); `name` equals the DIRECTORY name, because
+  `vercel-labs/skills` derives the install directory as `skill.name || basename(skill.path)`, so the
+  tempting `name: plan` would have put a bare `/plan` in every project an installer opens; the
+  shipped `SKILL.md` passes this project's OWN `make_skill_validator`; no skill pre-approves a tool
+  (an ALLOWLIST on the key — `Bash(uv run *)`, `Bash(*)` and a bare `Bash` all defeat a blocklist);
+  and **every command a skill prints parses through the real `build_parser().parse_args()`**, which
+  a "scrape `--flag` tokens" check cannot do — it sees neither subcommand scoping (`--json` is on
+  `distill` and `show` but not `export`), nor `required=True`, nor `choices`.
+
+- **Two README claims corrected in the same commit, because this change makes that file the entry
+  point for people who never read the code.** It said transcripts keep "message text and thinking
+  verbatim" — the measurement is that thinking renders to **0%** (2,384 blocks across 60 session
+  files, none with content, because Claude Code does not persist the thinking text), which together
+  with `tool_use` collapsing to a label is why a rendered transcript is mostly the user's side; the
+  same wording survived in `ctx_distillery/README.md` and `adapters/claude_code.py` and was swept
+  there too. And it said subagent conversations "aren't read yet", which its own line 22 already
+  contradicted — they are read, opt-in, via `--include-subagents`.
+
 - **`ctx-distillery-studio` gained an OPT-IN live-drive endpoint, `POST /v1/distill`, off unless the
   operator sets `CTXD_LIVE_PROJECTS`.** This reopens a refusal `CLAUDE.md` invariant 10 previously
   stated outright ("there is no live-drive endpoint"), on the four conditions that invariant itself
