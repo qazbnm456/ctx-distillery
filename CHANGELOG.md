@@ -12,6 +12,22 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A `prune` that names no target is now flagged where it is REVIEWED, not only where it is refused.**
+  `apply` has always refused one (`test_a_prune_with_no_target_path_is_refused` predates this), but
+  `assemble` reported `problems=[]` for it — so `ctx-distillery show` rendered a candidate that could
+  never be applied as though it were fine, and the operator found out only after approving it. Found
+  by a live run whose planner keyed its prune on `existing_memory_path` instead of `target_path`.
+  Same reasoning `draft_ok is False` already gets: a structurally unapplicable candidate should say
+  so on the review surface. Only PRESENCE is checked here — whether the path matches a real artifact
+  stays `apply_plan`'s call, because it re-scans the store at apply time precisely because the run's
+  snapshot is stale by construction, and `assemble` has no store to check against.
+
+  Two existing tests documented the old behaviour explicitly and were updated rather than relaxed:
+  `test_a_prune_without_a_target_path_is_not_counted_as_named` asserted `n_candidate_problems == 0`
+  with a docstring stating the gap in words, and `test_keep_and_prune_need_no_artifact` passed a
+  prune with no target — its parametrization now carries a well-formed `key_fields` per action, so
+  it still tests the thing it is named for.
+
 - **Two bugs found by the first live end-to-end run, neither of which any offline test could see.**
   Both were fixed against the endpoint that exposed them, and both are pinned in both directions.
 

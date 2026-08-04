@@ -344,6 +344,24 @@ def assemble(events: Sequence[dict], plan: DistillPlan) -> AssembledPlan:
                     f"{candidate.artifact_id!r}, but only "
                     f"{list(PROMOTION_ACTIONS)} draft an artifact"
                 )
+            # A `prune` MUST name its target. `apply.py` has always refused one that does not
+            # (`tests/test_apply.py::test_a_prune_with_no_target_path_is_refused`), but until this
+            # check existed the refusal was the FIRST time anyone heard about it: `assemble` reported
+            # `problems=[]`, so `ctx-distillery show` rendered a candidate that could never be
+            # applied as though it were fine, and the operator learned otherwise only after
+            # approving it. Found by a live run, where the planner proposed a prune keyed on
+            # `existing_memory_path` instead. The same reasoning `draft_ok is False` already gets:
+            # a candidate that is structurally unapplicable should say so where it is REVIEWED.
+            #
+            # Only PRESENCE is checked here. Whether the path matches a real artifact is
+            # `apply_plan`'s call and deliberately stays there — it re-scans the store at apply
+            # time precisely because the run's own snapshot is stale by construction, and this
+            # function has no store to check against.
+            if candidate.action == "prune" and not str(out.key_fields.get("target_path") or "").strip():
+                out.problems.append(
+                    "action 'prune' carries no usable `key_fields[\"target_path\"]`, so nothing "
+                    "identifies the file it proposes to remove — apply refuses such a candidate"
+                )
             assembled.candidates.append(out)
             continue
         tool = _DRAFT_TOOL_FOR_ACTION[candidate.action]

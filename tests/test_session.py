@@ -117,12 +117,22 @@ def test_a_skill_candidate_assembles_from_the_skill_tool():
     assert out.candidates[0].draft_ok is True and out.candidates[0].problems == []
 
 
-@pytest.mark.parametrize("action", ["keep", "prune"])
-def test_keep_and_prune_need_no_artifact(action):
-    out = assemble([], _plan({"action": action, "key_fields": {"reason": "stale"}}))
+#: `prune` additionally has to NAME its target, which is a separate requirement from needing no
+#: artifact — so the well-formed shape differs per action and the parametrization carries it. Giving
+#: prune a `target_path` is what keeps the test below about the thing it is named for; without it,
+#: the prune case would fail on the target check and say nothing about artifacts.
+_WELL_FORMED_NON_PROMOTION = [
+    ("keep", {"reason": "stale"}),
+    ("prune", {"reason": "stale", "target_path": "/memory/a.md"}),
+]
+
+
+@pytest.mark.parametrize(("action", "key_fields"), _WELL_FORMED_NON_PROMOTION)
+def test_keep_and_prune_need_no_artifact(action, key_fields):
+    out = assemble([], _plan({"action": action, "key_fields": key_fields}))
     candidate = out.candidates[0]
     assert candidate.draft is None and candidate.problems == []
-    assert candidate.key_fields == {"reason": "stale"}
+    assert candidate.key_fields == key_fields
 
 
 @pytest.mark.parametrize("action", ["keep", "prune"])
