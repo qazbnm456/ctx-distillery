@@ -12,6 +12,43 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **Two bugs found by the first live end-to-end run, neither of which any offline test could see.**
+  Both were fixed against the endpoint that exposed them, and both are pinned in both directions.
+
+  **A correct memory file was rejected for two leading newlines.** `frontmatter.parse` required the
+  opening `---` to be line 0, on the reasoning that tolerating blank lines would let a body's own
+  horizontal rule look like frontmatter. A real drafting call returned `'\n\n---\nname: ...'` — a
+  complete, valid file — and the whole artifact was thrown away with "no parseable YAML frontmatter".
+  The cost was wildly asymmetric: leading newlines are a shape language models emit constantly, while
+  the guarded-against case needs a document whose first non-blank line is a horizontal rule AND a
+  second `---` later AND the text between to parse as a mapping. Only genuinely EMPTY lines are now
+  skipped; content before the delimiter still means there is no frontmatter. (An indented `---` has
+  always been accepted, because the comparison strips the line — stated because an earlier draft of
+  this fix's docstring claimed the opposite and a test caught it.)
+
+  **`temperature=0.0` was hardcoded, which made the entire GPT-5 family unusable as the drafter.**
+  Every drafting call failed with `Unsupported value: 'temperature' does not support 0 with this
+  model. Only the default (1) value is supported.` — so the best model many operators hold could not
+  fill the role at all. `make_chat_fn` now retries once WITHOUT the parameter when a 400 mentions
+  temperature, and re-raises any other 400 untouched. It is a parameter-compatibility fallback, not a
+  transient retry: `max_retries=0` stays deliberate because `make_model_tool` owns transient retries,
+  and an endpoint that accepts `temperature` still costs exactly one request.
+
+  Worth recording separately: when the drafter was failing, the run degraded exactly as designed —
+  a `keep` with a stated reason, `cause` correctly `endpoint` rather than `invalid`, and no pretence
+  of success. That is what `CLAUDE.md` invariant 12 exists for, holding under a real fault.
+
+- **`examples/demo-run.jsonl` — a real finished run, readable with no credentials and no model.**
+  `ctx-distillery show` is the README's second command and the shipped skill's default path, and a
+  fresh install had nothing to point either at. This is a genuine artifact rather than a fixture: the
+  checked-in `eval/` demo transcript, materialized into a throwaway `~/.claude` layout under `/tmp`
+  so no real path reaches the trace, then distilled by a live run — 12 KB, one `promote_to_memory`
+  candidate with `draft_ok=True` and the memory file it drafted. `examples/README.md` records how to
+  regenerate it, including the non-obvious part: re-running after applying the promotion correctly
+  proposes `prune` instead, because the fact is no longer new, so reproduction starts from a fresh
+  demo root. The wheel does not carry it (verified), so the README offers a one-line `curl` for
+  people who installed from PyPI.
+
 ## [0.1.0] - 2026-08-04
 
 - **A `release.yml` now publishes to PyPI over Trusted Publishing (OIDC), with no API token.** Adapted

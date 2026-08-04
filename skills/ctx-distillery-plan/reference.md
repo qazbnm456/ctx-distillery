@@ -3,6 +3,14 @@
 Companion to `SKILL.md`. Load this when reading a plan in detail, when a run refuses to start, or
 when the operator asks what will happen if they apply something.
 
+**If the operator has never seen a plan and is unsure what this proposes**, show them a real one
+instead of describing it. A finished run ships with the project and needs no credentials:
+
+```
+curl -sO https://raw.githubusercontent.com/qazbnm456/ctx-distillery/main/examples/demo-run.jsonl
+ctx-distillery show demo-run.jsonl
+```
+
 ## The plan rendering, field by field
 
 `ctx-distillery show <trace>` prints one block per candidate. Every field is assembled by *re-reading

@@ -229,3 +229,84 @@ def test_config_module_has_no_dspy_at_module_level():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "ok"
+
+
+# --------------------------------------------------------------------------------------------------
+# `make_chat_fn`'s temperature-compatibility fallback.
+#
+# Found by a LIVE run, not by review: every drafting call against a GPT-5-family drafter failed with
+# `Unsupported value: 'temperature' does not support 0 with this model.`, so the whole drafting role
+# was unusable with the best model many operators hold. Both directions are pinned — the fallback
+# fires for a 400 about temperature, and a 400 about anything else still propagates rather than
+# being swallowed by a broad handler.
+# --------------------------------------------------------------------------------------------------
+
+
+def _fake_openai(monkeypatch):
+    """Install a fake `openai` module. Returns `(calls, BadRequestError, failures)`: append an
+    exception to `failures` and the next `create` raises it instead of returning."""
+    import sys
+    import types
+
+    calls: list[dict] = []
+    failures: list[Exception] = []
+
+    class BadRequestError(Exception):
+        pass
+
+    class _Completions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            if failures:
+                raise failures.pop(0)
+            return types.SimpleNamespace(
+                choices=[types.SimpleNamespace(message=types.SimpleNamespace(content="drafted"))]
+            )
+
+    class OpenAI:
+        def __init__(self, **_):
+            self.chat = types.SimpleNamespace(completions=_Completions())
+
+    module = types.ModuleType("openai")
+    module.OpenAI = OpenAI
+    module.BadRequestError = BadRequestError
+    monkeypatch.setitem(sys.modules, "openai", module)
+    return calls, BadRequestError, failures
+
+
+def test_a_temperature_refusal_is_retried_without_the_parameter(monkeypatch) -> None:
+    """The real message, verbatim from the live run that found this."""
+    from ctx_distillery.config import DistillConfig, make_chat_fn
+
+    calls, bad_request, failures = _fake_openai(monkeypatch)
+    failures.append(bad_request(
+        "Error code: 400 - Unsupported value: 'temperature' does not support 0 with this model. "
+        "Only the default (1) value is supported."
+    ))
+    assert make_chat_fn(DistillConfig(main_model="m", draft_model="d"))("spec") == "drafted"
+
+    assert len(calls) == 2, "the refusal should be retried exactly once"
+    assert calls[0]["temperature"] == 0.0
+    assert "temperature" not in calls[1], "the retry must OMIT the parameter, not pick another value"
+    assert calls[1]["model"] == "d"
+    assert calls[1]["messages"] == calls[0]["messages"]
+    assert calls[1]["max_tokens"] == calls[0]["max_tokens"]
+
+
+def test_a_400_about_anything_else_still_propagates(monkeypatch) -> None:
+    from ctx_distillery.config import DistillConfig, make_chat_fn
+
+    calls, bad_request, failures = _fake_openai(monkeypatch)
+    failures.append(bad_request("Error code: 400 - model not found"))
+    with pytest.raises(bad_request, match="model not found"):
+        make_chat_fn(DistillConfig(main_model="m", draft_model="d"))("spec")
+    assert len(calls) == 1, "a 400 that is not about temperature must not be retried"
+
+
+def test_an_endpoint_that_accepts_temperature_pays_nothing(monkeypatch) -> None:
+    """The fallback must cost one request, not two, on every endpoint that works today."""
+    from ctx_distillery.config import DistillConfig, make_chat_fn
+
+    calls, _, _ = _fake_openai(monkeypatch)
+    assert make_chat_fn(DistillConfig(main_model="m", draft_model="d"))("spec") == "drafted"
+    assert len(calls) == 1 and calls[0]["temperature"] == 0.0

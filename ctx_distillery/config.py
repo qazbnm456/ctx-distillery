@@ -314,7 +314,7 @@ def make_chat_fn(config: DistillConfig) -> Callable[[str], Any]:
     """
 
     def _chat(spec: str) -> str:
-        from openai import OpenAI
+        from openai import BadRequestError, OpenAI
 
         client = OpenAI(
             base_url=config.draft_base_url or config.base_url,
@@ -322,12 +322,29 @@ def make_chat_fn(config: DistillConfig) -> Callable[[str], Any]:
             max_retries=0,
             timeout=_DRAFT_TIMEOUT,
         )
-        reply = client.chat.completions.create(
-            model=config.draft_model or config.sub_model or config.main_model,
-            temperature=0.0,
-            max_tokens=_DRAFT_MAX_TOKENS,
-            messages=[{"role": "user", "content": spec}],
-        )
+        request: dict[str, Any] = {
+            "model": config.draft_model or config.sub_model or config.main_model,
+            "max_tokens": _DRAFT_MAX_TOKENS,
+            "messages": [{"role": "user", "content": spec}],
+        }
+        try:
+            reply = client.chat.completions.create(temperature=0.0, **request)
+        except BadRequestError as exc:
+            # `temperature=0` is the right ask for drafting a structured file, and it is also
+            # REFUSED outright by the newer reasoning models, which accept only the default. Found
+            # by a live run: every drafting call against a GPT-5-family drafter failed with
+            # `Unsupported value: 'temperature' does not support 0 with this model. Only the default
+            # (1) value is supported.`, so the whole role was unusable with the best model many
+            # operators have. Retrying WITHOUT the parameter costs one extra request on exactly the
+            # endpoints that would otherwise fail outright, and nothing on the ones that accept it.
+            #
+            # This is a PARAMETER-COMPATIBILITY fallback, not a transient retry — `max_retries=0`
+            # above stays deliberate, because `make_model_tool` owns transient retries and doubling
+            # the two turns a 60s timeout into minutes. A 400 that is not about `temperature`
+            # re-raises untouched rather than being swallowed by a broad handler.
+            if "temperature" not in str(exc).lower():
+                raise
+            reply = client.chat.completions.create(**request)
         return reply.choices[0].message.content or ""
 
     return _chat
