@@ -12,6 +12,25 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The shipped skill's `description` was rewritten after dogfooding showed it claiming ground it
+  does not own, and step 1 now offers the Claude subscription route.** A fresh session asked "what
+  in this project's accumulated memory is worth keeping" and the skill never fired — correctly. The
+  target was three files totalling 6 KB, this project had no trace of its own, and no `CD_*`
+  credentials were set, so firing would have routed a thirty-second read into "configure credentials
+  and pay for a run". The direct answer was also better: it verified each memory against the CURRENT
+  code, which the planner cannot do at all. The old description invited exactly that request
+  ("clean up a project's accumulated agent memory"); it now leads with the differentiator that is
+  real — transcript history far larger than fits in context — and carries an explicit NOT-for
+  clause. A skill that declines the requests it would serve badly is worth more than one that wins
+  them.
+
+  The subscription branch is stated with the limit that will otherwise bite: `CD_ROOT_LM=claude-agent-sdk/<id>`
+  moves the PLANNER (nearly all the tokens) onto the operator's Pro/Max plan, but the drafter cannot
+  follow it, so `CD_DRAFT_LM` still needs a real model and a key — verified against `from_env`, which
+  refuses the inherited sentinel outright. The saving is most of the cost, not the setup. The skill
+  asks before switching anyone onto their own subscription usage, and says that driving the Agent SDK
+  from inside a Claude Code session is unverified rather than pretending otherwise.
+
 - **`rlm-kit` was renamed upstream to `rlm-harness` (package, import name and GitHub repository), and
   this project followed it: 334 replacements across 59 files, plus `uv.lock`.** The upstream version
   went 0.2.0 -> 1.0.0 at the same time, but this is a PURE rename here — every name this project

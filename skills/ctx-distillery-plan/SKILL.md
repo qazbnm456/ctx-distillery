@@ -1,7 +1,7 @@
 ---
 name: ctx-distillery-plan
-description: Propose a distillation plan over a project's Claude Code history — what is safe to prune, and what durable knowledge is worth promoting into a memory file or a reusable Skill. Reads transcripts and the memory store, proposes judgements, and writes nothing. Use when asked to distil, review, prune, or clean up a project's accumulated agent memory, or to re-read a finished run's plan.
-when_to_use: The user asks to distil or clean up their Claude Code memory/history, to find what is worth promoting into a memory file or Skill, to review a ctx-distillery run, or to read a trace file produced by a previous run.
+description: Distil a project's Claude Code TRANSCRIPT history — dozens to hundreds of past conversations, far more than fits in context — into a reviewable plan of what durable knowledge is worth promoting into a memory file or a reusable Skill, and which existing memories are safe to prune. Reads transcripts plus the memory store, proposes judgements, and writes nothing. Needs either a finished run's trace file, or credentials and a Deno sandbox for a live run that bills the operator. NOT for auditing a handful of memory files that fit in context — read those directly instead, which is faster, free, and lets you verify each one against the current code.
+when_to_use: The user wants durable knowledge mined out of a LARGE body of past conversations ("what did I learn across all my sessions on X", "turn my history with this project into something reusable"), or wants to read/review a ctx-distillery trace file. Do NOT invoke it merely because the user said "memory" or "clean up" — if the target is a few files you can open, open them.
 ---
 
 # ctx-distillery — propose a distillation plan
@@ -53,9 +53,32 @@ as unverified and check `ctx-distillery --help` before using it.
 
 ## Step 1 — a live run (only when explicitly asked)
 
-Needs credentials (`CD_ROOT_LM`, `CD_API_KEY`, and `CD_DRAFT_LM` if the planner rides a Claude
-subscription) and a Deno sandbox (`deno --version`; `brew install deno`). Check both before
-running, and say which one is missing rather than letting the run fail partway.
+Needs a Deno sandbox (`deno --version`; `brew install deno`) and model credentials. Check both
+before running, and say which one is missing rather than letting the run fail partway.
+
+There are two seats, and they are configured separately:
+
+* the **planner** (`CD_ROOT_LM`) — the long-running one, and where nearly all the tokens go;
+* the **drafter** (`CD_DRAFT_LM`) — writes the memory/skill file bodies.
+
+**Offer the subscription route when it applies.** If `claude` is on PATH and `ANTHROPIC_API_KEY` is
+unset, the operator can run the *planner* on their own Claude Pro/Max subscription instead of an API
+key, by setting `CD_ROOT_LM=claude-agent-sdk/<model-id>`. **Ask them first, and say plainly that it
+consumes their subscription usage** — do not switch them onto it silently.
+
+Two things to state when you offer it, both of which will otherwise bite:
+
+1. **It does not remove the need for an API key.** The drafter cannot ride the subscription — it
+   talks to an OpenAI-compatible endpoint directly — so `CD_DRAFT_LM` must name a real model and
+   have a key. Leaving it unset makes the drafter inherit the `claude-agent-sdk/` sentinel and the
+   run refuses to start. That refusal is deliberate and it is the correct behaviour; do not work
+   around it. The saving is most of the *cost*, not the *setup*.
+2. **It needs the `subscription` extra**, so the install becomes
+   `uv tool install --with "litellm<1.95" "ctx-distillery[cli,subscription] @ git+https://github.com/qazbnm456/ctx-distillery"`,
+   and the Claude Code CLI has to be logged in.
+
+Driving the Agent SDK from inside a Claude Code session is not something this project has verified.
+If it fails, say so and fall back to an API key for the planner rather than debugging it in place.
 
 ```
 ctx-distillery distill /path/to/project
