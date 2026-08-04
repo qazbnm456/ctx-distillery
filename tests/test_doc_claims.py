@@ -108,6 +108,21 @@ def test_claude_md_states_the_cap_the_code_uses() -> None:
 
 RUFF_PIN_FILES = ("Makefile", ".github/workflows/ci.yml", "CLAUDE.md")
 
+#: Both workflows install uv through the same SHA-pinned action, and `release.yml`'s own header says
+#: to keep them in step. Same reasoning as the ruff pin below it: two copies is two chances to bump
+#: one. Not folded into `RUFF_PIN_FILES` because it is a different pin with a different bump cadence.
+SETUP_UV_PIN_FILES = (".github/workflows/ci.yml", ".github/workflows/release.yml")
+
+
+def test_setup_uv_is_pinned_to_one_sha_in_both_workflows() -> None:
+    found = {rel: set(re.findall(r"astral-sh/setup-uv@([0-9a-f]{40})", _read(rel)))
+             for rel in SETUP_UV_PIN_FILES}
+    for relative, shas in found.items():
+        assert shas, f"{relative} no longer SHA-pins astral-sh/setup-uv — pin it, never use a tag"
+    assert len(set().union(*found.values())) == 1, (
+        f"the two workflows install uv from different pinned SHAs: {found}"
+    )
+
 
 def test_the_ruff_pin_is_identical_in_every_place_that_carries_it() -> None:
     found = {rel: set(re.findall(r"ruff@(\d+\.\d+\.\d+)", _read(rel))) for rel in RUFF_PIN_FILES}
@@ -277,4 +292,47 @@ def test_claude_md_states_the_refusal_and_never_calls_it_a_cap() -> None:
         "CLAUDE.md invariant 8 must say explicitly that `slugify` does NOT truncate. Naming the "
         "refusal alone is not enough — the wording that drifted read as a cap precisely because it "
         "sat next to three sluggers that cap."
+    )
+
+
+# --------------------------------------------------------------------------------------------------
+# Claim 6: the release workflow's two irreversibility guards survive.
+#
+# Publishing to PyPI is the one action in this repository that cannot be undone — a version number
+# can never be reused. Two things in `.github/workflows/release.yml` stand between a mistake and a
+# permanent one, and both are a single deletable line:
+#
+#   * the FORK GUARD, which stops a fork's own release from asking PyPI to publish OUR project;
+#   * the TAG/VERSION check, which stops `v0.2.0` from shipping a wheel that says `0.1.0`.
+#
+# Neither can fail visibly in testing: the fork guard only matters in someone else's repository, and
+# the version check only fires on a mismatch nobody creates on purpose. So they are pinned here.
+# --------------------------------------------------------------------------------------------------
+
+RELEASE_WORKFLOW = ".github/workflows/release.yml"
+
+
+def test_the_release_workflow_only_publishes_from_this_repository() -> None:
+    source = _read(RELEASE_WORKFLOW)
+    guard = re.search(r"if:\s*github\.repository\s*==\s*'([^']+)'", source)
+    assert guard is not None, (
+        f"{RELEASE_WORKFLOW}'s publish job lost its `if: github.repository == '...'` fork guard. "
+        f"`release: published` is inherited by every fork, so without it a fork cutting a release "
+        f"asks PyPI to publish this project."
+    )
+    expected = "qazbnm456/ctx-distillery"
+    assert guard.group(1) == expected, (
+        f"the fork guard names {guard.group(1)!r}, not {expected!r} — a guard on the wrong "
+        f"repository is the same as no guard"
+    )
+
+
+def test_the_release_workflow_refuses_a_tag_that_disagrees_with_the_version() -> None:
+    """A PyPI version can never be reused, so a tag/version mismatch is unrecoverable rather than
+    merely wrong. `test_version_matches_pyproject` already ties `__version__` to `pyproject.toml`;
+    this ties the git TAG to the same number, which is the half CI cannot otherwise see."""
+    source = _read(RELEASE_WORKFLOW)
+    assert 'github.event.release.tag_name' in source and '"v$version"' in source, (
+        f"{RELEASE_WORKFLOW} no longer compares the release tag against `pyproject.toml`'s version. "
+        f"Without it, a `vX.Y.Z` tag can publish a wheel claiming some other version, permanently."
     )
