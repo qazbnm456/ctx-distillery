@@ -12,6 +12,29 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The shipped skill told an agent to check credentials, and an agent read `.env` to do it.** Caught
+  by running the trigger test as a genuinely fresh `claude -p` process. Step 1 asked it to confirm
+  `CD_ROOT_LM` / `CD_API_KEY` before a live run without saying HOW, so it opened the file and pulled
+  a live key into its context. Partly induced by that probe disallowing `Bash` — with no `printenv`
+  available, `Read` is the obvious fallback — but the guidance was missing either way, and this
+  project feeds transcripts to a model later, so a key that lands in one is exactly the wrong place
+  for it. The skill now says to check PRESENCE in the environment, gives `printenv CD_ROOT_LM
+  CD_DRAFT_LM` and a non-empty test for keys, and forbids opening `.env`/`.envrc` or printing a
+  value at all.
+
+  The same run surfaced two more: the skill's install commands still pointed at
+  `git+https://…/ctx-distillery` after 0.1.0 shipped to PyPI, disagreeing with the README on the
+  project's own front door; and the subscription offer described its two conditions in prose without
+  giving the check, so an agent had to invent one. Both fixed — the install matches the README, and
+  the offer leads with `command -v claude && printenv ANTHROPIC_API_KEY`, plus an explicit "do not
+  treat a Claude Code session as consent".
+
+  **The trigger test itself passed in both directions**, which is what the description rewrite was
+  for: a large-history prompt loaded the skill as its first action and then followed step 0, while
+  "看看這個專案的記憶檔有哪些可以刪掉" — the exact sentence whose earlier non-triggering prompted the
+  rewrite — correctly did not load it and went straight to reading the three files. Same behaviour as
+  before the rewrite, but now by design rather than by luck.
+
 - **A `prune` that names no target is now flagged where it is REVIEWED, not only where it is refused.**
   `apply` has always refused one (`test_a_prune_with_no_target_path_is_refused` predates this), but
   `assemble` reported `problems=[]` for it — so `ctx-distillery show` rendered a candidate that could

@@ -28,7 +28,7 @@ If it is missing, ask the operator to install it. The `[cli]` extra is required 
 bare install omits the model client and fails *mid-run*, after the trace file already exists:
 
 ```
-uv tool install "ctx-distillery[cli] @ git+https://github.com/qazbnm456/ctx-distillery"
+uv tool install "ctx-distillery[cli]"
 ```
 
 **On macOS that command currently fails**, and the error is a Rust/`maturin` build failure that
@@ -36,7 +36,7 @@ says nothing about this project. Cause: `litellm` (pulled in transitively by `ds
 wheel at 1.95+, so it is built from source. Add a constraint:
 
 ```
-uv tool install --with "litellm<1.95" "ctx-distillery[cli] @ git+https://github.com/qazbnm456/ctx-distillery"
+uv tool install --with "litellm<1.95" "ctx-distillery[cli]"
 ```
 
 Inside a checkout of ctx-distillery itself, `uv run ctx-distillery ...` also works and needs neither
@@ -56,15 +56,37 @@ as unverified and check `ctx-distillery --help` before using it.
 Needs a Deno sandbox (`deno --version`; `brew install deno`) and model credentials. Check both
 before running, and say which one is missing rather than letting the run fail partway.
 
+**Check credentials by PRESENCE in the environment. Never open `.env`, `.envrc`, or any other
+credential file, and never print a key's value.** What you need to know is whether a variable is
+set, which the environment answers without the secret ever entering this conversation:
+
+```
+printenv CD_ROOT_LM CD_DRAFT_LM
+```
+
+That prints the model ids, which are safe and are what you actually need; it says nothing about the
+keys' values. For the keys, test only that they are non-empty — `[ -n "$CD_API_KEY" ] && echo set`.
+If the variables are unset, say so and let the operator load their own environment (`set -a;
+. ./.env; set +a`) rather than reading the file yourself. A key you read lands in the transcript,
+and this project's whole purpose is feeding transcripts to a model later.
+
 There are two seats, and they are configured separately:
 
 * the **planner** (`CD_ROOT_LM`) — the long-running one, and where nearly all the tokens go;
 * the **drafter** (`CD_DRAFT_LM`) — writes the memory/skill file bodies.
 
-**Offer the subscription route when it applies.** If `claude` is on PATH and `ANTHROPIC_API_KEY` is
-unset, the operator can run the *planner* on their own Claude Pro/Max subscription instead of an API
-key, by setting `CD_ROOT_LM=claude-agent-sdk/<model-id>`. **Ask them first, and say plainly that it
-consumes their subscription usage** — do not switch them onto it silently.
+**Offer the subscription route when it applies.** Two conditions, both answerable without opening
+anything:
+
+```
+command -v claude && printenv ANTHROPIC_API_KEY
+```
+
+If `claude` is present and `ANTHROPIC_API_KEY` prints nothing, the operator can run the *planner* on
+their own Claude Pro/Max subscription instead of an API key, by setting
+`CD_ROOT_LM=claude-agent-sdk/<model-id>`. **Ask them first, and say plainly that it consumes their
+subscription usage** — do not switch them onto it silently, and do not treat a Claude Code session
+as consent.
 
 Two things to state when you offer it, both of which will otherwise bite:
 
@@ -74,7 +96,7 @@ Two things to state when you offer it, both of which will otherwise bite:
    run refuses to start. That refusal is deliberate and it is the correct behaviour; do not work
    around it. The saving is most of the *cost*, not the *setup*.
 2. **It needs the `subscription` extra**, so the install becomes
-   `uv tool install --with "litellm<1.95" "ctx-distillery[cli,subscription] @ git+https://github.com/qazbnm456/ctx-distillery"`,
+   `uv tool install --with "litellm<1.95" "ctx-distillery[cli,subscription]"`,
    and the Claude Code CLI has to be logged in.
 
 Driving the Agent SDK from inside a Claude Code session is not something this project has verified.
