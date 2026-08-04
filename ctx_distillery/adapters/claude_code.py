@@ -510,7 +510,12 @@ def render_transcript_events(events: Iterable[dict], *, include_sidechain: bool 
     * `message.content` is EITHER a plain string (really occurs) or a list of typed blocks. A string
       is used as-is; in a list, `text`/`thinking` contribute their text verbatim, `tool_use` a short
       `[used tool: X]` label, and `tool_result` a size label whose UNIT depends on its OWN content
-      being a string or a list (both really occur — never assume one shape for it).
+      being a string or a list (both really occur — never assume one shape for it). "Verbatim" is
+      the RULE, not a prediction about volume: a `thinking` block's own `thinking` field is EMPTY in
+      every transcript Claude Code writes (measured: 2,384 blocks across 60 session files, 0 with
+      content), so that branch contributes nothing and `_render_block` returning `""` for it is
+      correct. Do not "fix" it, and do not reach for the ~1,840-char `signature` — that is a crypto
+      signature, not prose.
     * an unrecognized block type contributes `[unrecognized content block: X]` rather than raising
       or silently vanishing, so a future block type shows up as a visible gap instead of a lie.
 
