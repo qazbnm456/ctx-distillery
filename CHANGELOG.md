@@ -12,6 +12,18 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The shipped skill defaults to the CURRENT project instead of teaching a path.** Its worked
+  example was `ctx-distillery distill /path/to/project`, which is the CLI's unusual case, not its
+  normal one: `project_dir` is `nargs="?", default="."` and has been since the command existed. A
+  skill runs inside the project the operator is already in, so "in project A, distil project B" is
+  a strange thing to make the default shape — the point raised by the owner, and correct. The
+  example is now the bare `ctx-distillery distill`, with an explicit path called out as the case to
+  confirm before using; `--project .` likewise for the apply line it prints, since that flag is
+  `required=True` and must name the same project the run covered. The frontmatter now also states
+  the scope directly, because it is a real limit and not just a default: ONE run covers ONE project
+  — `for_project` resolves exactly one storage directory and `transcript_files` reads only that one.
+  There is no mode that ingests every project at once, and nothing here implies otherwise any more.
+
 - **The shipped skill's `description` was rewritten after dogfooding showed it claiming ground it
   does not own, and step 1 now offers the Claude subscription route.** A fresh session asked "what
   in this project's accumulated memory is worth keeping" and the skill never fired — correctly. The
