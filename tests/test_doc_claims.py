@@ -108,19 +108,32 @@ def test_claude_md_states_the_cap_the_code_uses() -> None:
 
 RUFF_PIN_FILES = ("Makefile", ".github/workflows/ci.yml", "CLAUDE.md")
 
-#: Both workflows install uv through the same SHA-pinned action, and `release.yml`'s own header says
-#: to keep them in step. Same reasoning as the ruff pin below it: two copies is two chances to bump
-#: one. Not folded into `RUFF_PIN_FILES` because it is a different pin with a different bump cadence.
-SETUP_UV_PIN_FILES = (".github/workflows/ci.yml", ".github/workflows/release.yml")
+#: Every workflow that installs uv must do it from the SAME pinned SHA. Same reasoning as the ruff
+#: pin below: N copies of a version is N chances to bump N-1 of them. Not folded into
+#: `RUFF_PIN_FILES` — a different pin with a different bump cadence.
+#:
+#: DERIVED from the directory rather than hard-coded, because the hard-coded tuple that used to live
+#: here drifted within a single afternoon: `install-check.yml` landed as a third workflow and the
+#: check kept passing while covering two of three. A list of files that must all agree should never
+#: be a list somebody has to remember to extend.
+def _workflows_using_setup_uv() -> dict[str, set[str]]:
+    found = {}
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        shas = set(re.findall(r"astral-sh/setup-uv@([0-9a-f]{40})", path.read_text(encoding="utf-8")))
+        if shas or "astral-sh/setup-uv" in path.read_text(encoding="utf-8"):
+            found[path.relative_to(ROOT).as_posix()] = shas
+    return found
 
 
-def test_setup_uv_is_pinned_to_one_sha_in_both_workflows() -> None:
-    found = {rel: set(re.findall(r"astral-sh/setup-uv@([0-9a-f]{40})", _read(rel)))
-             for rel in SETUP_UV_PIN_FILES}
+def test_every_workflow_pins_setup_uv_to_one_sha() -> None:
+    found = _workflows_using_setup_uv()
+    assert len(found) >= 2, f"expected several workflows to install uv; found {list(found)}"
     for relative, shas in found.items():
-        assert shas, f"{relative} no longer SHA-pins astral-sh/setup-uv — pin it, never use a tag"
+        assert shas, (
+            f"{relative} references astral-sh/setup-uv without a 40-hex SHA — pin it, never a tag"
+        )
     assert len(set().union(*found.values())) == 1, (
-        f"the two workflows install uv from different pinned SHAs: {found}"
+        f"workflows install uv from different pinned SHAs: {found}"
     )
 
 

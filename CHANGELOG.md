@@ -12,6 +12,30 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A scheduled `install-check.yml` asks whether the PUBLISHED front door still works.** Every other
+  job runs `uv sync`, which reads `uv.lock`, so anything that breaks only OUTSIDE the lockfile is
+  invisible to CI and reaches a user first. That is not hypothetical — it happened twice in one day:
+  the `rlm-kit` -> `rlm-harness` rename left the published `uv tool install` command dead for
+  everyone while `make check` stayed green, and `litellm` dropping its macOS wheel at 1.95+ is a
+  class all five existing jobs are structurally blind to, being ubuntu-only. Both were found by a
+  human happening to run an install by hand; this is that habit on a timer.
+
+  It installs the RELEASED artifact from PyPI, not the checkout — the question is whether the command
+  strangers are told to run works right now, which depends on the whole dependency world rather than
+  on `main`. The corollary is stated in the file: a break introduced in `main` is not visible until
+  it is released. Each platform runs exactly the command `README.md` gives it, macOS constraint
+  included, because testing an idealized command would either go permanently red over a wheel gap
+  that is not ours to fix, or test a promise nobody was made; dropping the constraint later and
+  staying green is the signal that upstream fixed it. Verification goes past "it imports" to the
+  second command the README gives — `ctx-distillery show examples/demo-run.jsonl` must still render
+  a promotion. Scheduled plus `workflow_dispatch`, not a PR gate: the failure mode is "the world
+  moved", not "this PR broke it".
+
+  `test_doc_claims.py`'s setup-uv pin check now DERIVES its file list from the workflows directory.
+  The hard-coded tuple drifted within the same afternoon it was written — this workflow landed as a
+  third file and the check kept passing while covering two of three. A list of files that must all
+  agree should never be a list somebody has to remember to extend.
+
 - **The shipped skill told an agent to check credentials, and an agent read `.env` to do it.** Caught
   by running the trigger test as a genuinely fresh `claude -p` process. Step 1 asked it to confirm
   `CD_ROOT_LM` / `CD_API_KEY` before a live run without saying HOW, so it opened the file and pulled
