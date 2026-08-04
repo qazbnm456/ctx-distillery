@@ -472,6 +472,20 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    `allowed-tools` key must be ABSENT, never a blocklist naming spellings, since `Bash(uv run *)`
    and a bare `Bash` defeat one), and every command a skill prints parses through the REAL
    `build_parser().parse_args()` rather than merely containing flag names that exist somewhere.
+   **`.claude-plugin/marketplace.json`'s `source` names the SKILL DIRECTORY itself, with
+   `skills: ["./"]` — one level deeper than the docs' wording ("skill directories containing
+   `<name>/SKILL.md`") first suggests, and both halves of that were established by RUNNING it, not
+   by reading.** Machine-checkable half, and it is: the `npx skills` CLI keys its plugin-grouping
+   map on `resolve(join(source, skillPath))` (`plugin-manifest.ts`) and looks it up by the SKILL's
+   own resolved directory (`skills.ts`), so the likelier-looking `source: "./"` +
+   `skills: ["./skills"]` misses by exactly one level — installing fine but ungrouped, and copying
+   the WHOLE REPOSITORY (2.7 MB) into the plugin cache on every install and update instead of 16 KB.
+   `test_skill_contract.py` pins that the target really is a shipped skill directory. **The other
+   half cannot be tested from here and needs a HUMAN**: whether Claude Code's own loader accepts the
+   shape is only knowable by running `/plugin marketplace add <this repo>` → `/plugin install` →
+   invoking the skill. It was verified that way for the CURRENT manifest, on both shapes; if
+   `source`/`skills`/`strict` ever change, re-run it — a manifest that passes every test here can
+   still fail to load, and nothing in CI would say so.
 9. **`apply_plan`'s roots are PER KIND, and a skill's containment check is its OWN check.** A skill is
    NOT a flat `<slug>.md` in the memory store: it is `<skills_root>/<slug>/SKILL.md` — one directory
    deeper, under a root that is never `memory_dir` (`~/.claude/skills` for global,

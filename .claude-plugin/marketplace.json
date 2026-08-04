@@ -10,8 +10,8 @@
     {
       "name": "ctx-distillery",
       "description": "Propose a distillation plan over a project's Claude Code transcripts and memory store. Read-only: it runs the planner and explains the result, and never runs the human-gated apply step.",
-      "source": "./",
-      "skills": ["./skills"],
+      "source": "./skills/ctx-distillery-plan",
+      "skills": ["./"],
       "strict": false,
       "category": "development",
       "homepage": "https://github.com/qazbnm456/ctx-distillery"

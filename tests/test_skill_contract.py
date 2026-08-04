@@ -295,9 +295,25 @@ def test_marketplace_manifest_is_well_formed() -> None:
             f"plugin {entry.get('name')!r} has source {source!r}, which is not a directory here"
         )
         for skills_path in entry.get("skills", []):
-            assert ((ROOT / source) / skills_path).is_dir(), (
+            resolved = ((ROOT / source) / skills_path).resolve()
+            assert resolved.is_dir(), (
                 f"plugin {entry.get('name')!r} declares skills path {skills_path!r}, which does not "
                 f"exist under its source"
+            )
+            # It must be the skill DIRECTORY itself, not a parent holding several. This is what
+            # makes the `npx skills` CLI attribute the skill to this plugin: `plugin-manifest.ts`
+            # keys its grouping map on `resolve(join(source, skillPath))`, and `skills.ts` looks it
+            # up by the SKILL's own resolved directory. The likelier-looking `source: "./"` +
+            # `skills: ["./skills"]` misses by exactly one level — it installs and dedupes fine, but
+            # the skill shows up ungrouped, and `source: "./"` also copies the whole repository into
+            # the plugin cache on every install and update.
+            assert (resolved / "SKILL.md").is_file(), (
+                f"plugin {entry.get('name')!r}'s skills path {skills_path!r} is not a skill "
+                f"directory (no SKILL.md directly inside it)"
+            )
+            assert resolved in {d.resolve() for d in SKILL_DIRS}, (
+                f"plugin {entry.get('name')!r} points at {resolved}, which is not one of the "
+                f"shipped skills under {SKILLS_DIR}"
             )
 
 

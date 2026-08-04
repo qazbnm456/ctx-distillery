@@ -49,6 +49,18 @@ never applies anything itself.
   a "scrape `--flag` tokens" check cannot do — it sees neither subcommand scoping (`--json` is on
   `distill` and `show` but not `export`), nor `required=True`, nor `choices`.
 
+  The manifest's `source` names the SKILL DIRECTORY itself with `skills: ["./"]`, which is one level
+  deeper than the docs' wording ("skill directories containing `<name>/SKILL.md`") first suggests.
+  Both shapes were installed and invoked to decide between them, because only one is testable from
+  here: the `npx skills` CLI keys its plugin-grouping map on `resolve(join(source, skillPath))` and
+  looks it up by the skill's OWN resolved directory, so the likelier-looking `source: "./"` +
+  `skills: ["./skills"]` misses by exactly one level — it installs and dedupes correctly but shows
+  up ungrouped, and it copies the whole 2.7 MB repository into the plugin cache on every install and
+  update rather than 16 KB. Whether Claude Code's loader accepts the deeper shape is NOT testable
+  from here and was confirmed by hand; `CLAUDE.md` invariant 8 records that any future change to
+  `source`/`skills`/`strict` needs the same manual re-run, because a manifest can pass every test in
+  the suite and still fail to load.
+
 - **Two README claims corrected in the same commit, because this change makes that file the entry
   point for people who never read the code.** It said transcripts keep "message text and thinking
   verbatim" — the measurement is that thinking renders to **0%** (2,384 blocks across 60 session
