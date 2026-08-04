@@ -6,8 +6,8 @@ behaves EXACTLY as the replay-only version always has — `POST /v1/distill` and
 both 404, and the trace file remains the sole source of truth for both discovery and replay
 (`ctx-distillery` writes NO artifact of its own; `run_distillation` returns an in-memory
 `AssembledPlan` and persists nothing — CLAUDE.md invariant 1). Cancellation, when live mode is on,
-is REAL: it is built into rlm-kit's own sandbox interpreter (`RLMTask(cancel_event=...)`,
-`rlm_kit.SandboxCancelled`), not an `asyncio.Task.cancel()` that cannot interrupt a blocked
+is REAL: it is built into rlm-harness's own sandbox interpreter (`RLMTask(cancel_event=...)`,
+`rlm_harness.SandboxCancelled`), not an `asyncio.Task.cancel()` that cannot interrupt a blocked
 `pyodide`/`deno` sandbox call. Live mode still NEVER calls `ctx_distillery.apply.apply_plan` —
 applying a plan stays a separate, human-invoked action outside any web request, exactly as before.
 
@@ -17,7 +17,7 @@ without pulling `dspy` into `sys.modules`, even when live mode is fully enabled 
 `.live.run_live`'s own body, which only executes inside a worker thread once a live run actually
 starts. `.live`/`.shutdown` are safe to import at THIS module's own top because neither of them
 imports anything dspy-bearing at ITS module top either (confirmed: `.live` imports
-`rlm_kit.SandboxCancelled`, which is an EAGER, non-dspy-bearing top-level export from `rlm_kit`, and
+`rlm_harness.SandboxCancelled`, which is an EAGER, non-dspy-bearing top-level export from `rlm_harness`, and
 `.iterations._project_label`, already dspy-free).
 
 Ten endpoints:
@@ -279,7 +279,7 @@ def _load_trace(run_id: str) -> list[dict]:
     external failure — an unreadable file or a corrupted JSONL line — mirroring `assemble`'s own
     "none of them raise" discipline all the way out to the HTTP layer.
 
-    FIXED per adversarial review, then DE-DUPLICATED: `rlm_kit.trace.load_events` does NO shape
+    FIXED per adversarial review, then DE-DUPLICATED: `rlm_harness.trace.load_events` does NO shape
     validation — a line that is syntactically valid JSON but NOT an object (`42`, `"x"`, `[1,2,3]`,
     `null`) parses fine (no `ValueError`, so the 502 guard above never fires) and lands in the
     returned list as-is. Every downstream consumer (`plan_from_events`/`trace_facts`/`_step_key`/
@@ -578,7 +578,7 @@ async def distill(body: _DistillRequest, request: Request) -> StreamingResponse:
 
 @app.post("/v1/runs/{run_id}/cancel")
 def cancel_run(run_id: str, request: Request) -> JSONResponse:
-    """Cooperatively cancel an in-flight live run: sets its `cancel_event`, which rlm-kit's own
+    """Cooperatively cancel an in-flight live run: sets its `cancel_event`, which rlm-harness's own
     sandbox watchdog (or the run's next LM-call await) observes and unwinds from as a
     `SandboxCancelled` — see `live.py`. This is a REQUEST to stop, not a guarantee of immediate
     effect, so the response is `{"cancelling": true}` rather than `{"cancelled": true}`; the run's

@@ -21,8 +21,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from rlm_kit.rubric import Criterion, RubricCriteria
-from rlm_kit.trace import (
+from rlm_harness.rubric import Criterion, RubricCriteria
+from rlm_harness.trace import (
     EVENT_MAIN_STEP,
     EVENT_RESULT,
     EVENT_RUN_START,
@@ -124,7 +124,7 @@ def test_load_runs_groups_multiple_files_by_run_id(tmp_path):
 
 def test_load_runs_drops_non_dict_lines(tmp_path):
     """`CLAUDE.md` invariant 11: a new reader is a new call site for the `trace_io` guard, not an
-    exception to it. `rlm_kit.trace.load_events` would hand `42` / `null` straight through, and the
+    exception to it. `rlm_harness.trace.load_events` would hand `42` / `null` straight through, and the
     very first `event.get("type")` below would raise."""
     path = tmp_path / "dirty.jsonl"
     lines = [json.dumps(e) for e in _full_run("r0")]
@@ -298,7 +298,7 @@ def test_run_metrics_causes_partition_the_aggregate():
 
 
 def test_an_endpoint_error_that_STRINGIFIED_TO_NOTHING_is_not_counted_as_a_validator_reject():
-    """`endpoint_error` is `Optional[str]` and rlm-kit sets `str(exc)`, which is `''` for
+    """`endpoint_error` is `Optional[str]` and rlm-harness sets `str(exc)`, which is `''` for
     `httpx.ConnectTimeout`/`ReadTimeout`/`ConnectError`, `TimeoutError`, `OSError` and
     `RemoteDisconnected`. Under a truthiness test every one of those was counted in
     `draft_validator_rejects` — TRAINING SIGNAL teaching a trainer to read a dropped connection as
@@ -403,7 +403,7 @@ def test_the_role_split_is_by_tool_name():
 def test_the_drafting_split_is_not_filtered_on_outcome_output():
     """The sibling exporters narrow their generator split to records with a non-empty
     `outcome.output`; here that filter would produce an EMPTY split and look like "the planner never
-    drafted". `tools/drafting.py` records the bytes under `draft=`, and rlm-kit's `_action_record`
+    drafted". `tools/drafting.py` records the bytes under `draft=`, and rlm-harness's `_action_record`
     only reads `raw`/`result`/`results`/`preview` — so `outcome.output` is None for every one of
     this project's tool calls. Pinned, because the fix for a fabricated-looking empty split would
     otherwise be to re-add the filter."""
@@ -438,8 +438,8 @@ def test_the_label_surfaces_are_keyed_by_run_id():
 
 
 def test_a_reward_surface_is_structurally_refused_by_the_transport():
-    """Not our check — rlm-kit's. Stated here so the guarantee is visible where the bundle is built."""
-    from rlm_kit.dataset import run_label_bundle
+    """Not our check — rlm-harness's. Stated here so the guarantee is visible where the bundle is built."""
+    from rlm_harness.dataset import run_label_bundle
 
     with pytest.raises(ValueError) as excinfo:
         run_label_bundle({"r0": _full_run()}, reward=rl_export.run_labels)

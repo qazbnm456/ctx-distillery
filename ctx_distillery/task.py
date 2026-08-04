@@ -10,7 +10,7 @@ DEFINED here, next to the `RLMTask`. They now live in the dspy-free `schema.py` 
 below, so `from ctx_distillery.task import DistillPlan` keeps working exactly as before — see
 `schema.py`'s docstring for the measurement that forced the split (importing `eval/`'s or `studio/`'s
 entry point pulled dspy purely because the only route to these shapes ran through this module's
-`from rlm_kit import RLMTask`). What stayed HERE is what genuinely needs dspy or is task-specific:
+`from rlm_harness import RLMTask`). What stayed HERE is what genuinely needs dspy or is task-specific:
 the task class, its instructions, and the `pyodide` pin, which CLAUDE.md invariant 1 requires be
 stated in the task rather than delegated to config.
 """
@@ -21,10 +21,10 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Any, ClassVar
 
-from rlm_kit import RLMTask
-from rlm_kit.config import RLMConfig
-from rlm_kit.runtime import get_config
-from rlm_kit.tools.model import ChatFn
+from rlm_harness import RLMTask
+from rlm_harness.config import RLMConfig
+from rlm_harness.runtime import get_config
+from rlm_harness.tools.model import ChatFn
 
 from .adapters.base import ArtifactRef
 from .schema import DistillAction, DistillCandidate, DistillPlan
@@ -211,7 +211,7 @@ def _forced_config(config: RLMConfig | None) -> RLMConfig:
     passing `interpreter="local"` gets `pyodide` anyway rather than a silently weakened sandbox.
 
     (An explicit interpreter OBJECT via `RLMTask(interpreter=...)` still bypasses this, exactly as it
-    bypasses rlm-kit's own sandbox guard: that is the documented TEST seam — `ScriptedInterpreter` —
+    bypasses rlm-harness's own sandbox guard: that is the documented TEST seam — `ScriptedInterpreter` —
     where the caller supplies and owns the double. It is not a config path.)
     """
     base = config if config is not None else get_config()

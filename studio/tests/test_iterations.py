@@ -1,7 +1,7 @@
 """`build_iterations` — the Trajectory drawer's data layer, and its endpoint.
 
 Hand-rolled event dicts here are fine (the same licence `test_mapper.py` takes): `build_iterations`
-is a pure function over `{type, ts, step_id, payload}` shapes already pinned by rlm-kit's trace/v1
+is a pure function over `{type, ts, step_id, payload}` shapes already pinned by rlm-harness's trace/v1
 contract, and every tool payload below is transcribed from the REAL recorded shapes — a live run of
 the product against a real model in a real pyodide sandbox, plus the `record_tool_call(...)` calls in
 `ctx_distillery/tools/`. The endpoint tests at the bottom DO use a real `TraceRecorder`, because what
@@ -28,7 +28,7 @@ pytest.importorskip("fastapi")
 from ctx_distillery_studio import app as appmod
 from ctx_distillery_studio.iterations import build_iterations
 from fastapi.testclient import TestClient
-from rlm_kit.trace import TraceRecorder, record_tool_call
+from rlm_harness.trace import TraceRecorder, record_tool_call
 
 client = TestClient(appmod.app)
 

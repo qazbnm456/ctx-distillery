@@ -181,7 +181,7 @@ def test_the_reachability_check_would_catch_a_real_importer(line):
     "line",
     [
         "from .redact import redact_transcript",
-        "from rlm_kit.trace import record_tool_call",
+        "from rlm_harness.trace import record_tool_call",
         "    outcome = applied(candidate)",
     ],
 )

@@ -1,7 +1,7 @@
 """`apply_plan` against a REAL filesystem — the one module that mutates disk.
 
 Everything here is offline and model-free: applying a plan is plain host-side file I/O (no RLM, no
-sandbox, no rlm-kit tooling involved), so the tests build actual files under `tmp_path` and assert on
+sandbox, no rlm-harness tooling involved), so the tests build actual files under `tmp_path` and assert on
 what is on disk afterwards. The adversarial cases mirror the read side's: a symlink escaping
 `memory_dir` (see `test_adapters_claude_code.py`), and a target path that is not in the authoritative
 index.
@@ -736,7 +736,7 @@ def test_a_prune_with_a_valid_target_path_archives_outside_the_memory_store(memo
 
 def test_the_archive_lives_outside_memory_dir_and_is_never_re_enumerated(memory_dir, tmp_path):
     """Gap #4: an archive INSIDE `memory_dir` would eventually be re-discovered as live — by
-    `list_targets()`'s own glob, or by `rlm_kit.skills.discover_skills`'s `*/SKILL.md` walk."""
+    `list_targets()`'s own glob, or by `rlm_harness.skills.discover_skills`'s `*/SKILL.md` walk."""
     source = memory_dir / "conventions.md"
     outcomes = apply_plan(memory_dir, plan(prune(source)), [0])
     archived = Path(outcomes[0].path)
@@ -1187,7 +1187,7 @@ def test_a_bad_extra_relative_path_refuses_the_WHOLE_candidate_before_SKILL_md_i
     memory_dir, tmp_path
 ):
     """Validate-before-write: a candidate doomed by a bad `relative_path` must never leave a
-    half-written, DISCOVERABLE skill behind (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`)."""
+    half-written, DISCOVERABLE skill behind (`rlm_harness.skills.discover_skills` globs `*/SKILL.md`)."""
     skills_root = tmp_path / "skills"
     outcomes = apply_plan(
         memory_dir,

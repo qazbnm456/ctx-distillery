@@ -509,7 +509,7 @@ source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "rlm-kit" },
+    { name = "rlm-harness" },
 ]
 
 [package.optional-dependencies]
@@ -534,7 +534,7 @@ requires-dist = [
     { name = "openai", marker = "extra == 'cli'", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "rlm-kit", git = "https://github.com/qazbnm456/rlm-kit.git?branch=main" },
+    { name = "rlm-harness", git = "https://github.com/qazbnm456/rlm-harness.git?branch=main" },
 ]
 provides-extras = ["cli", "subscription"]
 
@@ -2103,9 +2103,9 @@ wheels = [
 ]
 
 [[package]]
-name = "rlm-kit"
-version = "0.2.0"
-source = { git = "https://github.com/qazbnm456/rlm-kit.git?branch=main#400495574c15340fb59876215ea6803361d8f2f7" }
+name = "rlm-harness"
+version = "1.0.0"
+source = { git = "https://github.com/qazbnm456/rlm-harness.git?branch=main#fb191c2fd942e350007fbe3c8a8bfddc0318409c" }
 dependencies = [
     { name = "dspy" },
     { name = "pydantic" },

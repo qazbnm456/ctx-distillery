@@ -1,16 +1,16 @@
 # ctx-distillery — agent guide
 
-`ctx-distillery` is a downstream consumer of [`rlm-kit`](https://github.com/qazbnm456/rlm-kit):
+`ctx-distillery` is a downstream consumer of [`rlm-harness`](https://github.com/qazbnm456/rlm-harness):
 an RLM-driven planner that reads AI coding-agent session transcripts + a persistent memory
 store and proposes a distillation plan (what to prune, what to merge across sessions, what to
 promote into a memory file or a Skill file). It never applies anything itself. See
 `README.md` for the overview and `ctx_distillery/README.md` for the package-level guide.
 
-`rlm-kit` is pinned as a git dependency (see `pyproject.toml`). For local co-development against
-an in-progress rlm-kit checkout, install it editable over the top:
+`rlm-harness` is pinned as a git dependency (see `pyproject.toml`). For local co-development against
+an in-progress rlm-harness checkout, install it editable over the top:
 
 ```
-uv pip install -e ../rlm-kit
+uv pip install -e ../rlm-harness
 ```
 
 ## Verify
@@ -27,7 +27,7 @@ the two in step, which is what `tests/test_doc_claims.py` pins. One deliberate d
 test` runs `uv run python -m pytest -q`, not the bare `pytest -q` below, which assumes an ACTIVATED
 venv and otherwise dies with "No such file or directory".
 
-- `uvx ruff@0.16.0 check .` — lint (line-length 110, matching rlm-kit's config). **The version pin is
+- `uvx ruff@0.16.0 check .` — lint (line-length 110, matching rlm-harness's config). **The version pin is
   deliberate and CI carries the same one.** An unpinned `uvx ruff check .` resolves the LATEST ruff at
   run time, so a release that widens the DEFAULT rule set turns the job red with nobody having touched
   a line of code — ruff 0.16's expansion did exactly that to two sibling projects (256 and 224 fresh
@@ -35,14 +35,14 @@ venv and otherwise dies with "No such file or directory".
   SAME commit as the bump. A bare `ruff` is not
   installed in this workspace; `uvx` is how CI runs it too.
 - `pytest -q` — the whole suite. The dspy-bearing tests (`test_task.py`, `test_session.py`)
-  drive a REAL `dspy.RLM.aforward` through `rlm_kit.testing.ScriptedInterpreter` +
+  drive a REAL `dspy.RLM.aforward` through `rlm_harness.testing.ScriptedInterpreter` +
   `scripted_lm`, so the planner → tools → SUBMIT chain executes (each tool's own tracing runs)
   at zero cost; they `importorskip("dspy")`.
 - `tests/test_no_write_capability.py` is the tripwire for invariant (1): a static scan over
   every module under `ctx_distillery/` — except the deliberate, human-gated `apply.py` — asserting
   none contains a write/delete call. If it goes red, someone added a writer — that is the finding,
   not a test to relax, and `apply.py` is not a precedent for a second exemption.
-- `tests/test_apply.py` needs no dspy, no rlm-kit model wiring, and no network: applying a plan is
+- `tests/test_apply.py` needs no dspy, no rlm-harness model wiring, and no network: applying a plan is
   plain host-side file I/O, so it runs against real files under `tmp_path`.
 - A LIVE run additionally needs real credentials and a Deno/pyodide sandbox
   (`brew install deno`). Don't do it in CI; it costs money.
@@ -73,8 +73,8 @@ venv and otherwise dies with "No such file or directory".
   and the writer must be absent (see invariant 8 and the `## Versioning` section below).
 - `tests/test_subscription.py` runs WITHOUT the `[subscription]` extra installed: the drafter-hazard
   tests touch only the dspy-free `DistillConfig.from_env`, and the router tests monkeypatch
-  `rlm_kit.ClaudeAgentLM`. One sharp edge, recorded because it is easy to get wrong —
-  `monkeypatch.setattr(rlm_kit, "ClaudeAgentLM", ...)` does a `getattr` FIRST, which trips rlm-kit's
+  `rlm_harness.ClaudeAgentLM`. One sharp edge, recorded because it is easy to get wrong —
+  `monkeypatch.setattr(rlm_harness, "ClaudeAgentLM", ...)` does a `getattr` FIRST, which trips rlm-harness's
   package `__getattr__` and pulls dspy into the test process. Fine in a test (they
   `importorskip("dspy")`); never let it become a module-level import.
 - **`pytest-asyncio` / `asyncio_mode = "auto"` are DECLINED, deliberately** — all three sibling
@@ -128,7 +128,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    the sandbox, not a convention the planner could be prompted around. The pin is ENFORCED IN
    CODE, not documented: `task._forced_config` runs `dataclasses.replace(config,
    interpreter="pyodide")` before `super().__init__`, so a caller passing `interpreter="local"`
-   still gets `pyodide`. (`RLMTask(interpreter=<object>)` still bypasses it — that is rlm-kit's
+   still gets `pyodide`. (`RLMTask(interpreter=<object>)` still bypasses it — that is rlm-harness's
    documented test seam, where the caller supplies and owns the double, not a config path.)
 2. **`output_model` carries only `{action, artifact_id, key_fields}` — never drafted content
    directly.** A promotion candidate's actual markdown+frontmatter body is authored by
@@ -143,7 +143,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 3. **Sensitive transcript content is redacted host-side before it becomes LM context, in THREE
    TIERS, in that order.** Redaction is not the planner's judgement call — do it in the
    tool/ingestion layer, before any transcript text is exposed to the RLM, the same stance
-   rlm-kit already takes for other untrusted content (fetched URLs, MCP output). `redact.py` runs
+   rlm-harness already takes for other untrusted content (fetched URLs, MCP output). `redact.py` runs
    **tier one** (7 hand-written patterns), then **tier two** (120 rules mechanically ported
    from gitleaks, `ctx_distillery/patterns/gitleaks_subset.json`), then **tier three** (the
    operator's own rules, from the `CD_REDACTIONS` env var — empty unless set). **This applies to
@@ -517,7 +517,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
    already does for the skill directory and `SKILL.md` itself. `_promote_skill` runs this check for
    EVERY supplementary file BEFORE writing anything at all, including `SKILL.md` — a candidate
    doomed by one bad `relative_path` must never leave a half-written, DISCOVERABLE skill behind
-   (`rlm_kit.skills.discover_skills` globs `*/SKILL.md`). Writing itself never deletes a
+   (`rlm_harness.skills.discover_skills` globs `*/SKILL.md`). Writing itself never deletes a
    supplementary file an `overwrite` draft omits — consistent with "archives, never deletes"
    holding everywhere in this module.
 
@@ -540,7 +540,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     even then it never touches `apply_plan` — it only drives a `DistillSession` and streams its
     trace, exactly what `ctx-distillery distill` already does from the CLI.
     **The full invariant lives in `studio/CLAUDE.md`** — the four reopening conditions this
-    live-drive endpoint had to meet (a real cancel seam in rlm-kit, opt-in-only route existence, an
+    live-drive endpoint had to meet (a real cancel seam in rlm-harness, opt-in-only route existence, an
     environment-sourced project allowlist, a stated loopback/CSRF posture), the `_slug_id` cap, the
     `textContent`-only rendering rule, and the `trace_io` dict-shape guard. It was moved there
     because it applies to that directory and to nothing else, and Claude Code loads a nested
@@ -565,7 +565,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     byte-identically, which is what proves the move was behaviour-preserving. It writes nothing, so
     it is inside `tests/test_no_write_capability.py`'s scan like everything else. Same
     failure mode, found twice; the second one is `ctx_distillery/trace_io.py`, the ONE place JSONL
-    bytes become events. `rlm_kit.trace.load_events` does no shape validation, so a JSON-valid
+    bytes become events. `rlm_harness.trace.load_events` does no shape validation, so a JSON-valid
     non-dict line reaches every `.get(...)` consumer as-is; `studio/` fixed that member-locally
     first, and **`eval/` needing the identical guard a THIRD time is what forced the shared module**
     — exactly the situation that had already forced `plan_from_events` public. `rubric`, `session`,
@@ -574,7 +574,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     is LOAD-BEARING: `load_events`'s own filter is an unguarded `event.get("run_id")`, so
     delegating puts the crash UPSTREAM of the guard, where nothing in `ctx_distillery` can reach it
     (this is why hardening only the consumers would NOT have fixed `eval/cli.py`). Hardening
-    `load_events` upstream in rlm-kit is a fine follow-up THERE; it is not a prerequisite here, and
+    `load_events` upstream in rlm-harness is a fine follow-up THERE; it is not a prerequisite here, and
     `load_trace` stays correct either way.
 
     The first of the two: **`rubric.plan_from_events` is the ONE public plan-from-trace
@@ -613,7 +613,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 
 12. **A drafting call's outcome is READ from a named `cause`, never re-reasoned per call site, and no
     surface may name the validator unless it knows the validator ran.**
-    `rlm_kit.tools.model.make_model_tool` sets `ok=False` when (a) the deterministic host-side
+    `rlm_harness.tools.model.make_model_tool` sets `ok=False` when (a) the deterministic host-side
     validator declined the text, (b) the model ENDPOINT failed after its transient retries
     (`endpoint_error` set, `raw=""` — the validator never ran), or (c) the CIRCUIT BREAKER
     short-circuited (`circuit_broken=True`, `raw=""` — the model was never even called). Collapsing
@@ -622,9 +622,9 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     the text a human reads before deciding what to apply, and in `rl_export` it is TRAINING SIGNAL
     that would teach a trainer to read a 502 as model dishonesty.
 
-    **Since rlm-kit `4fcd50b2` the cause has a NAME, and this project uses it end to end.**
+    **Since rlm-harness `4fcd50b2` the cause has a NAME, and this project uses it end to end.**
     `ModelToolResult` exposes `cause` (`"ok"` / `"invalid"` / `"endpoint"` / `"circuit_broken"`, the
-    `CAUSE_*` constants exported from `rlm_kit.tools`) and `validator_ran` as PROPERTIES — not
+    `CAUSE_*` constants exported from `rlm_harness.tools`) and `validator_ran` as PROPERTIES — not
     dataclass fields, so they exist only on a LIVE result object and never arrive in a trace by
     themselves. Hence two halves, and both are required:
 
@@ -634,7 +634,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
       SAYS what happened beats every downstream reader reconstructing it.
     * **Read it, with a fallback for old traces.** `trace_io.draft_cause(payload)` PREFERS a recorded
       `cause` (ignoring any value outside the closed vocabulary) and otherwise **CALLS
-      `rlm_kit.trace.payload_cause`** — it does not reimplement the chain. That matters because
+      `rlm_harness.trace.payload_cause`** — it does not reimplement the chain. That matters because
       `rl_export`, `schema` and `studio/` all read historical traces, and a pre-`4fcd50b2` trace has
       no `cause` key at all.
 
@@ -662,7 +662,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
     human/judge-visible problem line) and `rl_export.run_metrics` (`draft_validator_rejects` /
     `draft_endpoint_errors` / `draft_circuit_breaks`, disjoint and summing exactly to the
     `draft_not_ok` aggregate) both call it, and neither derives anything itself. Never reintroduce a
-    per-call-site derivation, and never invent a parallel cause vocabulary — the set is rlm-kit's,
+    per-call-site derivation, and never invent a parallel cause vocabulary — the set is rlm-harness's,
     and it is CLOSED.
 
     **`rubric.trace_facts`'s `any_circuit_broken` stays a direct `circuit_broken` read, and folding
@@ -829,12 +829,12 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   `schema.assemble()` already established (`finalized`, the action histogram, `n_unbacked`,
   `n_draft_not_ok`, `plan_problems`) — every field recomputable from the same JSONL by a second
   reader. Only `cve-reverser`'s `valid`/`complete` is oracle-flavoured, and its domain has ground
-  truth; ours does not. Never add a field that claims a judgement was CORRECT. `rlm_kit.dataset`'s
+  truth; ours does not. Never add a field that claims a judgement was CORRECT. `rlm_harness.dataset`'s
   `run_label_bundle` refuses a surface literally named `reward` (it raises), so the reward-free
   property is enforced at the transport, not by convention here.
 - **The DRAFTER may never ride the Claude subscription, and `from_env` refuses it UNCONDITIONALLY.**
   `CD_ROOT_LM` / `CD_SUB_LM` accept the `claude-agent-sdk/<id>` sentinel (`config.SUBSCRIPTION_PREFIX`
-  → `config._maybe_subscription_lm` → `rlm_kit.configure(main_lm=, sub_lm=)`, the `[subscription]`
+  → `config._maybe_subscription_lm` → `rlm_harness.configure(main_lm=, sub_lm=)`, the `[subscription]`
   extra); the drafter cannot, because `config.make_chat_fn` builds an `openai.OpenAI` client directly.
   The gate is unconditional rather than defensive for two compounding reasons: BOTH drafting tools are
   ALWAYS wired in `DistillSession.__init__` (so a sentinel there fails LATE, mid-trajectory, on the
@@ -843,7 +843,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   subscription path, silently hands the sentinel to the drafting endpoint as a model id. The error
   distinguishes *explicitly set* from *inherited* (and names WHICH variable it was inherited from),
   because the fix differs. `config.py` must stay dspy-free AT MODULE LEVEL — the
-  `from rlm_kit import ClaudeAgentLM` lives inside the sentinel branch, and both
+  `from rlm_harness import ClaudeAgentLM` lives inside the sentinel branch, and both
   `tests/test_public_api.py` and `tests/test_subscription.py` assert the module top in a FRESH
   interpreter. `studio/app.py` needs no mirrored prefix: its `/v1/config` reports no model at all.
 - **`apply_plan` is still callable directly from Python**, and `ctx-distillery-apply` is a thin
@@ -866,7 +866,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   `## Harness scope`; don't re-derive it here.
 - **`ctx_distillery/rubric.py` sources 100% of its facts from `session.assemble()`'s output, and
   `eval/` (`ctx-distillery-eval`) never writes and is never imported back.** The rubric is
-  deterministic, reward-free ATLAS (TF/TA/TG/PA) facts, built on `rlm_kit.rubric` — it never decides
+  deterministic, reward-free ATLAS (TF/TA/TG/PA) facts, built on `rlm_harness.rubric` — it never decides
   met/unmet, and no field anywhere functions as a score. `eval/` is a SEPARATE workspace member: a
   static, offline LLM-as-judge that reads the assembled plan + the transcript(s) it was drawn from
   as TEXT only (never executes anything, never touches `apply.py`), and `ctx_distillery` itself
@@ -880,7 +880,7 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   studio replay) over one bad trace.
 - **The eval judge is LIVE iff `CDEVAL_MODEL` is set, and an unscored row is NEVER a fake 0.** The
   `judge = ["openai>=1.0"]` extra used to be dead — nothing imported it — so `judge.make_eval_judge`
-  now implements it on `rlm_kit.tools.make_model_tool`, with `from openai import OpenAI` LAZY inside
+  now implements it on `rlm_harness.tools.make_model_tool`, with `from openai import OpenAI` LAZY inside
   the chat closure (`eval/tests/test_boundary.py` asserts in a FRESH subprocess that importing the
   eval CLI pulls neither dspy nor openai; hoisting that import turns it red, and
   `eval/tests/test_judge.py` re-asserts it against the module's own AST). `max_retries=0` on the

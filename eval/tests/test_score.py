@@ -1,6 +1,6 @@
 """`ctx_distillery_eval.score` — offline, with the default `StubJudge` (fixed, deterministic scores).
 
-Hand-rolled trace-event dicts, matching the shape `rlm_kit.trace` actually records (`EVENT_RESULT`'s
+Hand-rolled trace-event dicts, matching the shape `rlm_harness.trace` actually records (`EVENT_RESULT`'s
 `payload["output"]`) — fully offline, no dspy/model dependency, mirroring the root package's own
 `tests/test_rubric.py` convention for building event lists without a real `TraceRecorder`.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ctx_distillery_eval.judge import EvalScore, JudgeVerdict, StubJudge
 from ctx_distillery_eval.score import aggregate, render_plan, score_run
-from rlm_kit.trace import EVENT_RESULT
+from rlm_harness.trace import EVENT_RESULT
 
 from ctx_distillery.task import DistillCandidate, DistillPlan
 
@@ -152,7 +152,7 @@ def test_score_run_survives_a_non_dict_trace_line():
     """A DIFFERENT failure mode from the malformed-`output` case above, and it has to be said out
     loud because the two look alike: that one is a well-formed dict of the WRONG SHAPE (caught by
     `plan_from_events`'s `ValidationError` degrade); this one is a trace LINE that is valid JSON but
-    not an object at all (`42`, `null`, `"x"`, `[1,2,3]`), which `rlm_kit.trace.load_events` passes
+    not an object at all (`42`, `null`, `"x"`, `[1,2,3]`), which `rlm_harness.trace.load_events` passes
     through unfiltered. It raised in `ctx_distillery.session.assemble`, not in the plan
     reconstruction — `plan_from_events` had already returned by then."""
     events = [42, _result(_plan_dict({"action": "keep"})), None, "x", [1, 2, 3]]
@@ -161,7 +161,7 @@ def test_score_run_survives_a_non_dict_trace_line():
 
 
 def _tool_call_stub(tool, artifact_id, draft="---\nname: x\ndescription: d\n---\nbody\n"):
-    from rlm_kit.trace import EVENT_TOOL_CALL
+    from rlm_harness.trace import EVENT_TOOL_CALL
 
     return {
         "type": EVENT_TOOL_CALL,

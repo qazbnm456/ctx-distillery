@@ -11,7 +11,7 @@ current design-level distinction is that a fact about the user/project is a memo
 reusable how-to/procedure discovered during a session is a skill; see
 `ctx_distillery/task.py`'s instructions for how the planner is currently told to draw that line.
 
-This file follows the Agent-Skills convention used elsewhere in the rlm-kit ecosystem
+This file follows the Agent-Skills convention used elsewhere in the rlm-harness ecosystem
 (`name`/`description` frontmatter, progressive disclosure via `skills.py`'s `list_skills`/
 `read_skill`) — but note that ctx-distillery does not currently load skills this way for its own
 planner LM; see `VENDOR.md` for why. This file exists as a drafting-target reference, not as

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-from rlm_kit.trace import record_tool_call
+from rlm_harness.trace import record_tool_call
 
 #: Default window size, and the hard cap on one read. Large enough to read a real conversation turn
 #: or two, small enough that a scan is visible in the trace as a sequence of deliberate reads.

@@ -2,11 +2,11 @@
 
 Runs WITHOUT the `[subscription]` extra installed. The hazard tests touch only the dspy-free
 `DistillConfig.from_env`; the router tests either exercise the NON-sentinel branch (which returns
-before the lazy `from rlm_kit import ClaudeAgentLM` ever runs) or monkeypatch `rlm_kit.ClaudeAgentLM`
+before the lazy `from rlm_harness import ClaudeAgentLM` ever runs) or monkeypatch `rlm_harness.ClaudeAgentLM`
 so the sentinel branch is deterministic without the SDK present.
 
-One sharp edge worth naming, because it is easy to get wrong: `monkeypatch.setattr(rlm_kit,
-"ClaudeAgentLM", ...)` performs a `getattr` FIRST to save the original, which trips rlm-kit's own
+One sharp edge worth naming, because it is easy to get wrong: `monkeypatch.setattr(rlm_harness,
+"ClaudeAgentLM", ...)` performs a `getattr` FIRST to save the original, which trips rlm-harness's own
 package `__getattr__` and pulls dspy into the process. That is acceptable HERE — a test process may
 pay for dspy, and `tests/test_task.py` already does — but it must never leak into a module-level
 import, which is why `config._maybe_subscription_lm` keeps that import inside the sentinel branch
@@ -88,7 +88,7 @@ def test_from_env_refuses_an_explicitly_set_sentinel_drafter(monkeypatch):
 
 
 def test_from_env_accepts_a_subscription_planner_with_a_real_drafter(monkeypatch):
-    """The supported MIXED-auth shape: both rlm-kit seats on the subscription, drafter on a proxy."""
+    """The supported MIXED-auth shape: both rlm-harness seats on the subscription, drafter on a proxy."""
     monkeypatch.setenv("CD_ROOT_LM", SENTINEL)
     monkeypatch.setenv("CD_SUB_LM", SENTINEL_SUB)
     monkeypatch.setenv("CD_DRAFT_LM", "qwen/qwen3-next-80b")
@@ -126,15 +126,15 @@ def test_maybe_subscription_lm_returns_none_for_a_plain_model_id():
     may legitimately have loaded the adapter already, and a bare absence check would then be
     order-dependent.
     """
-    had_adapter = "rlm_kit.claude_agent_lm" in sys.modules
+    had_adapter = "rlm_harness.claude_agent_lm" in sys.modules
     assert config._maybe_subscription_lm("qwen/qwen3-next-80b") is None
-    assert ("rlm_kit.claude_agent_lm" in sys.modules) == had_adapter
+    assert ("rlm_harness.claude_agent_lm" in sys.modules) == had_adapter
 
 
 def test_maybe_subscription_lm_builds_the_adapter_for_a_sentinel(monkeypatch):
     """The sentinel branch strips the prefix and hands the bare model id to `ClaudeAgentLM`."""
-    pytest.importorskip("dspy")  # patching the attribute pulls rlm-kit's dspy-bearing __getattr__
-    import rlm_kit
+    pytest.importorskip("dspy")  # patching the attribute pulls rlm-harness's dspy-bearing __getattr__
+    import rlm_harness
 
     built: list[str] = []
 
@@ -142,7 +142,7 @@ def test_maybe_subscription_lm_builds_the_adapter_for_a_sentinel(monkeypatch):
         def __init__(self, model):
             built.append(model)
 
-    monkeypatch.setattr(rlm_kit, "ClaudeAgentLM", _FakeClaudeAgentLM)
+    monkeypatch.setattr(rlm_harness, "ClaudeAgentLM", _FakeClaudeAgentLM)
     lm = config._maybe_subscription_lm(SENTINEL)
     assert isinstance(lm, _FakeClaudeAgentLM)
     assert built == ["claude-sonnet-5"]
@@ -156,12 +156,12 @@ def test_maybe_subscription_lm_missing_extra_is_actionable(monkeypatch):
     say which command it is missing.
     """
     pytest.importorskip("dspy")
-    import rlm_kit
+    import rlm_harness
 
     def _raises(model):
         raise ImportError("No module named 'claude_agent_sdk'")
 
-    monkeypatch.setattr(rlm_kit, "ClaudeAgentLM", _raises)
+    monkeypatch.setattr(rlm_harness, "ClaudeAgentLM", _raises)
     with pytest.raises(ModuleNotFoundError) as excinfo:
         config._maybe_subscription_lm(SENTINEL)
     assert "uv sync --extra subscription" in str(excinfo.value)
@@ -171,10 +171,10 @@ def test_maybe_subscription_lm_missing_extra_is_actionable(monkeypatch):
 # -- setup() wires both seats -------------------------------------------------------------------
 
 
-def test_setup_injects_the_subscription_lm_for_both_rlm_kit_seats(monkeypatch):
+def test_setup_injects_the_subscription_lm_for_both_rlm_harness_seats(monkeypatch):
     """`main_lm=` / `sub_lm=` carry the adapter; the drafter is not a seat `configure` knows about."""
     pytest.importorskip("dspy")
-    import rlm_kit
+    import rlm_harness
 
     class _FakeClaudeAgentLM:
         def __init__(self, model):
@@ -186,8 +186,8 @@ def test_setup_injects_the_subscription_lm_for_both_rlm_kit_seats(monkeypatch):
         captured.update(config=cfg, main_lm=main_lm, sub_lm=sub_lm)
         return cfg
 
-    monkeypatch.setattr(rlm_kit, "ClaudeAgentLM", _FakeClaudeAgentLM)
-    monkeypatch.setattr(rlm_kit, "configure", _fake_configure)
+    monkeypatch.setattr(rlm_harness, "ClaudeAgentLM", _FakeClaudeAgentLM)
+    monkeypatch.setattr(rlm_harness, "configure", _fake_configure)
     config.setup(
         config.DistillConfig(main_model=SENTINEL, sub_model=SENTINEL_SUB, draft_model="qwen/q3")
     )
@@ -200,7 +200,7 @@ def test_setup_injects_the_subscription_lm_for_both_rlm_kit_seats(monkeypatch):
 def test_setup_injects_nothing_on_the_plain_proxy_path(monkeypatch):
     """No sentinel -> both seats stay None, so `configure` builds them from the `CD_*` config."""
     pytest.importorskip("dspy")
-    import rlm_kit
+    import rlm_harness
 
     captured: dict = {}
 
@@ -208,7 +208,7 @@ def test_setup_injects_nothing_on_the_plain_proxy_path(monkeypatch):
         captured.update(main_lm=main_lm, sub_lm=sub_lm)
         return cfg
 
-    monkeypatch.setattr(rlm_kit, "configure", _fake_configure)
+    monkeypatch.setattr(rlm_harness, "configure", _fake_configure)
     config.setup(config.DistillConfig(main_model="planner", sub_model="specialist"))
     assert captured == {"main_lm": None, "sub_lm": None}
 

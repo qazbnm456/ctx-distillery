@@ -1,6 +1,6 @@
 """`frontmatter.parse` — the real, NESTED-capable YAML frontmatter reader.
 
-The point of this module (over `rlm_kit.skills`'s flat parser) is `metadata.type`, so the nesting
+The point of this module (over `rlm_harness.skills`'s flat parser) is `metadata.type`, so the nesting
 case is the first thing asserted; the rest pin the degradation paths, which must return `({}, text)`
 rather than raise (a malformed model draft is a validation outcome, not a REPL exception).
 """

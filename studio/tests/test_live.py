@@ -107,7 +107,7 @@ def test_run_live_calls_on_done_exactly_once_when_for_project_raises(tmp_path, m
 def test_run_live_sets_cancelled_true_only_for_sandbox_cancelled(tmp_path, monkeypatch):
     """`isinstance(exc, SandboxCancelled)` decides ONLY the cosmetic `cancelled` flag, never a
     different control-flow path — pin that a plain failure never gets mislabeled as a cancel."""
-    from rlm_kit import SandboxCancelled
+    from rlm_harness import SandboxCancelled
 
     _patch_happy_setup(monkeypatch, tmp_path)
 

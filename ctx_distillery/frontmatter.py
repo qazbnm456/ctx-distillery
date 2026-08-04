@@ -1,13 +1,13 @@
 """YAML-frontmatter parsing for memory/skill files — the real, nested-capable parser.
 
-`rlm_kit.skills`'s own frontmatter reader is deliberately minimal: it handles FLAT lowercase
+`rlm_harness.skills`'s own frontmatter reader is deliberately minimal: it handles FLAT lowercase
 `key: value` lines and falls back to the filename when `name` is absent. That is fine for the
 Agent-Skills shape it governs (`name`/`description` only), but it CANNOT express the Claude Code
 memory-file schema this project validates against, whose `metadata.type` is a NESTED key. Reusing
 it for memory-file validation would silently read `metadata: {type: user}` as an opaque string and
 pass a malformed draft.
 
-So ctx-distillery owns this one small module (dspy-free, rlm-kit-free, `pyyaml`-backed) and uses it
+So ctx-distillery owns this one small module (dspy-free, rlm-harness-free, `pyyaml`-backed) and uses it
 in BOTH places frontmatter is read: the Claude Code adapter (parsing files that already exist) and
 the drafting tools' validators (parsing a candidate draft the model just produced). The flat skill
 shape is handled as a degenerate case — no nesting needed there, same parser.

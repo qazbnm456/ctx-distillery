@@ -1,6 +1,6 @@
 """ctx-distillery — distill an AI coding agent's transcripts + memory store, as a traced RLM harness.
 
-A downstream *consumer* of rlm-kit (a git-pinned dep; editable overlay for local co-dev): an RLM
+A downstream *consumer* of rlm-harness (a git-pinned dep; editable overlay for local co-dev): an RLM
 planner reads one or more session transcripts plus a persistent memory/skill index through six
 READ-ONLY tools, computes over them as code in a `pyodide` sandbox, and emits a judgement-only plan
 (keep / prune / promote_to_memory / promote_to_skill) whose drafted bytes are re-sourced from the

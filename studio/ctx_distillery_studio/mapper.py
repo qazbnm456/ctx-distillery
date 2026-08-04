@@ -2,20 +2,20 @@
 streamed event surface). Pure function, no FastAPI/web deps — unit-tested independently of the
 server, mirroring `diff_sentry_studio.mapper`'s own separation.
 
-A trace event is `{schema, run_id, step_id, ts, type, payload}` (rlm-kit's frozen trace/v1). We
+A trace event is `{schema, run_id, step_id, ts, type, payload}` (rlm-harness's frozen trace/v1). We
 surface only the events a UI needs and rename them to a stable `distill.<noun>.<verb>` vocabulary.
 Unknown/internal events return None (skipped) — never guessed at.
 
 `main_step`/`sub_call` are mapped, not dropped. ADDED per an implementation-plan audit — an earlier
 draft of this module silently fell through to `return None` for both, which is a real gap against
 this initiative's own motivating goal (seeing every step's
-context and results): `rlm_kit.task.record_main_trajectory` emits `main_step` UNCONDITIONALLY for
+context and results): `rlm_harness.task.record_main_trajectory` emits `main_step` UNCONDITIONALLY for
 every `RLMTask` run (not opt-in, and `DistillSession` does not disable it), and
-`rlm_kit.sub_lm.bind_recorder_to_sub_lm` emits `sub_call` for any recursive sub-LM escalation the
+`rlm_harness.sub_lm.bind_recorder_to_sub_lm` emits `sub_call` for any recursive sub-LM escalation the
 root planner issues. For a judgement-only task with only six tools, the planner's OWN reasoning
 turns are plausibly the richest part of the trace — dropping them from the live feed would have been
 a silent regression against the whole point of building a studio at all. Payload shapes confirmed
-against rlm_kit/trace.py's real `record_main_trajectory` (`turn`/`reasoning`/`code`/`output`) and
+against rlm_harness/trace.py's real `record_main_trajectory` (`turn`/`reasoning`/`code`/`output`) and
 `sub_lm.py`'s `bind_recorder_to_sub_lm` (`input`/`processed`/`raw`).
 """
 
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rlm_kit.trace import (
+from rlm_harness.trace import (
     EVENT_FINAL,
     EVENT_MAIN_STEP,
     EVENT_RESULT,
@@ -160,7 +160,7 @@ def to_event(trace_event: dict) -> dict[str, Any] | None:
     if t == EVENT_RUN_END:
         return _ev("distill.run.completed", {})
     if t == EVENT_FINAL:
-        # A real finished trace holds BOTH `final` (rlm_kit.task.record_main_trajectory) and
+        # A real finished trace holds BOTH `final` (rlm_harness.task.record_main_trajectory) and
         # `run_end` (the recorder's __exit__). Mapping both would emit the terminal event TWICE per
         # replay, and `final` lands BEFORE `result` — mirrors `diff_sentry_studio.mapper`'s own
         # documented reason for skipping it verbatim. `run_end` is the sole terminal.

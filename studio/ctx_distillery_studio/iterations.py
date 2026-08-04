@@ -15,9 +15,9 @@ tool-exec alone.
 consequence of two MEASURED numbers, not a hedge:
 
 - A REAL live run (real model, real pyodide sandbox) spans **20.4s** across its `main_step` ts →
-  `per_turn_timing = True`. rlm-kit backfills each turn's ts as it is parsed, so a real trace is
+  `per_turn_timing = True`. rlm-harness backfills each turn's ts as it is parsed, so a real trace is
   live-stamped and the interval back-mapping is meaningful.
-- The OFFLINE scripted harness this workspace's tests use (`rlm_kit.testing.ScriptedInterpreter` +
+- The OFFLINE scripted harness this workspace's tests use (`rlm_harness.testing.ScriptedInterpreter` +
   `scripted_lm`) spans **0.0019s** → `per_turn_timing = False`. Every turn lands at effectively one
   instant, so the mapping would be noise and we refuse to fake it.
 
@@ -318,7 +318,7 @@ def build_iterations(events: list[dict]) -> dict:
     - `iterations` — the planner's REPL turns (reasoning + code + its output), in turn order. CONTENT
       is always reliable; each turn's `output` already contains its tools' results inline. Per-turn
       timing (`rel_s`/`duration_s`) is attached only WHEN the trace carries live `main_step` ts
-      (rlm-kit backfills them as each turn is parsed → `per_turn_timing=True`). A trace whose turns
+      (rlm-harness backfills them as each turn is parsed → `per_turn_timing=True`). A trace whose turns
       all landed at one instant — an old finalize-flushed trace, OR any run fast enough not to span a
       second, which is EVERY offline scripted-harness trace this workspace's tests produce — sets
       `per_turn_timing=False`, and we skip per-turn durations rather than fake them.

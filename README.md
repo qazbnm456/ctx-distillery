@@ -1,7 +1,7 @@
 # ctx-distillery
 
 `ctx-distillery` reads AI coding-agent session transcripts — plus the persistent memory store
-those sessions built up — and uses an RLM ([`rlm-kit`](https://github.com/qazbnm456/rlm-kit)) to
+those sessions built up — and uses an RLM ([`rlm-harness`](https://github.com/qazbnm456/rlm-harness)) to
 propose a distillation plan: what's safe to prune, what should be cross-referenced or merged
 across sessions, and what durable knowledge is worth promoting into a standing memory file or a
 reusable Skill. It is a judgement engine, nothing more.
@@ -107,7 +107,7 @@ now needs a Rust toolchain, and the failure surfaces as a `maturin` error naming
 recognise. `litellm<1.95` still builds. A `git clone && uv sync` checkout is unaffected — `uv.lock`
 already pins a buildable version, and `uv tool install` does not read a lockfile.
 
-No PyPI release yet — `rlm-kit` is not on PyPI, and this project's git pin for it lives in
+No PyPI release yet — `rlm-harness` is not on PyPI, and this project's git pin for it lives in
 `[tool.uv.sources]`, which does not survive into published wheel metadata. `uv tool install` from
 git resolves it correctly; `pip install ctx-distillery` could not, so it is not offered.
 
@@ -159,7 +159,7 @@ wrong:
    index. Nothing is deleted, rewritten, or created on disk by the run itself. Applying a plan is a
    separate, explicit action a human takes outside the RLM trajectory, after reading the plan —
    `ctx_distillery/apply.py`, described below.
-2. **This is structural, not a convention we promise to honor.** rlm-kit's sandboxed interpreter
+2. **This is structural, not a convention we promise to honor.** rlm-harness's sandboxed interpreter
    (`pyodide`/Deno, the default and the only one this task uses) has no host filesystem write
    access at all. Combined with wiring zero write-capable tools, the model has no code path to
    mutate a file — full stop, not "we told it not to." See `CLAUDE.md` for the specific
@@ -318,7 +318,7 @@ for the assemble-on-read mechanics.
 
 The planning core is meant to work over any AI coding agent's transcript + memory format, not
 just one. That's bridged through a thin **adapter seam** — `ingest()` / `schema_for(kind)` /
-`list_targets()` — the same base/wrap split rlm-kit uses for tool extension, applied one layer up:
+`list_targets()` — the same base/wrap split rlm-harness uses for tool extension, applied one layer up:
 the harness is the "provider," not a model or API. See `ctx_distillery/adapters/base.py` for the
 interface.
 
@@ -351,9 +351,9 @@ For the ATLAS rubric facts, the eval member, and the Studio (Phase 1/2 of the ru
 initiative), see [`eval/README.md`](eval/README.md) and [`studio/README.md`](studio/README.md).
 For the hard invariants and the rationale behind each one, see [`CLAUDE.md`](CLAUDE.md).
 
-## Relationship to rlm-kit
+## Relationship to rlm-harness
 
-`ctx-distillery` is a thin declaration on top of `rlm-kit`'s `RLMTask` — the retry/validation
+`ctx-distillery` is a thin declaration on top of `rlm-harness`'s `RLMTask` — the retry/validation
 loop, sandbox selection, budget caps, tracing, and dataset export are all inherited, not
-reimplemented here. See rlm-kit's own README, "Building a consumer," for the pattern this project
+reimplemented here. See rlm-harness's own README, "Building a consumer," for the pattern this project
 follows.

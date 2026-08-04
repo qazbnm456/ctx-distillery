@@ -6,7 +6,7 @@ without a real `TraceRecorder` — a pure predicate over events needs no file at
 
 from __future__ import annotations
 
-from rlm_kit.trace import EVENT_RESULT, EVENT_TOOL_CALL
+from rlm_harness.trace import EVENT_RESULT, EVENT_TOOL_CALL
 
 from ctx_distillery.schema import AssembledExtraFile, DistillCandidate, DistillPlan, assemble
 

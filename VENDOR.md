@@ -3,7 +3,7 @@
 ctx-distillery vendors exactly **one** thing — a mechanically-ported subset of
 [gitleaks](https://github.com/gitleaks/gitleaks)' detection rules, used as tier two of the host-side
 redactor. It is documented in full below. Everything else is consumed, not copied: this project is a
-downstream *consumer* of [`rlm-kit`](https://github.com/qazbnm456/rlm-kit), using the kit's PUBLIC surface
+downstream *consumer* of [`rlm-harness`](https://github.com/qazbnm456/rlm-harness), using the kit's PUBLIC surface
 and extending it the sanctioned way — it never forks the harness, never re-implements tracing, and never
 copies kit source into this tree.
 
@@ -182,14 +182,14 @@ row, not to delete the test.
 Nothing about **tier three** (the operator's own `CD_REDACTIONS` rules) is vendored: it is
 operator-supplied data validated at load, with no upstream to track. See `ctx_distillery/README.md`.
 
-## What it consumes from rlm-kit (public surface only)
+## What it consumes from rlm-harness (public surface only)
 
 - **`RLMTask`** — subclassed as `DistillSession` (`ctx_distillery/task.py`). The declaration carries the
   `signature`, `output_field`, `output_model` (`DistillPlan`), and `instructions`; retry/validation,
   sandbox selection, budget caps, and observability are inherited, not reimplemented here.
-- **`configure` / `RLMConfig`** — feed rlm-kit's config from this project's own env-driven surface
+- **`configure` / `RLMConfig`** — feed rlm-harness's config from this project's own env-driven surface
   (`CD_*` vars, see `.env.example`). `ctx_distillery/config.py`'s `setup(config)` calls
-  `rlm_kit.configure(RLMConfig(...))` with the resolved `CD_*` values (both imported lazily, inside
+  `rlm_harness.configure(RLMConfig(...))` with the resolved `CD_*` values (both imported lazily, inside
   the function body, so the env-reading half of that module stays stdlib-only). The interpreter pin to
   `pyodide` (see `CLAUDE.md` invariant 1, the structural no-mutation guarantee) is ENFORCED IN CODE, not
   merely committed to in the design: `task._forced_config` runs `dataclasses.replace(config,
@@ -204,11 +204,11 @@ operator-supplied data validated at load, with no upstream to track. See `ctx_di
   builds an `openai.OpenAI` client directly), so it may never carry the sentinel: `DistillConfig.from_env`
   refuses one there unconditionally, including one inherited down the `CD_DRAFT_LM` → `CD_SUB_LM` →
   `CD_ROOT_LM` fallback chain.
-- **The trace schema + `rlm_kit.trace` helpers** — every run's tool calls (`draft_memory_file`,
+- **The trace schema + `rlm_harness.trace` helpers** — every run's tool calls (`draft_memory_file`,
   `draft_skill_file`, and the read-only lookups) are recorded through the standard trace/v1 events. The
   trace is read for auditability (`ctx-distillery show`, `eval/`, `studio/`) **and** exported as a
   reward-free dataset.
-- **`rlm_kit.dataset`'s `export_actions` / `export_sft_turns` / `run_label_bundle`** —
+- **`rlm_harness.dataset`'s `export_actions` / `export_sft_turns` / `run_label_bundle`** —
   `ctx_distillery/rl_export.py` builds the bundle `ctx-distillery export` prints:
   `{actions, drafting, orchestrator_tools, planner, sft_turns, labels, metrics, rubric_signal}`. Every
   action record carries `reward: null`, and `run_label_bundle` *refuses* a surface literally named
@@ -231,7 +231,7 @@ operator-supplied data validated at load, with no upstream to track. See `ctx_di
   there is **no writing `main()` and no `--out`** (`tests/test_no_write_capability.py` scans
   `rl_export.py` and `cli.py`, and a red tripwire is the finding, not a test to relax — so the CLI does
   `print(json.dumps(...))` to stdout, redirected with `>`, the same shape `show` already has); and
-  reading goes through `trace_io.load_trace`, never `rlm_kit.trace.load_events` (`CLAUDE.md` invariant
+  reading goes through `trace_io.load_trace`, never `rlm_harness.trace.load_events` (`CLAUDE.md` invariant
   11's non-dict-line guard applies to a new reader exactly as to the old ones).
 - **`make_model_tool`** — the base primitive for both of this project's LM-backed drafting tools,
   `draft_memory_file` and `draft_skill_file` (per `CLAUDE.md` invariant 2's judgement-only SUBMIT — the
@@ -241,7 +241,7 @@ operator-supplied data validated at load, with no upstream to track. See `ctx_di
   memory/skill body and an `artifact_id`, and never touch the memory directory or a `skill_dir` themselves.
   Two separate tool instances, one per drafting target, following `make_model_tool`'s "one tool per run,
   per-call breaker state in the closure" shape.
-- **`ModelToolResult.cause` / `.validator_ran`, and the `CAUSE_*` constants** (`rlm_kit.tools`) — the kit's
+- **`ModelToolResult.cause` / `.validator_ran`, and the `CAUSE_*` constants** (`rlm_harness.tools`) — the kit's
   own NAME for which of four outcomes a drafting call was (`"ok"` / `"invalid"` / `"endpoint"` /
   `"circuit_broken"`) and whether the domain validator actually ran. Consumed since the pin moved to
   `4fcd50b2`, which added them. Both are PROPERTIES on `ModelToolResult`, not dataclass fields, so they
@@ -249,14 +249,14 @@ operator-supplied data validated at load, with no upstream to track. See `ctx_di
   every drafting `tool_call`, and `trace_io.draft_cause` reads them back, deriving from
   `circuit_broken`/`endpoint_error` only as the fallback for traces recorded before the key existed. The
   vocabulary is imported, never restated locally, which is the whole point (`CLAUDE.md` invariants 11 and
-  12): the cause set is rlm-kit's and it is closed. `rlm_kit.tools` is dspy-free (verified), so importing
+  12): the cause set is rlm-harness's and it is closed. `rlm_harness.tools` is dspy-free (verified), so importing
   the constants into `schema.py` does not undo that module's reason for existing.
 - **The skills convention (`skills.py`)** — used only as the TARGET SHAPE `draft_skill_file` must produce
   (frontmatter `name`/`description`, progressive disclosure), not as a loader ctx-distillery itself calls.
   This project does not use `load_skills_as_tools`/`list_skills`/`read_skill` to give its own planner LM a
   skills library — it produces `SKILL.md`-shaped output for a *different* consumer (a harness's own skills
   directory) to eventually read. Don't force a fit where ctx-distillery is both a skills producer and a
-  skills consumer of rlm-kit's loader — right now it's only the former.
+  skills consumer of rlm-harness's loader — right now it's only the former.
 
 ## The three sanctioned extension points (and only these)
 
@@ -267,21 +267,21 @@ operator-supplied data validated at load, with no upstream to track. See `ctx_di
    harness-agnostic.
 3. Read results through the trace + exporters.
 
-## This project's OWN extension seam (not rlm-kit's)
+## This project's OWN extension seam (not rlm-harness's)
 
 The `ctx_distillery.adapters.HarnessAdapter` interface (`ctx_distillery/adapters/base.py`) is how a future
 agent-platform target (Codex/Hermes/OpenClaw/OpenCode) plugs in — read-only (`ingest`/`schema_for`/
 `list_targets`), no write path. Only a Claude Code adapter is in scope to build today, because it's the
 only platform whose real on-disk format has actually been inspected; the others are named future targets
 in `CLAUDE.md`'s "Harness scope", deliberately not designed yet. This is ctx-distillery's own seam,
-layered on top of rlm-kit, not something rlm-kit itself exposes.
+layered on top of rlm-harness, not something rlm-harness itself exposes.
 
-## How rlm-kit is pinned
+## How rlm-harness is pinned
 
-rlm-kit is public but not yet on PyPI, so it comes in via a commit-pinned git source
+rlm-harness is public but not yet on PyPI, so it comes in via a commit-pinned git source
 (`[tool.uv.sources]` in `pyproject.toml` → GitHub, `branch = "main"`; `uv.lock` pins the exact commit).
 Never `pip install` it. When co-developing the kit locally, overlay an editable install
-(`uv pip install -e ../rlm-kit`).
+(`uv pip install -e ../rlm-harness`).
 
 The pin currently sits at **`4fcd50b2`**, moved deliberately rather than drifted: that commit is what
 added `ModelToolResult.cause` / `.validator_ran` and the `CAUSE_*` constants this project now consumes

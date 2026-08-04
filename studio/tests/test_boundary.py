@@ -22,7 +22,7 @@ pulls `ctx_distillery` one way while STAYING LIGHT — no `dspy`, no `openai`. T
 read source; those two measure what actually lands in `sys.modules`, which is a different claim and
 the one that regressed: until that pass, EVERY studio HTTP request had already paid for a dspy
 import, because `app.py` reached `assemble` through `ctx_distillery.session` -> `ctx_distillery.task`
--> `from rlm_kit import RLMTask`. A replay server that never constructs an `RLMTask` should not
+-> `from rlm_harness import RLMTask`. A replay server that never constructs an `RLMTask` should not
 import an LM framework, and `ctx_distillery.schema` is what makes that true.
 """
 

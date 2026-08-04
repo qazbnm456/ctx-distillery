@@ -36,7 +36,7 @@ This invariant used to refuse the endpoint outright and name four conditions und
 be safe to reopen; all four are now met, and `studio/README.md` §Scope holds the full argument —
 this bullet is the short form:
 
-1. **A cancel seam landed upstream, in rlm-kit**: `rlm_kit.SandboxCancelled` +
+1. **A cancel seam landed upstream, in rlm-harness**: `rlm_harness.SandboxCancelled` +
    `RLMTask(cancel_event=...)` reach into the sandbox interpreter's own watchdog thread and can kill
    a wedged `deno`/`pyodide` subprocess mid-call — what `asyncio.Task.cancel()` cannot do, because
    the sandbox's blocking read has no `await` inside it to cancel. `studio/ctx_distillery_studio/
@@ -117,7 +117,7 @@ because a drafted memory/skill body is untrusted model output, not markup to ren
 `pyproject.toml`'s `[tool.uv.workspace] members` includes `"studio"` alongside `"eval"`.
 **`_load_trace` reads through `ctx_distillery.trace_io.load_trace`, which filters to dict-shaped
 events ONLY before anything downstream sees them** — found by an adversarial review post-merge:
-`rlm_kit.trace.load_events` does NO shape validation, so a JSON-valid non-dict line (`42`, `null`,
+`rlm_harness.trace.load_events` does NO shape validation, so a JSON-valid non-dict line (`42`, `null`,
 `[1,2,3]`) used to reach `plan_from_events`/`trace_facts`/`mapper.to_event`'s `.get(...)` calls and
 raise a raw `AttributeError` — a genuine 500, not the "never raise on a malformed trace" guarantee
 this invariant claims. The filter first lived INLINE here; it moved into `trace_io` when `eval/`

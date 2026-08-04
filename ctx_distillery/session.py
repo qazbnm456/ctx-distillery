@@ -8,7 +8,7 @@ redact once, run once, assemble once.
 `AssembledPlan` / `AssembledCandidate` / `PROMOTION_ACTIONS`. They now live in the dspy-free
 `schema.py` and are RE-EXPORTED below, so `from ctx_distillery.session import assemble` (and every
 other historical import of those names) resolves unchanged. The reason is measured, not aesthetic:
-this module imports `task.py`, which does `from rlm_kit import RLMTask`, so `eval/` and `studio/` —
+this module imports `task.py`, which does `from rlm_harness import RLMTask`, so `eval/` and `studio/` —
 which only ever REPLAY a finished trace — were paying for dspy purely to reach a pure function over
 `(events, plan)`. See `schema.py`'s docstring for the numbers and the full argument.
 
@@ -29,7 +29,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from rlm_kit.trace import TraceRecorder
+from rlm_harness.trace import TraceRecorder
 
 from .adapters.base import ArtifactRef, HarnessAdapter
 from .redact import redact_transcript
@@ -136,7 +136,7 @@ async def run_distillation_artifacts(
     * Writes/applies nothing: the returned artifacts are inert until a human acts on them. This
       module is inside `tests/test_no_write_capability.py`'s mutation scan and returning more data
       changes nothing about that — the only file this function's frame touches is the trace, and
-      `TraceRecorder` (rlm-kit's) owns that, exactly as before.
+      `TraceRecorder` (rlm-harness's) owns that, exactly as before.
     """
     raw = adapter.ingest()
     redacted_transcripts = [redact(t) for t in raw.transcripts]

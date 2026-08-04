@@ -19,7 +19,7 @@ from, and asks an LLM-as-judge four artifact-framed questions, one per ATLAS cat
 | PA | are the drafted memory/skill files clear, well-scoped, and correctly targeted? |
 
 Each answer is a 0-10 score. This package computes **per-category means only** — never a composite,
-never a training signal. Scoring stays a downstream trainer's job, exactly as `rlm-kit`'s own
+never a training signal. Scoring stays a downstream trainer's job, exactly as `rlm-harness`'s own
 "trajectories, never reward" invariant states for the rollout side.
 
 A run the judge **could not** score (endpoint failure, off-schema reply, tripped circuit breaker) is

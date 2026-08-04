@@ -17,7 +17,7 @@ import pytest
 from ctx_distillery_eval.cli import _pick_judge, _read_transcripts, main, render_scorecard
 from ctx_distillery_eval.judge import PROMPT_VERSION, JudgeVerdict, StubJudge
 from ctx_distillery_eval.schema import EvalReport, EvalRow, EvalScore
-from rlm_kit.trace import EVENT_RESULT, TraceRecorder, record_tool_call
+from rlm_harness.trace import EVENT_RESULT, TraceRecorder, record_tool_call
 
 from ctx_distillery.task import DistillCandidate, DistillPlan
 
@@ -58,14 +58,14 @@ def test_read_transcripts_refuses_if_any_one_of_several_is_empty(tmp_path):
 
 _DRAFT = "---\nname: merge-freeze-policy\ndescription: Merges are frozen.\n---\nbody\n"
 
-#: Valid JSON, but not an object — the exact shapes `rlm_kit.trace.load_events` passes through.
+#: Valid JSON, but not an object — the exact shapes `rlm_harness.trace.load_events` passes through.
 NON_DICT_LINES = ("42", "null", '"x"', "[1, 2, 3]")
 
 
 def _recorded_trace(path, run_id):
     """A REAL `TraceRecorder` trace, not hand-written JSON: this test turns on the `run_id`
     ENVELOPE key (which `collect_tasks` reads) and on `record_result`'s real payload shape, so
-    hand-rolling either would assert against a guess instead of what rlm-kit actually writes."""
+    hand-rolling either would assert against a guess instead of what rlm-harness actually writes."""
     plan = DistillPlan(candidates=[DistillCandidate(action="promote_to_memory", artifact_id="a1")])
     with TraceRecorder(str(path), run_id=run_id, meta={"transcripts": 1}) as rec:
         record_tool_call("draft_memory_file", ok=True, artifact_id="a1", draft=_DRAFT, errors=[])
@@ -74,10 +74,10 @@ def _recorded_trace(path, run_id):
 
 
 def test_score_command_survives_a_non_dict_line_in_one_trace_of_a_batch(tmp_path, capsys):
-    """THE regression test for this fix. `rlm_kit.trace.load_events` does no shape validation, so a
+    """THE regression test for this fix. `rlm_harness.trace.load_events` does no shape validation, so a
     JSONL line that is valid JSON but not an object reached three separate unguarded `.get(...)`
     calls on this exact path: `taskset.collect_tasks`'s `e.get("run_id")`, then `load_events`'s OWN
-    `run_id` filter (inside rlm-kit, upstream of anything `ctx_distillery` could harden), then
+    `run_id` filter (inside rlm-harness, upstream of anything `ctx_distillery` could harden), then
     `session.assemble` via `_draft_calls`.
 
     Reproduced before the fix: scoring a glob of one CLEAN trace plus one carrying a single `42`
