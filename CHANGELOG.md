@@ -12,6 +12,28 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A `release.yml` now publishes to PyPI over Trusted Publishing (OIDC), with no API token.** Adapted
+  from the sibling `rlm-harness` workflow. **Adding it cuts no version**: it is inert until a human
+  publishes a GitHub Release, and `CLAUDE.md ## Versioning` is explicit that a release heading is the
+  owner's statement about the software, never a side effect of tooling landing. One-time setup before
+  the first release — a PyPI Trusted Publisher for `ctx-distillery` (owner/repo/workflow/environment)
+  and a `pypi` environment in this repo's settings — is recorded in the file's own header.
+
+  Two deliberate departures from the sibling, both because this repository is not shaped like it.
+  **A tag/version guard** refuses a release whose tag disagrees with `pyproject.toml`; a PyPI version
+  can never be reused, so shipping `0.1.0` under a `v0.2.0` tag is unrecoverable rather than merely
+  wrong, and `test_public_api.py` already ties `__version__` to pyproject so checking the tag covers
+  both. And a **note on the workspace**: `uv build` at the root emits only `ctx_distillery-<v>` —
+  verified, neither `eval/` nor `studio/` — so `dist/*` is safe to upload wholesale; a member that
+  ever publishes needs its own Trusted Publisher and its own job, never `--all-packages` here.
+
+  `tests/test_doc_claims.py` gains claim 6, pinning the two guards that are each one deletable line
+  and neither of which can fail visibly in testing: the fork guard names THIS repository (`release:
+  published` is inherited by every fork, so a fork cutting a release would otherwise ask PyPI to
+  publish this project), and the tag check still compares against pyproject. It also pins that both
+  workflows install uv from the same SHA — two copies of a pin is two chances to bump one, the same
+  reasoning claim 2 already applies to ruff.
+
 - **The shipped skill defaults to the CURRENT project instead of teaching a path.** Its worked
   example was `ctx-distillery distill /path/to/project`, which is the CLI's unusual case, not its
   normal one: `project_dir` is `nargs="?", default="."` and has been since the command existed. A
