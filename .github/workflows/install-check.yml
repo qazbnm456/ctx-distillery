@@ -1,0 +1,73 @@
+name: Install check
+
+# Does this project's PUBLISHED front door still work? Every other job here runs `uv sync`, which
+# reads `uv.lock` — so anything that breaks only OUTSIDE the lockfile is invisible to CI and reaches
+# a user first. That is not hypothetical: it happened twice in one day.
+#
+#   * `rlm-kit` was renamed upstream to `rlm-harness`. `make check` stayed green the whole time
+#     because the lockfile pinned the old commit, while the `uv tool install` command published in
+#     `README.md` and inside the shipped skill was dead for everyone else.
+#   * `litellm` (transitive, via `dspy`) stopped shipping a macOS wheel at 1.95+, so a source build
+#     needs Rust and dies in `maturin`. Every job here runs on ubuntu, so this class is structurally
+#     invisible.
+#
+# Both were found by a human happening to run an install by hand. This job is that habit, on a timer.
+#
+# **It installs the RELEASED artifact from PyPI, not this checkout.** That is deliberate: the
+# question is "is the command we tell strangers to run working right now", and the answer depends on
+# the whole dependency world, not on `main`. The corollary is worth knowing — a break introduced in
+# `main` is not visible here until it is released.
+#
+# **Each platform runs exactly the command `README.md` gives for it**, macOS constraint included.
+# Testing an idealized command instead would either go permanently red (the macOS wheel gap is not
+# ours to fix and is documented rather than worked around) or test a promise nobody was made. When
+# the constraint is no longer needed, dropping it here and staying green is the signal that upstream
+# fixed it.
+#
+# Scheduled rather than a PR gate: the failure mode is "the world moved", not "this PR broke it", so
+# paying network and wall-clock on every PR would buy nothing. `workflow_dispatch` is there for the
+# one time it matters on demand — just before cutting a release.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"        # Mondays, 06:17 UTC. Off the hour on purpose: scheduled runs pile up
+                                # at :00 across all of GitHub and get delayed.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false          # A macOS-only break is the interesting case; do not let it hide the
+                                # linux result, or vice versa.
+      matrix:
+        include:
+          - os: ubuntu-latest
+            spec: '"ctx-distillery[cli]"'
+          - os: macos-latest
+            # The macOS caveat README.md documents. See this file's header.
+            spec: '--with "litellm<1.95" "ctx-distillery[cli]"'
+    steps:
+      - uses: actions/checkout@v4         # for examples/demo-run.jsonl only, never for the install
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - name: Install the published package the way README.md says to
+        run: uv tool install ${{ matrix.spec }}
+      - name: Both console scripts exist and run
+        run: |
+          ctx-distillery --version
+          ctx-distillery-apply --version
+      - name: The shipped example still renders a real plan
+        # Not just "it imports": this is the second command README.md gives, and the shipped skill's
+        # default path. `show` is fully offline, so it needs no credentials, no model and no sandbox.
+        run: |
+          output="$(ctx-distillery show examples/demo-run.jsonl)"
+          echo "$output"
+          case "$output" in
+            *promote_to_memory*) ;;
+            *) echo "::error::the shipped example no longer renders a promotion"; exit 1 ;;
+          esac
