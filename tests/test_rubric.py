@@ -229,13 +229,18 @@ def test_a_prune_with_a_target_path_is_counted_as_named():
 
 
 def test_a_prune_without_a_target_path_is_not_counted_as_named():
-    """`trace_facts`'s `prune_targets_named` is a structural presence check only — `session.assemble`
-    itself doesn't flag a missing target_path as a candidate problem, so only the presence count
-    moves, not `n_candidate_problems`."""
+    """`trace_facts`'s `prune_targets_named` is a structural presence count, and it is NOT the same
+    signal as the candidate problem beside it — that is the point of asserting both here.
+
+    This test's docstring used to say `assemble` "doesn't flag a missing target_path as a candidate
+    problem", and asserted `n_candidate_problems == 0`. That was true and was a gap: `apply` has
+    always refused such a prune, so `ctx-distillery show` was rendering an unapplicable candidate as
+    clean. `assemble` flags it now, so the count moves to 1. The two facts stay distinct — one asks
+    "did the planner name a target", the other "is this candidate reviewable as-is"."""
     plan = _plan_dict({"action": "prune", "key_fields": {"reason": "stale, no target named"}})
     facts = trace_facts([_result(plan)])
     assert facts["prune_targets_named"] == 0
-    assert facts["n_candidate_problems"] == 0
+    assert facts["n_candidate_problems"] == 1
 
 
 def test_a_promote_to_skill_with_an_invalid_scope_is_counted_by_n_bad_skill_scope():

@@ -6,6 +6,7 @@ without a real `TraceRecorder` — a pure predicate over events needs no file at
 
 from __future__ import annotations
 
+import pytest
 from rlm_harness.trace import EVENT_RESULT, EVENT_TOOL_CALL
 
 from ctx_distillery.schema import AssembledExtraFile, DistillCandidate, DistillPlan, assemble
@@ -185,3 +186,49 @@ def test_assemble_harness_is_none_when_run_start_carries_no_harness_key():
     events = [_run_start({"transcripts": 3}), _result(_plan_dict())]
     assembled = assemble(events, DistillPlan.model_validate(_plan_dict()))
     assert assembled.harness is None
+
+
+# --------------------------------------------------------------------------------------------------
+# A `prune` must name its target, and `assemble` is where a reviewer finds out.
+#
+# `apply.py` has always refused a prune with no `target_path`
+# (`tests/test_apply.py::test_a_prune_with_no_target_path_is_refused`). Until this check existed,
+# that refusal was the FIRST anyone heard of it: `assemble` reported `problems=[]`, so
+# `ctx-distillery show` rendered an unapplicable candidate as though it were fine and the operator
+# learned otherwise only after approving it. Found by a live run whose planner keyed its prune on
+# `existing_memory_path` instead.
+# --------------------------------------------------------------------------------------------------
+
+
+def test_a_prune_without_target_path_is_flagged_where_it_is_reviewed() -> None:
+    plan = DistillPlan(candidates=[DistillCandidate(action="prune", key_fields={"reason": "stale"})])
+    (candidate,) = assemble([], plan).candidates
+    assert candidate.problems, "an unapplicable prune must not render as a clean candidate"
+    assert "target_path" in candidate.problems[0]
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_a_present_but_unusable_target_path_is_flagged_too(value) -> None:
+    """`apply` refuses these as well, so the review surface must not call them fine. A bare key with
+    an empty value is exactly what a model produces when it knows the field is expected but has
+    nothing to put in it."""
+    plan = DistillPlan(
+        candidates=[DistillCandidate(action="prune", key_fields={"target_path": value})]
+    )
+    (candidate,) = assemble([], plan).candidates
+    assert candidate.problems and "target_path" in candidate.problems[0]
+
+
+def test_a_prune_that_names_its_target_is_left_alone() -> None:
+    """The check must not fire on the normal case — that is what makes the flag mean something."""
+    plan = DistillPlan(
+        candidates=[DistillCandidate(action="prune", key_fields={"target_path": "/m/a.md"})]
+    )
+    assert assemble([], plan).candidates[0].problems == []
+
+
+def test_keep_needs_no_target_path() -> None:
+    """`keep` writes nothing, so it has no target to name. Flagging it would make every well-formed
+    plan carry a problem."""
+    plan = DistillPlan(candidates=[DistillCandidate(action="keep", key_fields={"reason": "still true"})])
+    assert assemble([], plan).candidates[0].problems == []
