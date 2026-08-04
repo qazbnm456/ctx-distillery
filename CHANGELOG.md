@@ -38,6 +38,17 @@ never applies anything itself.
   a `keep` with a stated reason, `cause` correctly `endpoint` rather than `invalid`, and no pretence
   of success. That is what `CLAUDE.md` invariant 12 exists for, holding under a real fault.
 
+- **The shipped demo trace was ignored by `.gitignore`, and shipped without shipping.** It was added,
+  committed, pushed and merged with only its README going in — `git status` says nothing, because an
+  ignored file is not "deleted", it is simply never mentioned. This is the SECOND time the blanket
+  `*.jsonl` (carried from the sibling template, where every `.jsonl` really is a run artifact) has
+  swallowed source: it took the `eval/` demo transcripts once already, and that rule's own comment
+  describes the trap it then repeated. `!examples/*.jsonl` is the fix; `tests/test_examples.py` is
+  why it will not happen a third time — it asks `git ls-files`, not the filesystem, and additionally
+  pins that the trace parses, carries a promotion with usable drafted text, and contains none of the
+  shapes that reached a candidate demo during authoring. Verified by removing the negation and
+  watching it go red.
+
 - **`examples/demo-run.jsonl` — a real finished run, readable with no credentials and no model.**
   `ctx-distillery show` is the README's second command and the shipped skill's default path, and a
   fresh install had nothing to point either at. This is a genuine artifact rather than a fixture: the

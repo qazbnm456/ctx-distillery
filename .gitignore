@@ -18,6 +18,13 @@ output/
 # raised FileNotFoundError, five eval tests failed — including the one asserting these are checked-in
 # data — and CI's eval-test job went red, while four docs claimed they were tracked. Found by review.
 !eval/ctx_distillery_eval/demo/*.jsonl
+# ...and `examples/` is SHIPPED documentation, not a run artifact either. Same trap, second victim:
+# `examples/demo-run.jsonl` was added, committed, pushed and merged before anyone noticed that only
+# its README had gone in. A trace under `examples/` is there precisely so a reader can run
+# `ctx-distillery show` without credentials — it is the one .jsonl in this repo whose whole job is to
+# be distributed. `tests/test_examples.py` now fails if it stops being tracked, because "silently
+# absent" is exactly how this rule fails both times.
+!examples/*.jsonl
 
 # Secrets / local env (only .env.example is tracked)
 .env
