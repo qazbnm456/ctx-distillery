@@ -1,7 +1,7 @@
 ---
 name: ctx-distillery-plan
-description: Distil a project's Claude Code TRANSCRIPT history — dozens to hundreds of past conversations, far more than fits in context — into a reviewable plan of what durable knowledge is worth promoting into a memory file or a reusable Skill, and which existing memories are safe to prune. Reads transcripts plus the memory store, proposes judgements, and writes nothing. Needs either a finished run's trace file, or credentials and a Deno sandbox for a live run that bills the operator. NOT for auditing a handful of memory files that fit in context — read those directly instead, which is faster, free, and lets you verify each one against the current code.
-when_to_use: The user wants durable knowledge mined out of a LARGE body of past conversations ("what did I learn across all my sessions on X", "turn my history with this project into something reusable"), or wants to read/review a ctx-distillery trace file. Do NOT invoke it merely because the user said "memory" or "clean up" — if the target is a few files you can open, open them.
+description: Distil THE CURRENT PROJECT's Claude Code TRANSCRIPT history — dozens to hundreds of past conversations, far more than fits in context — into a reviewable plan of what durable knowledge is worth promoting into a memory file or a reusable Skill, and which existing memories are safe to prune. One run covers one project, the working directory, and there is no mode that reads every project at once. Reads transcripts plus the memory store, proposes judgements, and writes nothing. Needs either a finished run's trace file, or credentials and a Deno sandbox for a live run that bills the operator. NOT for auditing a handful of memory files that fit in context — read those directly instead, which is faster, free, and lets you verify each one against the current code.
+when_to_use: The user wants durable knowledge mined out of a LARGE body of past conversations in the project they are working in ("what did I work out across all my sessions here", "turn my history with this project into something reusable"), or wants to read/review a ctx-distillery trace file. Do NOT invoke it merely because the user said "memory" or "clean up" — if the target is a few files you can open, open them.
 ---
 
 # ctx-distillery — propose a distillation plan
@@ -81,12 +81,17 @@ Driving the Agent SDK from inside a Claude Code session is not something this pr
 If it fails, say so and fall back to an API key for the planner rather than debugging it in place.
 
 ```
-ctx-distillery distill /path/to/project
+ctx-distillery distill
 ```
 
+**One run covers one project, and that project is the current working directory.** There is no
+mode that reads every project at once — a run resolves exactly one storage directory from the
+project path. Pass a path only if the operator explicitly names a *different* project than the one
+they are working in, which is unusual and worth confirming before you do it.
+
 Add `--include-subagents` only if asked: it renumbers every transcript index and ships
-substantially more text to the model. Omit the path to distil the current directory. The run writes
-exactly one file, a trace at `./traces/<run-id>.jsonl` (or `$CTXD_TRACES_DIR`), and nothing else.
+substantially more text to the model. The run writes exactly one file, a trace at
+`./traces/<run-id>.jsonl` (or `$CTXD_TRACES_DIR`), and nothing else.
 
 ## Step 2 — read the plan
 
@@ -124,8 +129,11 @@ for them, do not suggest "apply all", and do not run the apply binary. Print the
 indices *they* named, and stop there:
 
 ```
-ctx-distillery-apply traces/<run-id>.jsonl --project /path/to/project --approve 0,3
+ctx-distillery-apply traces/<run-id>.jsonl --project . --approve 0,3
 ```
+
+`--project` is required and names the store that would be written — the current project unless the
+operator distilled a different one, in which case it must be that same one.
 
 Without `--confirm` that is a dry run that writes nothing — which is the right thing to read first.
 Adding `--confirm` is what writes. Installing a skill into `~/.claude/skills` additionally needs
