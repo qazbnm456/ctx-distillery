@@ -278,10 +278,9 @@ layered on top of rlm-harness, not something rlm-harness itself exposes.
 
 ## How rlm-harness is pinned
 
-rlm-harness is public but not yet on PyPI, so it comes in via a commit-pinned git source
-(`[tool.uv.sources]` in `pyproject.toml` → GitHub, `branch = "main"`; `uv.lock` pins the exact commit).
-Never `pip install` it. When co-developing the kit locally, overlay an editable install
-(`uv pip install -e ../rlm-harness`).
+rlm-harness comes from PyPI as an exact version pin (`rlm-harness==1.0.0` in `pyproject.toml`;
+`uv.lock` records the resolved artifact). When co-developing the kit locally, overlay an editable
+install (`uv pip install -e ../rlm-harness`), then bump the pin once the change ships.
 
 The pin currently sits at **`4fcd50b2`**, moved deliberately rather than drifted: that commit is what
 added `ModelToolResult.cause` / `.validator_ran` and the `CAUSE_*` constants this project now consumes

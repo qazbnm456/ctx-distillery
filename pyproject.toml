@@ -26,7 +26,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "rlm-harness",
+    # Pinned exactly: 1.0.0 freezes the kit's public surface under SemVer.
+    "rlm-harness==1.0.0",
     "pydantic>=2.9",
     # Memory/skill frontmatter is real YAML with a NESTED `metadata.type` key; rlm_harness.skills's own
     # reader only handles flat `key: value` lines, so `ctx_distillery/frontmatter.py` parses it here.
@@ -89,12 +90,9 @@ target-version = "py311"
 [tool.uv]
 default-groups = ["dev", "subscription-sdk"]
 
-# rlm-harness is public but not on PyPI yet, so it comes in via a commit-pinned git source
-# rather than a normal PyPI dependency; uv.lock pins the exact commit. Never `pip install`
-# it directly. For local co-development against an in-progress rlm-harness checkout, overlay
-# an editable install on top: `uv pip install -e ../rlm-harness` (see CLAUDE.md).
-[tool.uv.sources]
-rlm-harness = { git = "https://github.com/qazbnm456/rlm-harness.git", branch = "main" }
+# rlm-harness resolves from PyPI at the version pinned above. For local co-development against an
+# in-progress rlm-harness checkout, overlay an editable install on top:
+# `uv pip install -e ../rlm-harness` (see CLAUDE.md), then bump the pin once the change ships.
 
 [tool.uv.workspace]
 members = ["eval", "studio"]

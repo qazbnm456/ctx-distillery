@@ -43,23 +43,25 @@ never applies anything itself.
   asks before switching anyone onto their own subscription usage, and says that driving the Agent SDK
   from inside a Claude Code session is unverified rather than pretending otherwise.
 
-- **`rlm-kit` was renamed upstream to `rlm-harness` (package, import name and GitHub repository), and
-  this project followed it: 334 replacements across 59 files, plus `uv.lock`.** The upstream version
-  went 0.2.0 -> 1.0.0 at the same time, but this is a PURE rename here — every name this project
-  imports (`RLMTask`, `RLMConfig`, `SandboxCancelled`, `ClaudeAgentLM`, and the `config`/`dataset`/
-  `rubric`/`runtime`/`testing`/`tools`/`trace` submodule surfaces) was verified present on
-  `rlm_harness` 1.0.0 BEFORE any file was touched, and the diff is symmetric at 334 insertions /
-  334 deletions.
+- **A green suite hid a published install command that was already dead — and the fix was to stop
+  tracking a branch.** The upstream harness renamed itself (`rlm-kit` -> `rlm-harness`) before its
+  first publish; following it here was mechanical and is not the interesting part.
 
-  **The way this surfaced is the part worth keeping.** `make check` stayed green throughout, because
+  `make check` stayed green throughout, because
   `uv.lock` pinned the old commit — while `uv tool install ... @ git+https://…/ctx-distillery`, the
   command this repository had just published in `README.md` and in the shipped skill, was already
   dead for everyone: `[tool.uv.sources]` tracks `branch = "main"`, so it resolved a package whose
   metadata now said `rlm-harness` and failed with `Package metadata name 'rlm-harness' does not match
   given name 'rlm-kit'`. A green suite and a broken published install command is a state nothing here
   can currently detect — the lockfile that makes local development reproducible is exactly what hides
-  upstream drift from CI. Recorded as a known gap: tracking a BRANCH is what makes a published
-  install command a moving target, and no job installs from the unlocked tree.
+  upstream drift from CI.
+
+  The root cause is now gone rather than merely recorded. `rlm-harness` publishes to PyPI, so the
+  `[tool.uv.sources]` override is deleted and the dependency is an ordinary exact pin
+  (`rlm-harness==1.0.0`). Nothing tracks `main` any more, so an unlocked resolve can no longer drift
+  out from under a published install command. The residual gap is narrower and worth naming: no job
+  installs from the unlocked tree, so a dependency that breaks only outside the lockfile would still
+  reach a user before CI.
 
 - **This project now ships itself as a Claude Code Skill: `skills/ctx-distillery-plan/`, installable
   without cloning** — `npx skills add qazbnm456/ctx-distillery` (which is what indexes it on
@@ -80,10 +82,11 @@ never applies anything itself.
   imported INSIDE `config.make_chat_fn`'s closure, so a bare install fails mid-trajectory rather
   than at startup; and `litellm` (transitive, via `dspy`) ships no macOS wheel at 1.95+, so it
   builds from an sdist that now needs Rust and dies in `maturin`. A `uv sync` checkout is unaffected
-  (`uv.lock` pins a buildable version; `uv tool install` does not read a lockfile). No PyPI release:
-  `rlm-harness` is not on PyPI and this project's git pin for it lives in `[tool.uv.sources]`, which
-  does not survive into published wheel metadata (verified by building the wheel —
-  `Requires-Dist: rlm-harness`, bare), so `pip install ctx-distillery` could not resolve.
+  (`uv.lock` pins a buildable version; `uv tool install` does not read a lockfile). Still no PyPI
+  release, but no longer blocked on one: the reason it could not resolve was that this project's
+  `rlm-harness` pin lived in `[tool.uv.sources]`, which never survives into published wheel metadata
+  (verified by building the wheel — `Requires-Dist: rlm-harness`, bare). That pin is now an ordinary
+  versioned dependency, so the metadata resolves on its own.
 
   `tests/test_skill_contract.py` pins what is mechanical (a case count is deliberately not quoted —
   nothing enforces one, and the first draft of this entry was already stale by a case): frontmatter

@@ -107,9 +107,9 @@ now needs a Rust toolchain, and the failure surfaces as a `maturin` error naming
 recognise. `litellm<1.95` still builds. A `git clone && uv sync` checkout is unaffected — `uv.lock`
 already pins a buildable version, and `uv tool install` does not read a lockfile.
 
-No PyPI release yet — `rlm-harness` is not on PyPI, and this project's git pin for it lives in
-`[tool.uv.sources]`, which does not survive into published wheel metadata. `uv tool install` from
-git resolves it correctly; `pip install ctx-distillery` could not, so it is not offered.
+No PyPI release yet, but the blocker is gone: `rlm-harness` now publishes to PyPI and is pinned as a
+normal dependency, so wheel metadata resolves on its own rather than depending on a
+`[tool.uv.sources]` entry that never survived into it.
 
 The skill declares no `allowed-tools`, so it never pre-approves a tool on your behalf; what actually
 prompts you is decided by your own permission settings, not by anything shippable in a skill file.
