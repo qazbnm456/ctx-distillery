@@ -6,12 +6,20 @@ store and proposes a distillation plan (what to prune, what to merge across sess
 promote into a memory file or a Skill file). It never applies anything itself. See
 `README.md` for the overview and `ctx_distillery/README.md` for the package-level guide.
 
-`rlm-harness` is pinned as a git dependency (see `pyproject.toml`). For local co-development against
-an in-progress rlm-harness checkout, install it editable over the top:
+`rlm-harness` resolves from PyPI at an EXACT pin (see `pyproject.toml`). It was a git dependency
+until 1.0.0 shipped to PyPI; this line said "pinned as a git dependency" for a month after that
+stopped being true, which is the drift `tests/test_doc_claims.py` exists for and does not yet
+cover. For local co-development against an in-progress rlm-harness checkout, install it editable
+over the top:
 
 ```
 uv pip install -e ../rlm-harness
 ```
+
+**That editable install leaks the kit's OWN `tests/` onto the import path and can break this
+repo's collection** (reported by the kit's maintainer as having bitten several consumers). If it
+does, put only the `rlm_harness` package on `PYTHONPATH` via a symlink instead, and bump the pin
+once the change ships rather than leaving the overlay in place.
 
 ## Verify
 

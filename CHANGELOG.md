@@ -12,6 +12,41 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **`rlm-harness` 1.0.0 -> 1.11.1, with dspy's floor moving 3.2.1 -> 3.3.1 underneath it.** Handed
+  over by the kit's maintainer rather than discovered here. Every kit name this project imports
+  already existed at 1.0.0, so it is an upgrade and not a port, and the trace format stayed
+  `rlm-harness/trace/v1` (additive-only), so stored traces and the 25 `rlm_harness.trace` call sites
+  are unaffected. `litellm` did NOT drift off 1.93.0 — worth checking rather than assuming, since
+  1.95+ has no macOS wheel and a drift there would have broken `uv sync` on this platform.
+
+  **One test failed, and it was the test doing its job rather than a regression.**
+  `test_cancel_event_reaches_the_constructed_sandbox_interpreter` read
+  `rlm._interpreter._cancel_event`, and dspy 3.3.x removed that attribute: `RLM` now takes an
+  `interpreter_factory` it calls per forward pass. Traced before touching anything, because "the
+  cancel seam is broken" and "the assertion moved" look identical from the failure line. The seam is
+  intact — the kit still builds the interpreter itself with `cancel_event=` and passes it to
+  `aforward()` positionally, and deliberately does NOT supply it through `interpreter_factory`,
+  because dspy shuts down whatever that factory returns and would double-shut-down a sandbox the kit
+  owns. The assertion now reads `task._built_interpreter`, and the docstring records why, so the next
+  `AttributeError` here is not "fixed" by deleting the check.
+
+- **Two stale claims about that dependency, one of them a month old.** `CLAUDE.md`'s opening said
+  `rlm-harness` was "pinned as a git dependency" for a month after `[tool.uv.sources]` was deleted
+  and it became an ordinary exact PyPI pin, and `pyproject.toml`'s comment still said "1.0.0 freezes
+  the kit's public surface". Both corrected, and claim 7 in `tests/test_doc_claims.py` now covers
+  them: the dependency must be an exact `==` pin with no `[tool.uv.sources]` entry, and the opening
+  must state how it resolves.
+
+  The guard's own first draft matched the bare phrase "pinned as a git dependency" and so flagged the
+  sentence that RETRACTS it. A check that cannot tell a correction from the thing it corrects makes
+  the correction unwritable, so it matches the present-tense assertion instead. Verified in both
+  directions by reinstating the old sentence and watching it go red.
+
+  Also recorded from the same handover: `uv pip install -e ../rlm-harness`, which `CLAUDE.md` has
+  always recommended for co-development, leaks the kit's own `tests/` onto the import path and can
+  break this repo's collection. The workaround is a `PYTHONPATH` symlink of just the `rlm_harness`
+  package.
+
 - **A scheduled `install-check.yml` asks whether the PUBLISHED front door still works.** Every other
   job runs `uv sync`, which reads `uv.lock`, so anything that breaks only OUTSIDE the lockfile is
   invisible to CI and reaches a user first. That is not hypothetical — it happened twice in one day:

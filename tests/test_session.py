@@ -478,14 +478,24 @@ def test_cancel_event_reaches_the_constructed_sandbox_interpreter():
     forwarding (`run_distillation_artifacts` -> `DistillSession.__init__` -> `RLMTask.__init__`).
     Checked directly on `DistillSession`/`RLMTask`, one layer below `run_distillation_artifacts`,
     with the REAL (never-executed) pyodide interpreter — a `ScriptedInterpreter` override would
-    bypass `build_interpreter` entirely and prove nothing about this specific wiring."""
+    bypass `build_interpreter` entirely and prove nothing about this specific wiring.
+
+    **Asserted on the TASK's built interpreter, not on `rlm._interpreter`, and the move is not
+    cosmetic.** This used to read `task._build_rlm()._interpreter._cancel_event`. dspy 3.3.x stopped
+    taking an interpreter INSTANCE on the constructor: it now takes an `interpreter_factory` it
+    calls per forward pass, and rlm-harness deliberately does NOT supply the sandbox through that
+    seam, because dspy shuts down whatever the factory returns and would double-shut-down a sandbox
+    the kit owns. The kit still builds the interpreter itself with `cancel_event=` and hands it to
+    `aforward()` positionally, so the wiring this test exists for is unchanged — only the place it
+    is observable moved. Reading `rlm._interpreter` after the bump raised `AttributeError`, which is
+    the test doing its job; do not "fix" a future occurrence by dropping the assertion."""
     import threading
 
     _configure([{"reasoning": "x", "code": "x"}])
     ev = threading.Event()
     task = DistillSession(memory_index=[], chat_fn=lambda spec: "x", transcripts=[], cancel_event=ev)
-    rlm = task._build_rlm()
-    assert rlm._interpreter._cancel_event is ev
+    task._build_rlm()
+    assert task._built_interpreter._cancel_event is ev
 
 
 # -- subagent ingestion: redaction, and the trace's identity list -------------------------------
