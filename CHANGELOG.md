@@ -12,6 +12,15 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The retry loop now reports which attempt succeeded, and raises a `::notice::` when it was not the
+  first.** "Has this loop ever actually done anything?" is now answerable from CI history by anyone,
+  instead of resting on whether the person holding the delete key knows why it is there. The
+  reasoning came out of an exchange with rlm-harness's maintainer and applies to any guard like it:
+  insurance nobody has seen pay out is exactly what a well-meaning tidy-up removes, and a comment in
+  the file is not enough — the evidence has to be in the run log. Verified against stubs for both
+  paths: a ready index reports attempt 1 silently, a lagging one reports the attempt it recovered on
+  and emits the notice.
+
 - **The install check now also runs after a release, chained off the publish rather than off the
   release event.** Scheduled catches upstream drift; this catches "the artifact we just shipped does
   not install", which is the failure with the shortest fuse — a broken front door reaches strangers
