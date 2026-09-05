@@ -47,11 +47,17 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      # The tag check below already derives this; exporting it means the verify job at the bottom
+      # cannot disagree about which version was published. GitHub expressions have no string
+      # replace, so stripping the tag's leading `v` there would be its own small mess.
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
       - name: Refuse a tag that disagrees with the package version
+        id: version
         run: |
           tag='${{ github.event.release.tag_name }}'
           version="$(python3 -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
@@ -60,6 +66,7 @@ jobs:
             exit 1
           fi
           echo "tag '$tag' matches pyproject version '$version'"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Build sdist + wheel
         run: uv build
       - uses: actions/upload-artifact@v4
@@ -87,3 +94,19 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+
+  # Did the thing we just published actually install? This is the failure with the shortest fuse:
+  # a broken front door reaches strangers immediately, and they do not open issues, they leave.
+  #
+  # It is `needs: publish`, NOT a second `on: release: published`. That would be the same event this
+  # workflow keys on, so it would start while the upload is still in flight and fail against an index
+  # that does not have the version yet. `expect-version` additionally closes the false-GREEN: PyPI's
+  # CDN lags, so an install right after a publish can quietly resolve the PREVIOUS version and pass.
+  #
+  # INFORMATIONAL, not a gate. The publish already happened and a PyPI version can never be reused,
+  # so a red run here means "fix it forward" — it cannot and does not roll anything back.
+  verify:
+    needs: [build, publish]
+    uses: ./.github/workflows/install-check.yml
+    with:
+      expect-version: ${{ needs.build.outputs.version }}
