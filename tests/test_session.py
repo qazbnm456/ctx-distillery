@@ -488,7 +488,17 @@ def test_cancel_event_reaches_the_constructed_sandbox_interpreter():
     the kit owns. The kit still builds the interpreter itself with `cancel_event=` and hands it to
     `aforward()` positionally, so the wiring this test exists for is unchanged — only the place it
     is observable moved. Reading `rlm._interpreter` after the bump raised `AttributeError`, which is
-    the test doing its job; do not "fix" a future occurrence by dropping the assertion."""
+    the test doing its job; do not "fix" a future occurrence by dropping the assertion.
+
+    **It is NOT a duplicate of rlm-harness's own `test_cancel_event_reaches_the_built_interpreter_
+    end_to_end`, even though the assertion line is identical — the question was raised by the kit's
+    maintainer and settled by measurement.** The kit's test constructs an `RLMTask` DIRECTLY, so it
+    covers the kit's wiring from `RLMTask.__init__` down. This one covers the seam ABOVE that:
+    `DistillSession.__init__` takes explicit keyword-only parameters plus `**kw`, and `cancel_event`
+    reaches `RLMTask.__init__` only by riding that `**kw`. Demonstrated by deleting the `**kw` from
+    the `super().__init__` call: this test goes red, and the kit's path still reports
+    `_cancel_event is ev` as True, because nothing about the kit changed. The shared assertion is
+    only where the property is observable, not what is being tested."""
     import threading
 
     _configure([{"reasoning": "x", "code": "x"}])
