@@ -93,7 +93,15 @@ jobs:
             if uv tool install --force --no-cache ${{ matrix.spec }}; then
               got="$(ctx-distillery --version | awk '{print $2}')"
               if [ -z "$expected" ] || [ "$got" = "$expected" ]; then
-                echo "installed $got"
+                # Report the ATTEMPT, not just the outcome, and raise a notice when it was not the
+                # first. "Has this retry loop ever actually done anything?" then has an answer in CI
+                # history that anyone can read, instead of resting on whether the person holding the
+                # delete key knows why the loop is there. Insurance nobody has seen pay out is
+                # exactly what a well-meaning tidy-up removes.
+                echo "installed $got on attempt $attempt/8"
+                if [ "$attempt" -gt 1 ]; then
+                  echo "::notice::the index lagged: $expected only became installable on attempt $attempt of 8"
+                fi
                 exit 0
               fi
               echo "index still serving $got, waiting for $expected (attempt $attempt/8)"
