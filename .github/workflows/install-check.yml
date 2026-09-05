@@ -46,6 +46,18 @@ name: Install check
 #
 # The verification is informational, not a gate: a PyPI version can never be reused, so a red run
 # here means "go fix it forward", never "the release was rolled back".
+#
+# **A red here DOES conclude the whole Release run as failed, and that is chosen rather than
+# overlooked.** rlm-harness's reviewer raised it as a contradiction with the informational framing
+# and suggested `continue-on-error`. Half right: the mechanism is real, but `continue-on-error`
+# concludes the run `success` and notifies nobody, which trades a misreadable signal for no signal —
+# strictly worse for a job whose entire purpose is telling you the front door is broken. And the red
+# is not actually a lie: the release DID produce an artifact that does not install.
+#
+# What was wrong was that the failure said nothing about what to do, so the person who clicked into
+# it had to read this file to learn there is no rollback. The error annotation now carries that,
+# which addresses the misreading at the moment it would happen instead of hoping a comment reaches
+# someone first.
 
 on:
   schedule:
@@ -110,7 +122,14 @@ jobs:
             fi
             sleep 20
           done
-          echo "::error::gave up waiting for ${expected:-a working install} after 8 attempts"
+          if [ -n "$expected" ]; then
+            # The release path. Whoever clicks into this red must not have to read this file to
+            # learn there is nothing to undo — the failure itself has to say so, because the
+            # instinct on a red release run is to look for a rollback that cannot exist.
+            echo "::error::$expected did not become installable after 8 attempts. The publish ALREADY SUCCEEDED and a PyPI version can never be reused, so there is nothing to roll back and re-running this workflow will not help. Fix forward: cut the next patch version. This job is informational; the release itself is done."
+          else
+            echo "::error::gave up waiting for a working install after 8 attempts"
+          fi
           exit 1
       - name: Both console scripts exist and run
         run: |
