@@ -26,8 +26,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    # Pinned exactly: 1.0.0 freezes the kit's public surface under SemVer.
-    "rlm-harness==1.0.0",
+    # Pinned EXACTLY, and bumped deliberately: an exact pin is what makes an upstream release a
+    # reviewed event here rather than something a fresh resolve discovers for a user.
+    "rlm-harness==1.11.1",
     "pydantic>=2.9",
     # Memory/skill frontmatter is real YAML with a NESTED `metadata.type` key; rlm_harness.skills's own
     # reader only handles flat `key: value` lines, so `ctx_distillery/frontmatter.py` parses it here.

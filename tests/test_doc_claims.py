@@ -349,3 +349,51 @@ def test_the_release_workflow_refuses_a_tag_that_disagrees_with_the_version() ->
         f"{RELEASE_WORKFLOW} no longer compares the release tag against `pyproject.toml`'s version. "
         f"Without it, a `vX.Y.Z` tag can publish a wheel claiming some other version, permanently."
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# Claim 7: the docs describe how `rlm-harness` actually resolves.
+#
+# `CLAUDE.md` opened with "pinned as a git dependency" for a MONTH after the `[tool.uv.sources]`
+# entry was deleted and the dependency became an ordinary exact PyPI pin. Nothing caught it: the
+# claim is prose, and the only reader who would notice is someone following it to set up co-dev and
+# finding no git source to co-develop against. Both halves are mechanically checkable.
+# --------------------------------------------------------------------------------------------------
+
+
+def _declared_rlm_harness_pin() -> str:
+    project = tomllib.loads(_read("pyproject.toml"))
+    pins = [d for d in project["project"]["dependencies"] if d.startswith("rlm-harness")]
+    assert len(pins) == 1, f"expected exactly one rlm-harness dependency, found {pins}"
+    return pins[0]
+
+
+def test_rlm_harness_is_an_exact_pin_and_not_a_git_source() -> None:
+    """The exact pin is the thing that makes an upstream release a reviewed event here. A range
+    would let a fresh resolve hand a user a version this repo's suite has never run against."""
+    pin = _declared_rlm_harness_pin()
+    assert re.fullmatch(r"rlm-harness==\d+\.\d+\.\d+", pin), (
+        f"rlm-harness must be an exact `==` pin; found {pin!r}"
+    )
+    assert "[tool.uv.sources]" not in _read("pyproject.toml"), (
+        "a `[tool.uv.sources]` entry is back. If that is deliberate, it must pin a rev or tag and "
+        "never a branch — branch tracking has already shipped one broken install command here."
+    )
+
+
+def test_claude_md_describes_the_resolution_it_actually_uses() -> None:
+    """The wording that actually drifted, checked in both directions.
+
+    The negative half matches the PRESENT-TENSE sentence shape that was wrong (`is pinned as a git
+    dependency`), not the bare phrase: the corrected text QUOTES the old claim while explaining it,
+    and a bare-phrase match flagged that explanation as the defect. A guard that cannot tell a
+    retraction from the thing it retracts makes the correction unwritable."""
+    opening = _read("CLAUDE.md").split("## Verify")[0]
+    assert re.search(r"resolves from PyPI at an EXACT pin", opening), (
+        "CLAUDE.md's opening no longer states how rlm-harness resolves. Say it plainly: a reader "
+        "setting up co-development follows this sentence and finds no git source to work against."
+    )
+    assert not re.search(r"is pinned as a git dependency", opening), (
+        "CLAUDE.md still asserts rlm-harness IS a git dependency; it resolves from PyPI at an "
+        "exact pin. (Quoting the old claim while correcting it is fine and does not match this.)"
+    )
