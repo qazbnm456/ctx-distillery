@@ -26,13 +26,41 @@ name: Install check
 #
 # Scheduled rather than a PR gate: the failure mode is "the world moved", not "this PR broke it", so
 # paying network and wall-clock on every PR would buy nothing. `workflow_dispatch` is there for the
-# one time it matters on demand — just before cutting a release.
+# one time it matters on demand.
+#
+# **`workflow_call` is the third trigger, and it answers a different question.** `release.yml` calls
+# this after its publish job, because "the artifact we just shipped does not install" is the failure
+# with the shortest fuse and the largest blast radius — and it is exactly the window the scheduled
+# run cannot close, since this workflow tests the RELEASED artifact and a break lands the moment it
+# is released. Two things make the release path work that the scheduled path does not need:
+#
+#   * **It must NOT be a second `on: release: published`.** That is the same event `release.yml`
+#     itself keys on, so a separate workflow listening to it starts while the upload is still in
+#     flight and fails against an index that does not have the version yet. `needs: publish` in the
+#     caller is what orders it.
+#   * **`expect-version` closes the false-GREEN.** PyPI's CDN lags, so an install right after a
+#     publish can quietly resolve the PREVIOUS version and pass — testing the wrong artifact and
+#     reporting success. With the input set, the step retries until the index actually serves that
+#     version and fails only after giving up. A job that goes red on ordinary CDN lag teaches people
+#     to ignore it, which costs more than the gap it closes.
+#
+# The verification is informational, not a gate: a PyPI version can never be reused, so a red run
+# here means "go fix it forward", never "the release was rolled back".
 
 on:
   schedule:
     - cron: "17 6 * * 1"        # Mondays, 06:17 UTC. Off the hour on purpose: scheduled runs pile up
                                 # at :00 across all of GitHub and get delayed.
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      expect-version:
+        description: >-
+          Wait until the index serves exactly this version before checking it. Empty (the scheduled
+          and manual paths) means "whatever is current".
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -56,7 +84,26 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
       - name: Install the published package the way README.md says to
-        run: uv tool install ${{ matrix.spec }}
+        # `--no-cache` on every attempt: uv would otherwise answer a retry from the index cache it
+        # populated on the attempt that was too early, so the wait would never observe the new
+        # version. Without `expect-version` this is one attempt and exits immediately.
+        run: |
+          expected="${{ inputs.expect-version }}"
+          for attempt in $(seq 1 8); do
+            if uv tool install --force --no-cache ${{ matrix.spec }}; then
+              got="$(ctx-distillery --version | awk '{print $2}')"
+              if [ -z "$expected" ] || [ "$got" = "$expected" ]; then
+                echo "installed $got"
+                exit 0
+              fi
+              echo "index still serving $got, waiting for $expected (attempt $attempt/8)"
+            else
+              echo "install failed, retrying (attempt $attempt/8)"
+            fi
+            sleep 20
+          done
+          echo "::error::gave up waiting for ${expected:-a working install} after 8 attempts"
+          exit 1
       - name: Both console scripts exist and run
         run: |
           ctx-distillery --version

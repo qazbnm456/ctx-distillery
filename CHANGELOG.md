@@ -12,6 +12,32 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The install check now also runs after a release, chained off the publish rather than off the
+  release event.** Scheduled catches upstream drift; this catches "the artifact we just shipped does
+  not install", which is the failure with the shortest fuse — a broken front door reaches strangers
+  immediately, and they do not open issues, they leave. `install-check.yml` gained `workflow_call`
+  and `release.yml` calls it with `needs: [build, publish]`.
+
+  Two things make it work that the scheduled path does not need, and both were found by reasoning
+  about the race rather than by watching it fail. It must NOT be a second `on: release: published` —
+  that is the same event `release.yml` keys on, so it would start while the upload is still in
+  flight and fail against an index that does not yet have the version. And `expect-version` closes
+  the false-GREEN: PyPI's CDN lags, so an install immediately after a publish can quietly resolve
+  the PREVIOUS version and pass, testing the wrong artifact and reporting success. With it set, the
+  step retries (with `--no-cache`, or uv answers the retry from the cache the too-early attempt
+  populated) until the index really serves that version. A job that goes red on ordinary CDN lag
+  teaches people to ignore it, which costs more than the gap it closes.
+
+  ONE definition, three triggers — the alternative was a second copy of the platform matrix in
+  `release.yml`, which would put the macOS `--with "litellm<1.95"` constraint in two places. That is
+  the same "N copies is N chances to bump N-1" that `test_doc_claims.py` already guards for the ruff
+  and setup-uv pins, and the cheapest fix is not having the second copy. The verification is
+  informational: the publish already happened and a PyPI version can never be reused, so a red run
+  means "fix it forward", never a rollback.
+
+  Prompted by rlm-harness's maintainer asking which trigger to use for the same job in the kit. The
+  answer is both, and the race was the part worth writing down.
+
 - **`rlm-harness` 1.0.0 -> 1.11.1, with dspy's floor moving 3.2.1 -> 3.3.1 underneath it.** Handed
   over by the kit's maintainer rather than discovered here. Every kit name this project imports
   already existed at 1.0.0, so it is an upgrade and not a port, and the trace format stayed
