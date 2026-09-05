@@ -12,6 +12,20 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A failed post-publish verify now explains itself at the point someone reads it.** Raised by
+  rlm-harness's reviewer: `needs: [build, publish]` means a red `verify` concludes the whole Release
+  run as failed, which is the misreading the INFORMATIONAL framing exists to prevent. The mechanism
+  is real; the suggested fix was not taken. `continue-on-error` concludes the run `success` and
+  notifies nobody, trading a misreadable signal for no signal at all — strictly worse for a job whose
+  only purpose is saying the front door is broken. And the red is not a lie: the release really did
+  produce an artifact that does not install.
+
+  What WAS wrong is that the failure said nothing about what to do, so anyone clicking into it had to
+  read the workflow to learn there is no rollback. The error annotation on the release path now
+  carries it — publish already succeeded, the version cannot be reused, re-running will not help, fix
+  forward. That addresses the misreading at the moment it would happen rather than hoping a comment
+  in the file reaches someone first, and the reasoning for keeping the red is recorded beside it.
+
 - **The retry loop now reports which attempt succeeded, and raises a `::notice::` when it was not the
   first.** "Has this loop ever actually done anything?" is now answerable from CI history by anyone,
   instead of resting on whether the person holding the delete key knows why it is there. The
