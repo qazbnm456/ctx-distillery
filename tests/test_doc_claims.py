@@ -6,6 +6,24 @@ stale CONFIRMED/UNCONFIRMED label "has now caught this invariant itself twice", 
 of history holds four commits whose whole subject is repairing a doc claim. Every one of those was
 caught by a human reading carefully. That works until someone doesn't.
 
+**The drift has a SHAPE, and knowing it is worth more than resolving to read carefully.** In this
+repo and in the sibling kit, the recurring case is not a claim that rots on its own: it is a claim
+introduced BY THE FIX for a previous one. Three in a single session, all caught by measurement and
+none by re-reading: `frontmatter.parse`'s corrected docstring asserted that an indented `---` does
+not open a block (it always has, and the test said so); this module's own guard against the stale
+"git dependency" wording matched the sentence that RETRACTS it; and a message sent to the kit's
+maintainer generalised a GitHub-expression limitation to their workflow without opening it. The
+kit reports the same pattern at larger scale — two releases, seven review rounds between them, and
+in every round the blocking finding was a sentence the previous round's fix had introduced, never
+the code.
+
+So the countermeasure is procedural, not attentional: **after fixing a doc claim, assume the fix
+introduced a new false one, and check the new sentences against the PRIMARY SOURCE rather than
+against the text around them.** A correction reads as authoritative precisely because it is a
+correction, which is what lets a fresh error ride along inside it. Where the new sentence is
+mechanically checkable, it belongs in this file — that is the strongest available form of the same
+instruction.
+
 Most of what `CLAUDE.md` says is prose about WHY, and prose is not testable — that is fine and is not
 what this module is for. But a subset of the claims are numbers, names, or cross-file agreements, and
 those are mechanically checkable. This file is the home for that subset: **when you write a doc claim
