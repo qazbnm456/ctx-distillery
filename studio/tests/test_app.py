@@ -533,3 +533,51 @@ def test_list_runs_reports_live_run_ids(monkeypatch, tmp_path):
     monkeypatch.setattr(appmod, "TRACES_DIR", tmp_path)
     monkeypatch.setattr(appmod, "_WORKERS", {"b-live": object(), "a-live": object()})
     assert client.get("/v1/runs").json()["live"] == ["a-live", "b-live"]
+
+
+# --------------------------------------------------------------------------------------------------
+# Replay ordering is CAUSAL (`ts`), not write order (`step_id`).
+#
+# `_step_key` sorted by `step_id` alone until 2026-09-13, which streamed every tool call before every
+# reasoning turn: `record_main_trajectory` flushes the trajectory once `aforward()` returns, so every
+# `main_step` id is higher than every live `tool_call` id. Five sibling studios each documented that
+# as a caveat and none fixed it, while `ts` was in the trace the whole time.
+# --------------------------------------------------------------------------------------------------
+
+
+def _ev(kind: str, step_id: int, ts: float) -> dict:
+    return {"type": kind, "step_id": step_id, "ts": ts}
+
+
+def test_replay_orders_by_timestamp_not_by_write_order() -> None:
+    """The real shape: turns flushed last carry LOW timestamps and HIGH step_ids."""
+    from ctx_distillery_studio.app import _step_key
+
+    events = [
+        _ev("tool_call", 1, 100.0),
+        _ev("tool_call", 2, 300.0),
+        _ev("main_step", 3, 50.0),    # flushed after, but happened FIRST
+        _ev("main_step", 4, 200.0),
+    ]
+    ordered = [e["type"] for e in sorted(events, key=_step_key)]
+    assert ordered == ["main_step", "tool_call", "main_step", "tool_call"], (
+        "replay must interleave by when things happened, not by when they were written"
+    )
+
+
+def test_step_id_still_breaks_a_timestamp_tie() -> None:
+    """Dropping `step_id` entirely would leave same-`ts` events ordered by input accident."""
+    from ctx_distillery_studio.app import _step_key
+
+    events = [_ev("tool_call", 9, 1.0), _ev("tool_call", 2, 1.0)]
+    assert [e["step_id"] for e in sorted(events, key=_step_key)] == [2, 9]
+
+
+@pytest.mark.parametrize("ts", [None, "not-a-number", {}])
+def test_an_unusable_timestamp_sorts_last_and_never_raises(ts) -> None:
+    """Same contract the `step_id` version carried: a malformed trace degrades, never crashes a
+    replay."""
+    from ctx_distillery_studio.app import _step_key
+
+    events = [{"type": "tool_call", "step_id": 1, "ts": ts}, _ev("main_step", 2, 5.0)]
+    assert [e["type"] for e in sorted(events, key=_step_key)] == ["main_step", "tool_call"]
