@@ -48,7 +48,7 @@ Then confirm the version matches what this skill describes:
 ctx-distillery --version
 ```
 
-This skill was written against **0.1.0**. If the installed version is older, treat every flag below
+This skill was written against **0.1.1**. If the installed version is older, treat every flag below
 as unverified and check `ctx-distillery --help` before using it.
 
 ## Step 1 — a live run (only when explicitly asked)

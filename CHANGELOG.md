@@ -12,6 +12,8 @@ never applies anything itself.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-13
+
 - **The three drift shapes collapsed into the one mechanism that produces them: being WRITTEN DOWN
   confers authority independent of how well-founded the writing is.** `tests/test_doc_claims.py`'s
   docstring had accumulated them as separate findings — a correction believed because it is a

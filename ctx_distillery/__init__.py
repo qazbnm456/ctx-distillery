@@ -196,7 +196,7 @@ __all__ = [  # noqa: RUF022
     "main",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def __getattr__(name: str):  # PEP 562 — defer the dspy import to first use
