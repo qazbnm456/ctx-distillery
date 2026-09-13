@@ -415,3 +415,35 @@ def test_claude_md_describes_the_resolution_it_actually_uses() -> None:
         "CLAUDE.md still asserts rlm-harness IS a git dependency; it resolves from PyPI at an "
         "exact pin. (Quoting the old claim while correcting it is fine and does not match this.)"
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# Claim 8: CLAUDE.md's account of which versions are cut matches CHANGELOG.md.
+#
+# `## Versioning` asserted "0.1.0 IS NOT CUT" for five weeks after 0.1.0 was cut, tagged and
+# published to PyPI. Nothing caught it: the sentence is prose, and it sits in a section a reader only
+# opens when they are about to cut a version — which is exactly when believing it is most expensive.
+# --------------------------------------------------------------------------------------------------
+
+
+def _cut_versions() -> list[str]:
+    return re.findall(r"^## \[(\d+\.\d+\.\d+)\]", _read("CHANGELOG.md"), re.MULTILINE)
+
+
+def test_claude_md_does_not_deny_a_version_the_changelog_has_cut() -> None:
+    cut = _cut_versions()
+    assert cut, "CHANGELOG.md carries no cut version heading — if that is deliberate, drop this claim"
+    versioning = _read("CLAUDE.md").split("## Versioning")[1].split("## Known simplifications")[0]
+    for version in cut:
+        assert not re.search(rf"{re.escape(version)} IS NOT CUT", versioning), (
+            f"CLAUDE.md still says {version} IS NOT CUT, but CHANGELOG.md has cut it"
+        )
+
+
+def test_the_package_version_is_one_the_changelog_accounts_for() -> None:
+    """A version in `pyproject.toml` that no CHANGELOG heading mentions means either the cut was
+    never recorded or the bump was accidental. Both want a human, not a silent pass."""
+    declared = tomllib.loads(_read("pyproject.toml"))["project"]["version"]
+    assert declared in _cut_versions(), (
+        f"pyproject declares {declared}, which has no `## [{declared}]` heading in CHANGELOG.md"
+    )
