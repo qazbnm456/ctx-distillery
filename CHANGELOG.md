@@ -12,6 +12,19 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The three drift shapes collapsed into the one mechanism that produces them: being WRITTEN DOWN
+  confers authority independent of how well-founded the writing is.** `tests/test_doc_claims.py`'s
+  docstring had accumulated them as separate findings — a correction believed because it is a
+  correction, a citation believed because it is attributed, a specification believed because it is
+  specified. They are three surfaces of one thing, and the third is what shows age and provenance are
+  not what does it: the document that beat an experiment was written ninety minutes earlier, in the
+  same session, by the same author as the experiment. The concrete instances stay, because they are
+  the evidence; what changed is that the file now states the cause once instead of three unrelated
+  effects, which is also how it stops growing every time another instance turns up.
+
+  The countermeasure gains its missing half: where the primary source is an EXPERIMENT, it outranks
+  any prose — including prose written minutes ago by whoever is reading it.
+
 - **A second defect in the same line: `inf` as the fallback for a bad stamp outranks `run_end`, so
   the terminal event stopped being terminal.** Reported by `diff-sentry` through the kit's
   maintainer; verified here at **24 of 24 permutations** before changing anything. `math.isfinite`

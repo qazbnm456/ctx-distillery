@@ -6,9 +6,15 @@ stale CONFIRMED/UNCONFIRMED label "has now caught this invariant itself twice", 
 of history holds four commits whose whole subject is repairing a doc claim. Every one of those was
 caught by a human reading carefully. That works until someone doesn't.
 
-**The drift has a SHAPE, and knowing it is worth more than resolving to read carefully.** In this
-repo and in the sibling kit, the recurring case is not a claim that rots on its own: it is a claim
-introduced BY THE FIX for a previous one. Three in a single session, all caught by measurement and
+**One mechanism produces all of it, and naming it is worth more than resolving to read carefully:
+being WRITTEN DOWN confers authority independent of how well-founded the writing is.** Three
+surfaces, each observed here, each a way a statement gets believed for a reason unrelated to whether
+it is true — a correction because it is a correction, a citation because it is attributed, a
+specification because it is specified. The third is the one that shows age and provenance are not
+what does it: the document that beat an experiment below was written ninety minutes earlier, in the
+same session, by the same author as the experiment.
+
+**Surface one — a claim introduced BY THE FIX for a previous one.** Three in a single session, all caught by measurement and
 none by re-reading: `frontmatter.parse`'s corrected docstring asserted that an indented `---` does
 not open a block (it always has, and the test said so); this module's own guard against the stale
 "git dependency" wording matched the sentence that RETRACTS it; and a message sent to the kit's
@@ -24,8 +30,7 @@ at all". The dismissed count was correct. **Declining to assert a number is not 
 humble choice** — here it discarded the right measurement and left the text agreeing with a figure
 that was retracted hours later. Hedging is a claim too, and it inherits the same duty to be checked.
 
-**A second shape arrives from outside: a claim inherited from a sibling repo, carrying its
-attribution.** `studio/app.py`'s `stream_run` documented its replay ordering as "matching
+**Surface two — a claim inherited from a sibling repo, carrying its attribution.** `studio/app.py`'s `stream_run` documented its replay ordering as "matching
 `diff-sentry-studio`'s own ordering caveat" — and that citation is why nobody re-derived it for
 months. It was never a caveat; sorting by `ts` instead of `step_id` fixes it, with data that was in
 the trace the whole time. Five sibling studios carried the same note and none had checked it, so
@@ -35,9 +40,19 @@ in the claim rather than raise it** — and a count of mentions is not a count o
 comment here credits a sibling, treat the sibling's reasoning as unexamined until someone examines
 it.
 
+**Surface three — a specification winning against an experiment that contradicts it.** The studio's
+`_step_key` docstring promised "an unusable stamp sorts last". A test written for it asserted
+`run_end` stays terminal, and failed. The failure was explained away as the contract working, the
+assertion deleted, and a paragraph written about how the test had asserted the wrong property. The
+test was right; the contract was wrong, because "sorts last" is past the terminal event. **A failing
+test that contradicts a specification is a question about which of the two is wrong, and answering
+it by citing the specification is not answering it.** Recorded in `studio/app.py::_step_key` and the
+restored assertion beside it; the defect was found independently by a sibling an hour later.
+
 So the countermeasure is procedural, not attentional: **after fixing a doc claim, assume the fix
 introduced a new false one, and check the new sentences against the PRIMARY SOURCE rather than
-against the text around them.** A correction reads as authoritative precisely because it is a
+against the text around them** — and where the primary source is an experiment, it outranks any
+prose, including prose written minutes ago by whoever is reading it. A correction reads as authoritative precisely because it is a
 correction, which is what lets a fresh error ride along inside it. Where the new sentence is
 mechanically checkable, it belongs in this file — that is the strongest available form of the same
 instruction.
