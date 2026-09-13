@@ -12,6 +12,29 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **The studio replayed runs in WRITE order, and the fix needed nothing from upstream — `ts` was in
+  the trace the whole time.** `_step_key` sorted by `step_id` alone, so a replay streamed every tool
+  call before every reasoning turn; the `stream_run` docstring documented that as an inherited
+  caveat, crediting `diff-sentry-studio`'s wording. Five sibling studios each wrote the same caveat
+  down and none fixed it, which is the shape that usually says a kit should grow a seam. It does not
+  here.
+
+  Measured before opining, on this repo's whole corpus — three traces, 57 events, every one carrying
+  a unique `ts` — sorting by `ts` reproduces the causal interleave `export_actions` produces since
+  1.11.2, character for character:
+
+  ```
+  by step_id:  tttttttttttttttttttttttPPPPPPPPPPPPPPP
+  by ts:       PPPPttPPPtPPPPPPttttttttttttttttPttttP
+  ```
+
+  `main_step` timestamps interleave with `tool_call` timestamps, so `ts` is stamped when the turn
+  happened rather than when the trajectory was flushed — which is the whole question, and the reason
+  `step_id` is write order. `step_id` stays as the TIEBREAK so same-`ts` events still order
+  deterministically. Both call sites moved (`app._step_key`, `iterations._step_key`), and the
+  degradation contract the old key carried is kept and tested: an absent or malformed `ts` sorts last
+  and never raises. Verified by reverting the key and watching four tests go red.
+
 - **`rlm-harness` 1.11.1 -> 1.11.2, which corrects `export_actions`' ordering — every dataset this
   project has ever exported had the wrong `state`.** The exporter sequenced `main_step`, `tool_call`
   and `sub_call` by `step_id`, which is WRITE order: the trajectory is flushed once `aforward()`

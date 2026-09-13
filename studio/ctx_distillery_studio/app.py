@@ -182,11 +182,32 @@ def _trace_path(run_id: str) -> Path:
     return TRACES_DIR / f"{_slug_id(run_id)}.jsonl"
 
 
-def _step_key(event: dict) -> int:
-    """Sort key for SSE replay ordering: non-digit `step_id` sorts LAST, never raises. Copied
-    verbatim from `diff_sentry_studio.app._step_key`."""
+def _step_key(event: dict) -> tuple[float, int]:
+    """Sort key for SSE replay ordering: `ts` FIRST, `step_id` only as a tiebreak. Neither raises,
+    and a missing value of either sorts LAST.
+
+    **This used to sort by `step_id` alone, and that streamed every tool call before every reasoning
+    turn.** `step_id` is WRITE order: `record_main_trajectory` flushes the whole trajectory once
+    `aforward()` returns, so every `main_step` id is higher than every live `tool_call` id and the
+    two families come out fully segregated. The docstring on `stream_run` used to document that as a
+    caveat inherited verbatim from `diff-sentry-studio`, which is how five sibling studios each ended
+    up describing the same wrong ordering rather than fixing it.
+
+    `ts` was always the right key and was always in the trace. Verified on this repo's whole corpus —
+    three traces, 57 events, every one carrying a unique `ts` — that sorting by it reproduces the
+    causal interleave `rlm_harness.dataset.export_actions` produces since 1.11.2, character for
+    character:
+
+        by step_id:  tttttttttttttttttttttttPPPPPPPPPPPPPPP
+        by ts:       PPPPttPPPtPPPPPPttttttttttttttttPttttP
+
+    `step_id` stays as the tiebreak rather than being dropped: it is monotonic per family, so two
+    events sharing a timestamp still order deterministically instead of by dict iteration.
+    """
+    ts = event.get("ts")
+    ts_key = float(ts) if isinstance(ts, (int, float)) else float("inf")
     s = str(event.get("step_id", ""))
-    return int(s) if s.lstrip("-").isdigit() else 1 << 30
+    return (ts_key, int(s) if s.lstrip("-").isdigit() else 1 << 30)
 
 
 def _project_in_allowlist(project_dir: Path) -> bool:
@@ -424,9 +445,11 @@ def get_iterations(run_id: str) -> JSONResponse:
 
 @app.get("/v1/runs/{run_id}/events")
 async def stream_run(run_id: str, delay: float = 0.0) -> StreamingResponse:
-    """Replay the run's trace as SSE, sorted by `step_id` (`_step_key`, matching
-    `diff-sentry-studio`'s own ordering caveat: `main_step`s flush post-hoc with trailing step_ids,
-    so a replay streams actions before reasoning turns). `delay` (seconds) paces it to feel live.
+    """Replay the run's trace as SSE in CAUSAL order (`_step_key`: `ts` first, `step_id` as a
+    tiebreak). It used to sort by `step_id` alone, inheriting `diff-sentry-studio`'s caveat that
+    `main_step`s flush post-hoc with trailing ids "so a replay streams actions before reasoning
+    turns" — a caveat five sibling studios each documented and none fixed, when `ts` was in the
+    trace the whole time. See `_step_key`. `delay` (seconds) paces it to feel live.
     If no `distill.run.completed` was ever mapped (a truncated trace — e.g. a hard-killed run whose
     recorder never reached `__exit__`), synthesize one at the end so a client waiting on it doesn't
     hang forever — same reasoning `diff_sentry_studio.app.stream_run` states for its own case.

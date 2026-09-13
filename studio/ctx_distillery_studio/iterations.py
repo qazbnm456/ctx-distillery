@@ -88,9 +88,13 @@ def _looks_like_a_path(value: str) -> bool:
     return value.startswith(("/", "~/", "\\", "./", "../"))
 
 
-def _step_key(e: dict) -> int:
+def _step_key(e: dict) -> tuple[float, int]:
+    """`ts` first, `step_id` as a tiebreak — see `app._step_key` for why `step_id` alone is write
+    order rather than causal order, and for the measurement."""
+    ts = e.get("ts")
+    ts_key = float(ts) if isinstance(ts, (int, float)) else float("inf")
     s = str(e.get("step_id", ""))
-    return int(s) if s.lstrip("-").isdigit() else 1 << 30
+    return (ts_key, int(s) if s.lstrip("-").isdigit() else 1 << 30)
 
 
 def _preview(s: Any) -> str | None:
