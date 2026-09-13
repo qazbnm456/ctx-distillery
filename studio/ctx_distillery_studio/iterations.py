@@ -56,7 +56,6 @@ must use `el.textContent`, never `innerHTML` — `CLAUDE.md` invariant 10).
 from __future__ import annotations
 
 import math
-
 from pathlib import PurePath
 from typing import Any
 
