@@ -36,6 +36,19 @@ name: Release
 # Supply-chain: the two third-party actions are SHA-pinned — setup-uv, and (highest blast radius, it
 # uploads to PyPI) pypi-publish. Bump a SHA and its trailing version comment together. GitHub-owned
 # checkout/*-artifact stay on major tags. setup-uv's pin matches `ci.yml`'s; keep them in step.
+#
+# **pypi-publish is on v1.14.2 because v1.14.0 could not upload what hatchling now builds.** The
+# 0.1.1 release failed at exactly this step with `InvalidDistribution: Invalid distribution
+# metadata: '2.5' is not a valid metadata version` — hatchling emits core metadata 2.5 (this project
+# uses PEP 639 `license`/`license-files`, which is what raises the version), and the twine bundled in
+# v1.14.0 predates it. v1.14.2's own release notes name the fix: Twine v7, "will let them upload
+# their sdists and wheels containing core packaging metadata v2.5". The producer is not the problem
+# and must not be pinned backwards to accommodate a stale consumer.
+#
+# Worth knowing for the next one: `[build-system] requires = ["hatchling>=1.27"]` is a lower bound,
+# so the metadata version CAN move under a release with nothing in this repo changing — the same
+# shape as the ruff pin `CLAUDE.md ## Verify` argues at length, in a place that only fails at
+# publish time. The `install-check` job cannot see it either, since it tests the PUBLISHED artifact.
 
 on:
   release:
@@ -93,7 +106,7 @@ jobs:
           name: dist
           path: dist/
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
   # Did the thing we just published actually install? This is the failure with the shortest fuse:
   # a broken front door reaches strangers immediately, and they do not open issues, they leave.

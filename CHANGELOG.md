@@ -14,6 +14,23 @@ never applies anything itself.
 
 ## [0.1.1] - 2026-09-13
 
+- **The first attempt to publish this release FAILED, and the fix is recorded here rather than in a
+  0.1.2, because nothing was uploaded.** `pypa/gh-action-pypi-publish` v1.14.0 rejected the wheel with
+  `InvalidDistribution: Invalid distribution metadata: '2.5' is not a valid metadata version`.
+  `hatchling` emits core metadata 2.5 — this project uses PEP 639 `license`/`license-files`, which is
+  what raises the version — and the twine bundled in v1.14.0 predates it. Bumped to v1.14.2, whose own
+  release notes name exactly this: Twine v7, "will let them upload their sdists and wheels containing
+  core packaging metadata v2.5". The PRODUCER was not wrong and was not pinned backwards to
+  accommodate a stale consumer.
+
+  Two things about the shape. `[build-system] requires = ["hatchling>=1.27"]` is a lower bound, so
+  the metadata version moved under a release with nothing in this repo changing — the same class the
+  ruff pin argument in `CLAUDE.md ## Verify` is about, in a place that only fails at publish time,
+  which `install-check` cannot see either because it tests the PUBLISHED artifact. And the workflow a
+  `release: published` event runs is the one at the TAG's commit, not on `main`, so fixing this
+  needed the `v0.1.1` tag moved onto the corrected commit — safe only because the version was never
+  uploaded and so was never burned.
+
 - **The three drift shapes collapsed into the one mechanism that produces them: being WRITTEN DOWN
   confers authority independent of how well-founded the writing is.** `tests/test_doc_claims.py`'s
   docstring had accumulated them as separate findings — a correction believed because it is a
