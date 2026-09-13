@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import itertools
 from types import SimpleNamespace
 
 import pytest
@@ -595,7 +596,12 @@ def test_an_unusable_timestamp_sorts_last_and_never_raises(ts) -> None:
 # defect IS order-dependence, so it only shows up across inputs that differ in order alone.
 # --------------------------------------------------------------------------------------------------
 
-import itertools
+
+
+#: `_step_key` returns `(rank, ts, step_id)`. These two tests are about the TS slot, so they index
+#: it by name rather than by 0 — the slot moved once already, when `rank` was prepended to pin
+#: terminality, and every positional assertion here went red at the same time.
+_TS_SLOT = 1
 
 
 @pytest.mark.parametrize(
@@ -604,13 +610,13 @@ import itertools
 def test_a_value_that_is_not_a_point_in_time_sorts_last(ts) -> None:
     from ctx_distillery_studio.app import _step_key
 
-    assert _step_key({"ts": ts, "step_id": 1})[0] == float("inf")
+    assert _step_key({"ts": ts, "step_id": 1})[_TS_SLOT] == float("inf")
 
 
 def test_a_real_timestamp_is_still_used(ts=1.5) -> None:
     from ctx_distillery_studio.app import _step_key
 
-    assert _step_key({"ts": ts, "step_id": 1})[0] == 1.5
+    assert _step_key({"ts": ts, "step_id": 1})[_TS_SLOT] == 1.5
 
 
 def test_replay_order_does_not_depend_on_input_order_when_a_stamp_is_nan() -> None:
@@ -642,3 +648,41 @@ def test_replay_order_does_not_depend_on_input_order_when_a_stamp_is_nan() -> No
         f"the same five events sorted {len(orders)} different ways depending on input order: "
         f"{sorted(orders)}. A key that is not comparable makes the replay stream file order."
     )
+
+
+def test_the_terminal_event_stays_terminal_even_beside_an_unusable_stamp() -> None:
+    """The assertion this suite deleted once, wrongly, and is the reason it is back.
+
+    It first appeared with the NaN fix, failed, and was replaced by the determinism test above on
+    the reasoning that "an unusable stamp sorts last" is the key's documented contract, so a NaN
+    landing after `run_end` was the contract working. That was backwards: `inf` as the fallback
+    outranks `run_end`'s real stamp, so the fallback — not the NaN — is what unseats the terminal
+    event. `math.isfinite` does not close it; only pinning terminality outside the timestamp does.
+
+    A failing test that contradicts a specification is a question about which of the two is wrong.
+    Answering it by citing the specification is not answering it.
+    """
+    from ctx_distillery_studio.app import _step_key
+
+    events = [
+        {"type": "run_start", "step_id": 0, "ts": 1.0},
+        {"type": "main_step", "step_id": 1, "ts": 2.0},
+        {"type": "tool_call", "step_id": 2, "ts": float("nan")},
+        {"type": "run_end", "step_id": 3, "ts": 9.0},
+    ]
+    for permutation in itertools.permutations(events):
+        order = [e["type"] for e in sorted(permutation, key=_step_key)]
+        assert order[-1] == "run_end", f"run_end is not terminal: {order}"
+        assert order[0] == "run_start", f"run_start is not first: {order}"
+
+
+def test_rank_does_not_override_causal_order_between_ordinary_events() -> None:
+    """Terminality is pinned; everything between the two ends still sorts by when it happened."""
+    from ctx_distillery_studio.app import _step_key
+
+    events = [
+        {"type": "tool_call", "step_id": 1, "ts": 300.0},
+        {"type": "main_step", "step_id": 9, "ts": 100.0},
+        {"type": "tool_call", "step_id": 2, "ts": 200.0},
+    ]
+    assert [e["step_id"] for e in sorted(events, key=_step_key)] == [9, 2, 1]

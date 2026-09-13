@@ -206,7 +206,12 @@ def _usable_ts(ts: object) -> bool:
     return isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts)
 
 
-def _step_key(event: dict) -> tuple[float, int]:
+#: `run_start` opens a run and `run_end` closes it, and neither fact is a matter of timing — so
+#: neither is decided by a timestamp. Everything else ranks between them and is ordered causally.
+_TERMINAL_RANK = {"run_start": 0, "run_end": 2}
+
+
+def _step_key(event: dict) -> tuple[int, float, int]:
     """Sort key for SSE replay ordering: `ts` FIRST, `step_id` only as a tiebreak. Neither raises,
     and a missing value of either sorts LAST.
 
@@ -227,11 +232,27 @@ def _step_key(event: dict) -> tuple[float, int]:
 
     `step_id` stays as the tiebreak rather than being dropped: it is monotonic per family, so two
     events sharing a timestamp still order deterministically instead of by dict iteration.
+
+    **`rank` comes FIRST, and that is a second defect's fix rather than tidiness.** With `(ts,
+    step_id)` alone, a mid-run event carrying an unusable stamp sorts to `inf` — which is after
+    `run_end`'s real stamp, so the terminal event stops being terminal. Measured: 24 of 24
+    permutations of a four-event fixture. `math.isfinite` does NOT close this; it is the FALLBACK
+    that outranks `run_end`, not the NaN. Any "sorts last" fallback does the same, so terminality
+    has to be pinned independently of stamps rather than expressed through them.
+
+    **This project had the evidence and reasoned it away.** The first test written for the NaN fix
+    asserted `run_end` stays last, failed, and was rewritten to assert determinism instead — on the
+    grounds that "unusable sorts last" is the documented contract and a NaN landing after `run_end`
+    is therefore the contract working. The test was right and the contract was wrong. A failing test
+    that contradicts a specification is a question about which of the two is wrong, and answering it
+    by citing the specification is not answering it. Reported independently by `diff-sentry` through
+    the kit's maintainer; verified here at 24/24 before changing anything.
     """
+    rank = _TERMINAL_RANK.get(str(event.get("type", "")), 1)
     ts = event.get("ts")
     ts_key = float(ts) if _usable_ts(ts) else float("inf")
     s = str(event.get("step_id", ""))
-    return (ts_key, int(s) if s.lstrip("-").isdigit() else 1 << 30)
+    return (rank, ts_key, int(s) if s.lstrip("-").isdigit() else 1 << 30)
 
 
 def _project_in_allowlist(project_dir: Path) -> bool:

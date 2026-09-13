@@ -12,6 +12,29 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A second defect in the same line: `inf` as the fallback for a bad stamp outranks `run_end`, so
+  the terminal event stopped being terminal.** Reported by `diff-sentry` through the kit's
+  maintainer; verified here at **24 of 24 permutations** before changing anything. `math.isfinite`
+  does NOT close it — the FALLBACK is what unseats `run_end`, not the NaN, and any "sorts last"
+  fallback does the same. Terminality is now pinned outside the timestamp: `_step_key` returns
+  `(rank, ts, step_id)` with `run_start` 0, `run_end` 2, everything else 1. Ordinary events between
+  the two ends still sort causally; tested both ways.
+
+  **This project had the evidence an hour earlier and reasoned it away, which is the part worth
+  keeping.** The first test written for the NaN fix asserted `run_end` stays last. It failed, and
+  the entry for that commit explained the failure as "a NaN stamp now sorts to `inf` and therefore
+  lands after `run_end`, which is this key's documented contract working, not a defect" — then
+  replaced the assertion with a determinism check. The test was right and the contract was wrong.
+  **A failing test that contradicts a specification is a question about which of the two is wrong,
+  and answering it by citing the specification is not answering it.** The assertion is back, with
+  that reasoning recorded beside it.
+
+  Two smaller things from the same change. `_step_key`'s tuple grew, so every positional assertion
+  about the ts slot went red at once; the tests index it through a named `_TS_SLOT` now, because the
+  slot has already moved once. And `make check` exited 2 on the NaN commit while the commit and push
+  were chained AFTER it rather than behind it, so an import-order lint failure reached `main` and
+  needed `1ecd1c8` to repair. The gate has to gate — it did on the next attempt, twice.
+
 - **`_step_key` admitted NaN, and separately bool — two values that pass `isinstance(ts, (int,
   float))` and are not points in time.** Reported for the NaN half by `nuclei-forge` through the
   kit's maintainer, verified here before changing anything: Python's JSON decoder is non-strict, so
