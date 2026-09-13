@@ -700,10 +700,12 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
   (`eval/ctx_distillery_eval/__init__.py`, `studio/ctx_distillery_studio/__init__.py`), so a check
   is writable; none exists. They are independent numbers; don't
   assume bumping the root moved them, and don't assume they must move together.
-- **0.1.0 IS NOT CUT, and cutting it is the OWNER'S call, not a tidiness move.** `CHANGELOG.md` has
-  `## [Unreleased]` as its ONLY version heading. When a version is cut it is a RENAME of that heading
-  plus a fresh empty `## [Unreleased]` ABOVE it — never a section added underneath a shipped one,
-  which would file the project's whole history under a version that never shipped.
+- **0.1.0 WAS CUT on 2026-08-04 and is on PyPI; cutting a version is the OWNER'S call, not a tidiness
+  move.** `CHANGELOG.md` now carries `## [Unreleased]` above `## [0.1.0] - 2026-08-04`. Cutting one is
+  a RENAME of the `[Unreleased]` heading plus a fresh empty `## [Unreleased]` ABOVE it — never a
+  section added underneath a shipped one, which would file the project's whole history under a
+  version that never shipped. (This bullet asserted "0.1.0 IS NOT CUT" for five weeks after it was,
+  which is the drift `tests/test_doc_claims.py` exists for; claim 8 there now covers it.)
 
   **It was cut once, prematurely, and reverted; the reasoning error is worth keeping.** The argument
   ran: this file is bloated → the bloat is one uncut `[Unreleased]` → so cut it. Every step is true

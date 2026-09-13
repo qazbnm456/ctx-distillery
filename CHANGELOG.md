@@ -12,6 +12,41 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **`rlm-harness` 1.11.1 -> 1.11.2, which corrects `export_actions`' ordering — every dataset this
+  project has ever exported had the wrong `state`.** The exporter sequenced `main_step`, `tool_call`
+  and `sub_call` by `step_id`, which is WRITE order: the trajectory is flushed once `aforward()`
+  returns, so every turn's id is higher than every live call. The two families came out completely
+  segregated. Measured on this repo's own traces, before and after:
+
+  ```
+  before: tttttttttttttttttttttttPPPPPPPPPPPPPPP
+  after : PPPPttPPPtPPPPPPttttttttttttttttPttttP
+  ```
+
+  The first planner turn moved from index 23 to 0 on that run, and from 9 and 1 to 0 on the other
+  two. `state` is "the ordered list of prior actions", so a tool record's priors contained no turns
+  at all and a turn's contained every tool call. `cli.py`'s `export` produces this too, so anything a
+  user already exported has it; re-export rather than patch.
+
+  **Nothing SHIPPED is affected**, which is worth stating because it is not obvious: the defect is in
+  the exporter that READS a trace, and `examples/demo-run.jsonl` is a trace, not an export. Verified
+  by its event types — `run_start`/`main_step`/`tool_call`/`final`/`result`/`run_end`, no action
+  records.
+
+  The maintainer's report put the impact at 26 of 38 records on the sampled run; my own first count
+  said 37, then 38, and both were wrong for the same reason in opposite directions — the RECORDS
+  themselves reorder, so a positional diff and an identity diff each measure something other than
+  what they claim, and the identity key is not unique. The interleave above is the honest statement
+  and needs no count at all. Left as a note rather than a correction of their figure: I do not know
+  their method, and asserting mine over theirs without it would be the error this file already
+  warns about.
+
+- **`CLAUDE.md ## Versioning` said "0.1.0 IS NOT CUT" for five weeks after 0.1.0 was cut, tagged and
+  published.** Corrected, and claim 8 in `tests/test_doc_claims.py` now covers it in both directions:
+  no version CHANGELOG has cut may be denied by that section, and `pyproject.toml`'s declared version
+  must have a heading accounting for it. The sentence sat in a section a reader only opens when they
+  are about to cut a version, which is exactly when believing it is most expensive.
+
 - **A failed post-publish verify now explains itself at the point someone reads it.** Raised by
   rlm-harness's reviewer: `needs: [build, publish]` means a red `verify` concludes the whole Release
   run as failed, which is the misreading the INFORMATIONAL framing exists to prevent. The mechanism
