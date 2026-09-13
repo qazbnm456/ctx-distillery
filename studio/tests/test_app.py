@@ -581,3 +581,64 @@ def test_an_unusable_timestamp_sorts_last_and_never_raises(ts) -> None:
 
     events = [{"type": "tool_call", "step_id": 1, "ts": ts}, _ev("main_step", 2, 5.0)]
     assert [e["type"] for e in sorted(events, key=_step_key)] == ["main_step", "tool_call"]
+
+
+# --------------------------------------------------------------------------------------------------
+# `_usable_ts`: two values that pass `isinstance(ts, (int, float))` and are not points in time.
+#
+# NaN was reported by `nuclei-forge` through the kit's maintainer and verified here before changing
+# anything: Python's JSON decoder is non-strict, so a trace really can carry one, and every NaN
+# comparison is False — the sort never raises and never orders. The bool case was found while
+# checking that report; `isinstance(True, int)` is True, so `"ts": true` sorted as the instant 1.0.
+#
+# The permutation test is the one that matters. Asserting a single sorted() call is not enough: the
+# defect IS order-dependence, so it only shows up across inputs that differ in order alone.
+# --------------------------------------------------------------------------------------------------
+
+import itertools
+
+
+@pytest.mark.parametrize(
+    "ts", [float("nan"), float("inf"), float("-inf"), True, False, None, "12", {}, []]
+)
+def test_a_value_that_is_not_a_point_in_time_sorts_last(ts) -> None:
+    from ctx_distillery_studio.app import _step_key
+
+    assert _step_key({"ts": ts, "step_id": 1})[0] == float("inf")
+
+
+def test_a_real_timestamp_is_still_used(ts=1.5) -> None:
+    from ctx_distillery_studio.app import _step_key
+
+    assert _step_key({"ts": ts, "step_id": 1})[0] == 1.5
+
+
+def test_replay_order_does_not_depend_on_input_order_when_a_stamp_is_nan() -> None:
+    """The whole defect is ORDER-DEPENDENCE, so determinism across permutations is the property —
+    and getting that wrong is instructive enough to record.
+
+    This test first asserted that `run_end` stays last, copying the shape of the number in the
+    report that prompted the fix ("N of 120 permutations put an event AFTER run_end"). It failed
+    WITH the fix applied, because a NaN stamp now sorts to `inf` and therefore lands after
+    `run_end` — which is this key's documented contract working, not a defect. The report's number
+    described the BROKEN state, where a nan key compares False against everything and the event
+    lands wherever it was handed in. Asserting the number's shape instead of the property it was
+    evidence for turned a correct fix red.
+    """
+    from ctx_distillery_studio.app import _step_key
+
+    events = [
+        {"type": "run_start", "step_id": 0, "ts": 1.0},
+        {"type": "main_step", "step_id": 3, "ts": 2.0},
+        {"type": "tool_call", "step_id": 1, "ts": float("nan")},
+        {"type": "main_step", "step_id": 4, "ts": 3.0},
+        {"type": "run_end", "step_id": 5, "ts": 4.0},
+    ]
+    orders = {
+        tuple(e["step_id"] for e in sorted(permutation, key=_step_key))
+        for permutation in itertools.permutations(events)
+    }
+    assert len(orders) == 1, (
+        f"the same five events sorted {len(orders)} different ways depending on input order: "
+        f"{sorted(orders)}. A key that is not comparable makes the replay stream file order."
+    )

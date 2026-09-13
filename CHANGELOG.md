@@ -12,6 +12,28 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **`_step_key` admitted NaN, and separately bool — two values that pass `isinstance(ts, (int,
+  float))` and are not points in time.** Reported for the NaN half by `nuclei-forge` through the
+  kit's maintainer, verified here before changing anything: Python's JSON decoder is non-strict, so
+  `json.loads('{"ts": NaN}')` really yields a float nan, and every nan comparison is False — the sort
+  never raises and never orders, so an SSE replay streams file order. Measured on a five-event
+  fixture: **54 of 120 input permutations** placed an event after `run_end`. That satisfies this
+  key's "never raises" contract while silently breaking its ordering half, which is the worse
+  failure. **The bool half is ours and was not in the report**: `isinstance(True, int)` is True, so
+  `"ts": true` was read as the instant 1.0 and sorted first with total confidence. `_usable_ts`
+  excludes it explicitly, since `math.isfinite(True)` is also True.
+
+  The kit never writes either — stamps come from `time.time()` — but a studio reads whatever file it
+  is pointed at, so hand-edited, generated and third-party traces are its real input class.
+
+  **The first version of the test failed WITH the fix applied, and that is the part worth keeping.**
+  It asserted `run_end` stays last, copying the shape of the report's number ("N of 120 permutations
+  put an event AFTER run_end"). A NaN stamp now sorts to `inf` and therefore lands after `run_end`,
+  which is the contract working. The number described the BROKEN state; the property it was evidence
+  FOR is determinism across permutations, which is what the test asserts now. Asserting a number's
+  shape instead of the property behind it turned a correct fix red — the same error as counting
+  positions instead of records, arriving through a borrowed metric rather than a borrowed sentence.
+
 - **A second drift shape recorded, with this repo's own instance of it: an inherited claim carrying
   its attribution.** `stream_run` documented its replay ordering as "matching `diff-sentry-studio`'s
   own ordering caveat", and that citation is why nobody re-derived it. Five sibling studios carried

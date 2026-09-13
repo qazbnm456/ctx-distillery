@@ -55,6 +55,8 @@ must use `el.textContent`, never `innerHTML` — `CLAUDE.md` invariant 10).
 
 from __future__ import annotations
 
+import math
+
 from pathlib import PurePath
 from typing import Any
 
@@ -88,11 +90,17 @@ def _looks_like_a_path(value: str) -> bool:
     return value.startswith(("/", "~/", "\\", "./", "../"))
 
 
+def _usable_ts(ts: object) -> bool:
+    """See `app._usable_ts` — NaN and bool both pass `isinstance(ts, (int, float))` and neither is a
+    point in time."""
+    return isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts)
+
+
 def _step_key(e: dict) -> tuple[float, int]:
     """`ts` first, `step_id` as a tiebreak — see `app._step_key` for why `step_id` alone is write
     order rather than causal order, and for the measurement."""
     ts = e.get("ts")
-    ts_key = float(ts) if isinstance(ts, (int, float)) else float("inf")
+    ts_key = float(ts) if _usable_ts(ts) else float("inf")
     s = str(e.get("step_id", ""))
     return (ts_key, int(s) if s.lstrip("-").isdigit() else 1 << 30)
 
