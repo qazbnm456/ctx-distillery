@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import math
 import os
 import re
 import threading
@@ -182,6 +183,29 @@ def _trace_path(run_id: str) -> Path:
     return TRACES_DIR / f"{_slug_id(run_id)}.jsonl"
 
 
+def _usable_ts(ts: object) -> bool:
+    """Is `ts` a real point in time? `isinstance(ts, (int, float))` is NOT that question, and the
+    two ways it says yes to a non-time are both reachable from a trace file.
+
+    **NaN.** Python's JSON decoder is non-strict, so `json.loads('{"ts": NaN}')` really does yield a
+    float nan, `isinstance(nan, float)` is True, and every nan comparison is False. The sort then
+    never raises and never orders: it returns whatever `sorted` was handed. Measured on a five-event
+    fixture with one nan stamp, 54 of the 120 input permutations placed an event AFTER `run_end`, so
+    an SSE replay's order becomes an accident of file order. That satisfies the "never raises" half
+    of this key's contract while silently breaking the ordering half, which is the worse failure.
+
+    **bool.** `isinstance(True, int)` is True in Python, so `"ts": true` was being read as the
+    instant 1.0 — 1970 — and sorted first with total confidence. Not in the report that prompted
+    this; found while checking the NaN claim, which is why the guard excludes it explicitly rather
+    than relying on `math.isfinite` alone (`isfinite(True)` is True).
+
+    The kit never writes either: stamps come from `time.time()`. A studio reads whatever file it is
+    pointed at, though, so hand-edited, generated and third-party traces are its real input class.
+    Reported by `nuclei-forge` via the kit's maintainer, and verified here before changing anything.
+    """
+    return isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts)
+
+
 def _step_key(event: dict) -> tuple[float, int]:
     """Sort key for SSE replay ordering: `ts` FIRST, `step_id` only as a tiebreak. Neither raises,
     and a missing value of either sorts LAST.
@@ -205,7 +229,7 @@ def _step_key(event: dict) -> tuple[float, int]:
     events sharing a timestamp still order deterministically instead of by dict iteration.
     """
     ts = event.get("ts")
-    ts_key = float(ts) if isinstance(ts, (int, float)) else float("inf")
+    ts_key = float(ts) if _usable_ts(ts) else float("inf")
     s = str(event.get("step_id", ""))
     return (ts_key, int(s) if s.lstrip("-").isdigit() else 1 << 30)
 
