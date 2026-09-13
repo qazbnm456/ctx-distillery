@@ -8,8 +8,10 @@ promote into a memory file or a Skill file). It never applies anything itself. S
 
 `rlm-harness` resolves from PyPI at an EXACT pin (see `pyproject.toml`). It was a git dependency
 until 1.0.0 shipped to PyPI; this line said "pinned as a git dependency" for a month after that
-stopped being true, which is the drift `tests/test_doc_claims.py` exists for and does not yet
-cover. For local co-development against an in-progress rlm-harness checkout, install it editable
+stopped being true, which is the drift `tests/test_doc_claims.py` exists for — claim 7 covers it
+now, in both directions (the dependency must be an exact `==` pin with no `[tool.uv.sources]`, and
+this paragraph must say how it resolves). The "does not yet cover" this sentence carried was written
+in the same commit that added the coverage, which is the shape the same file's docstring documents. For local co-development against an in-progress rlm-harness checkout, install it editable
 over the top:
 
 ```
