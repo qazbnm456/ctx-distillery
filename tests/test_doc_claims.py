@@ -17,6 +17,13 @@ kit reports the same pattern at larger scale — two releases, seven review roun
 in every round the blocking finding was a sentence the previous round's fix had introduced, never
 the code.
 
+A fourth instance landed in a CHANGELOG entry that was itself CORRECTING an upstream measurement,
+and it is the most instructive of the four: the entry dismissed its own identity-based count as
+unreliable because the key had one duplicate in 38, and fell back on "the interleave needs no count
+at all". The dismissed count was correct. **Declining to assert a number is not automatically the
+humble choice** — here it discarded the right measurement and left the text agreeing with a figure
+that was retracted hours later. Hedging is a claim too, and it inherits the same duty to be checked.
+
 So the countermeasure is procedural, not attentional: **after fixing a doc claim, assume the fix
 introduced a new false one, and check the new sentences against the PRIMARY SOURCE rather than
 against the text around them.** A correction reads as authoritative precisely because it is a

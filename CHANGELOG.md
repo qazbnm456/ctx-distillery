@@ -33,13 +33,21 @@ never applies anything itself.
   by its event types — `run_start`/`main_step`/`tool_call`/`final`/`result`/`run_end`, no action
   records.
 
-  The maintainer's report put the impact at 26 of 38 records on the sampled run; my own first count
-  said 37, then 38, and both were wrong for the same reason in opposite directions — the RECORDS
-  themselves reorder, so a positional diff and an identity diff each measure something other than
-  what they claim, and the identity key is not unique. The interleave above is the honest statement
-  and needs no count at all. Left as a note rather than a correction of their figure: I do not know
-  their method, and asserting mine over theirs without it would be the error this file already
-  warns about.
+  **The real figure is 57 of 57 — every action record this project has ever exported.** `state` is
+  CUMULATIVE, so once any earlier record moves, every later record's history changes too; a corpus
+  with a planner turn anywhere has nothing left unchanged. The maintainer's first report said 26 of
+  38 on a sampled run, measured by comparing `(kind, len(state))` at the same POSITION in two
+  differently-ordered lists, and corrected it to 57/57 after another consumer re-derived it by record
+  identity. Independently confirmed here on the same corpus: 4/4, 38/38, 15/15.
+
+  **This entry's own first draft got that wrong, which is the fourth instance of the shape
+  `tests/test_doc_claims.py` now documents — and the first one in this repo's own correction rather
+  than in the thing being corrected.** It said two local counts "were wrong for the same reason in
+  opposite directions" and that the interleave "needs no count at all". The positional count (37) was
+  indeed wrong. The identity count (38) was RIGHT, and was dismissed because its key had one
+  duplicate in 38 — a duplicate that could not have changed an answer of "all of them". Declining to
+  assert a number is not automatically the humble choice: here it discarded the correct measurement
+  and left the entry agreeing with a figure that was about to be retracted.
 
 - **`CLAUDE.md ## Versioning` said "0.1.0 IS NOT CUT" for five weeks after 0.1.0 was cut, tagged and
   published.** Corrected, and claim 8 in `tests/test_doc_claims.py` now covers it in both directions:
