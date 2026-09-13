@@ -696,6 +696,26 @@ this project reasons about (pruning/deleting a user's own history) is irreversib
 - Keep `pyproject.toml` `[project].version` and `ctx_distillery.__version__` in sync — pinned by
   `tests/test_public_api.py::test_version_matches_pyproject`. On a bump, fold the release's changes
   into `CHANGELOG.md` (under the new version).
+- **Cutting a version can fail at the PUBLISH step for reasons nothing here can catch first, and
+  three facts decide what to do about it. Read them before you cut, not after.** All three were
+  learned from 0.1.1, whose first publish attempt failed.
+  - **A failed publish does NOT burn the version**, as long as nothing was uploaded — check
+    `/simple/ctx-distillery/`, never `pypi.org/pypi/ctx-distillery/json`, which serves a CDN-cached
+    response and reported the PREVIOUS version while two installs of the new one were passing in the
+    same run. When a job's evidence and that API disagree, the API is wrong.
+  - **A `release: published` run uses the workflow at the TAG's commit, not `main`'s head.** So
+    fixing `release.yml` on `main` changes nothing until the tag is force-moved onto the fix. That is
+    only available while the version is unburned; once it is on PyPI the tag can never move, and the
+    only path is forward to the next version.
+  - **`[build-system] requires = ["hatchling>=1.27"]` is a LOWER BOUND, so the emitted core-metadata
+    version can move under a release with nothing in this repo changing** — the same class as an
+    unpinned linter (see `## Verify`'s ruff argument), in a place that only fails at publish time and
+    that `install-check` cannot see either, because that job tests the PUBLISHED artifact. 0.1.1 hit
+    exactly this: hatchling emitted metadata 2.5 and `gh-action-pypi-publish` v1.14.0's bundled twine
+    refused it. The fix is to bump the CONSUMER (v1.14.2 accepts it, and its notes say so), never to
+    pin the build backend backwards. Documented rather than pinned deliberately: the failure is LOUD
+    and costs a delayed release, where pinning the backend buys a permanent bump treadmill.
+
 - **The two workspace members carry their OWN `version`** (`eval/pyproject.toml` and
   `studio/pyproject.toml`, both `0.1.0` today) and **nothing checks them** — no test, no CI step, and
   nothing compares them to the root's. Each member DOES expose its own `__version__`
