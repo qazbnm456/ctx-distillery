@@ -24,6 +24,17 @@ at all". The dismissed count was correct. **Declining to assert a number is not 
 humble choice** — here it discarded the right measurement and left the text agreeing with a figure
 that was retracted hours later. Hedging is a claim too, and it inherits the same duty to be checked.
 
+**A second shape arrives from outside: a claim inherited from a sibling repo, carrying its
+attribution.** `studio/app.py`'s `stream_run` documented its replay ordering as "matching
+`diff-sentry-studio`'s own ordering caveat" — and that citation is why nobody re-derived it for
+months. It was never a caveat; sorting by `ts` instead of `step_id` fixes it, with data that was in
+the trace the whole time. Five sibling studios carried the same note and none had checked it, so
+"five projects independently hit this" was really one derivation plus four citations. **A citation is
+evidence a claim was COPIED, not that it was CONFIRMED, so it should lower the confidence you place
+in the claim rather than raise it** — and a count of mentions is not a count of derivations. When a
+comment here credits a sibling, treat the sibling's reasoning as unexamined until someone examines
+it.
+
 So the countermeasure is procedural, not attentional: **after fixing a doc claim, assume the fix
 introduced a new false one, and check the new sentences against the PRIMARY SOURCE rather than
 against the text around them.** A correction reads as authoritative precisely because it is a

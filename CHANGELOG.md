@@ -12,6 +12,16 @@ never applies anything itself.
 
 ## [Unreleased]
 
+- **A second drift shape recorded, with this repo's own instance of it: an inherited claim carrying
+  its attribution.** `stream_run` documented its replay ordering as "matching `diff-sentry-studio`'s
+  own ordering caveat", and that citation is why nobody re-derived it. Five sibling studios carried
+  the same note, which read as five independent observations and was one derivation plus four
+  citations. **A citation is evidence a claim was COPIED, not that it was CONFIRMED**, so it should
+  lower rather than raise the confidence placed in it, and a count of mentions is not a count of
+  derivations. Written into `tests/test_doc_claims.py`'s docstring beside the first shape, because
+  the artefact is ours — an earlier pattern offered in the same exchange was declined for having no
+  local instance to check it against, and this one has one.
+
 - **The studio replayed runs in WRITE order, and the fix needed nothing from upstream — `ts` was in
   the trace the whole time.** `_step_key` sorted by `step_id` alone, so a replay streamed every tool
   call before every reasoning turn; the `stream_run` docstring documented that as an inherited
