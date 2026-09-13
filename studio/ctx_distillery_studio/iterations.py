@@ -95,13 +95,17 @@ def _usable_ts(ts: object) -> bool:
     return isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts)
 
 
-def _step_key(e: dict) -> tuple[float, int]:
+_TERMINAL_RANK = {"run_start": 0, "run_end": 2}
+
+
+def _step_key(e: dict) -> tuple[int, float, int]:
     """`ts` first, `step_id` as a tiebreak — see `app._step_key` for why `step_id` alone is write
     order rather than causal order, and for the measurement."""
+    rank = _TERMINAL_RANK.get(str(e.get("type", "")), 1)
     ts = e.get("ts")
     ts_key = float(ts) if _usable_ts(ts) else float("inf")
     s = str(e.get("step_id", ""))
-    return (ts_key, int(s) if s.lstrip("-").isdigit() else 1 << 30)
+    return (rank, ts_key, int(s) if s.lstrip("-").isdigit() else 1 << 30)
 
 
 def _preview(s: Any) -> str | None:
